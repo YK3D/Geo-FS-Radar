@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Mini-Radar
+// @name         Geo-FS-Radar
 // @namespace    http://tampermonkey.net/
-// @version      1.4
+// @version      2.0
 // @description  A mini-map Radar toggle with Alt+Z, drag to move
 // @author       Massiv4515 & YK3D
 // @match        https://www.geo-fs.com/geofs.php?v=3.9
@@ -50,21 +50,21 @@ radarCanvas.addEventListener('touchstart', startDragTouch);
 
 function startDrag(e) {
     isDragging = true;
-    
+
     // Get mouse position relative to radar
     const rect = radarCanvas.getBoundingClientRect();
     dragOffsetX = e.clientX - rect.left;
     dragOffsetY = e.clientY - rect.top;
-    
+
     // Add event listeners for dragging
     document.addEventListener('mousemove', onDrag);
     document.addEventListener('mouseup', stopDrag);
-    
+
     // Change appearance while dragging
     radarCanvas.style.border = '2px solid rgba(0, 255, 0, 0.7)';
     radarCanvas.style.cursor = 'grabbing';
     radarCanvas.style.boxShadow = '0 0 20px rgba(0, 255, 0, 0.8)';
-    
+
     e.preventDefault();
 }
 
@@ -75,25 +75,25 @@ function startDragTouch(e) {
         const rect = radarCanvas.getBoundingClientRect();
         dragOffsetX = touch.clientX - rect.left;
         dragOffsetY = touch.clientY - rect.top;
-        
+
         document.addEventListener('touchmove', onDragTouch);
         document.addEventListener('touchend', stopDrag);
-        
+
         radarCanvas.style.border = '2px solid rgba(0, 255, 0, 0.7)';
         radarCanvas.style.cursor = 'grabbing';
         radarCanvas.style.boxShadow = '0 0 20px rgba(0, 255, 0, 0.8)';
-        
+
         e.preventDefault();
     }
 }
 
 function onDrag(e) {
     if (!isDragging) return;
-    
+
     // Calculate new position
     const newLeft = e.clientX - dragOffsetX;
     const newTop = e.clientY - dragOffsetY;
-    
+
     // Apply new position
     radarCanvas.style.left = newLeft + 'px';
     radarCanvas.style.top = newTop + 'px';
@@ -101,31 +101,31 @@ function onDrag(e) {
 
 function onDragTouch(e) {
     if (!isDragging || e.touches.length !== 1) return;
-    
+
     const touch = e.touches[0];
     const newLeft = touch.clientX - dragOffsetX;
     const newTop = touch.clientY - dragOffsetY;
-    
+
     radarCanvas.style.left = newLeft + 'px';
     radarCanvas.style.top = newTop + 'px';
-    
+
     e.preventDefault();
 }
 
 function stopDrag() {
     isDragging = false;
-    
+
     // Remove event listeners
     document.removeEventListener('mousemove', onDrag);
     document.removeEventListener('touchmove', onDragTouch);
     document.removeEventListener('mouseup', stopDrag);
     document.removeEventListener('touchend', stopDrag);
-    
+
     // Reset appearance
     radarCanvas.style.border = '2px solid rgba(255,255,255,0.3)';
     radarCanvas.style.cursor = 'move';
     radarCanvas.style.boxShadow = '0 0 15px rgba(0, 255, 0, 0.5)';
-    
+
     // Optional: Save position to localStorage
     saveRadarPosition();
 }
@@ -156,7 +156,7 @@ document.addEventListener('keydown', (e) => {
     if (e.altKey && e.code === 'KeyZ') {
         const isHidden = radarCanvas.style.display === 'none';
         radarCanvas.style.display = isHidden ? 'block' : 'none';
-        
+
         // Save visibility state
         localStorage.setItem('radarVisible', isHidden);
     }
@@ -201,42 +201,42 @@ function drawSpinningLine() {
     const centerX = radarSize / 2;
     const centerY = radarSize / 2;
     const lineLength = radarSize / 2 - 10;
-    
+
     // Update spin angle
     spinAngle += spinSpeed;
     if (spinAngle > Math.PI * 2) spinAngle -= Math.PI * 2;
-    
+
     // Calculate end point of spinning line
     const endX = centerX + Math.cos(spinAngle) * lineLength;
     const endY = centerY + Math.sin(spinAngle) * lineLength;
-    
+
     // Add current point to trail
     spinTrail.push({x: endX, y: endY, alpha: 1.0});
-    
+
     // Limit trail length
     if (spinTrail.length > spinTrailLength) {
         spinTrail.shift();
     }
-    
+
     // Update trail alpha values (fade out)
     spinTrail.forEach((point, index) => {
         point.alpha = index / spinTrailLength;
     });
-    
+
     // Draw trail (from oldest to newest)
     for (let i = 0; i < spinTrail.length - 1; i++) {
         const point = spinTrail[i];
         const nextPoint = spinTrail[i + 1] || {x: endX, y: endY};
-        
+
         // Create gradient for trail
         const gradient = ctx.createLinearGradient(
             point.x, point.y,
             nextPoint.x, nextPoint.y
         );
-        
+
         gradient.addColorStop(0, `rgba(0, 255, 0, ${point.alpha * 0.3})`);
         gradient.addColorStop(1, `rgba(0, 255, 0, ${point.alpha * 0.1})`);
-        
+
         ctx.beginPath();
         ctx.moveTo(point.x, point.y);
         ctx.lineTo(nextPoint.x, nextPoint.y);
@@ -244,12 +244,12 @@ function drawSpinningLine() {
         ctx.lineWidth = 2 + (point.alpha * 2);
         ctx.stroke();
     }
-    
+
     // Draw main spinning line
     ctx.beginPath();
     ctx.moveTo(centerX, centerY);
     ctx.lineTo(endX, endY);
-    
+
     // Create gradient for main line
     const lineGradient = ctx.createLinearGradient(
         centerX, centerY,
@@ -257,11 +257,11 @@ function drawSpinningLine() {
     );
     lineGradient.addColorStop(0, 'rgba(0, 255, 0, 0.8)');
     lineGradient.addColorStop(1, 'rgba(0, 255, 0, 0.3)');
-    
+
     ctx.strokeStyle = lineGradient;
     ctx.lineWidth = 3;
     ctx.stroke();
-    
+
     // Draw spinning dot at end
     ctx.beginPath();
     ctx.arc(endX, endY, 4, 0, Math.PI * 2);
@@ -277,17 +277,17 @@ function drawRadar() {
     // Clear canvas with slight fade effect for trails
     ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
     ctx.fillRect(0, 0, radarSize, radarSize);
-    
+
     // Draw radar background circle
     ctx.beginPath();
     ctx.arc(radarSize/2, radarSize/2, radarSize/2, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(0, 20, 0, 0.7)';
     ctx.fill();
-    
+
     // Draw radar grid lines
     ctx.strokeStyle = 'rgba(0, 255, 0, 0.2)';
     ctx.lineWidth = 1;
-    
+
     // Center lines
     ctx.beginPath();
     ctx.moveTo(radarSize/2, 0);
@@ -295,20 +295,20 @@ function drawRadar() {
     ctx.moveTo(0, radarSize/2);
     ctx.lineTo(radarSize, radarSize/2);
     ctx.stroke();
-    
+
     // Range circles
     for (let i = 1; i <= 3; i++) {
         ctx.beginPath();
         ctx.arc(radarSize/2, radarSize/2, (radarSize/2) * (i/3), 0, Math.PI * 2);
         ctx.stroke();
     }
-    
+
     // Draw compass directions
     ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
     ctx.font = 'bold 12px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    
+
     const directions = ['N', 'E', 'S', 'W'];
     const dirPositions = [
         {x: radarSize/2, y: 15},
@@ -316,40 +316,42 @@ function drawRadar() {
         {x: radarSize/2, y: radarSize - 15},
         {x: 15, y: radarSize/2}
     ];
-    
+
     directions.forEach((dir, i) => {
         ctx.fillText(dir, dirPositions[i].x, dirPositions[i].y);
     });
-    
+
     // Draw spinning line
     drawSpinningLine();
-    
+
     const cx = radarSize / 2;
     const cy = radarSize / 2;
 
-    // Get player heading
+    // Get player data
     let playerHeading = 0;
     let player = null;
-    
+    let playerCallsign = "YOU";
+
     try {
         player = geofs.aircraft?.instance;
-        if (player && player.animationValue) {
-            playerHeading = player.animationValue.heading360 || 0;
+        if (player) {
+            playerHeading = player.animationValue?.heading360 || 0;
+            playerCallsign = player.callsign || "YOU";
         }
     } catch (e) {
-        console.log("Could not get player heading yet");
+        console.log("Could not get player data yet");
     }
 
     // Draw player triangle (rotated to heading)
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate((playerHeading * Math.PI) / 180);
-    
+
     // Draw player aircraft with better graphics
     ctx.fillStyle = 'rgba(0, 255, 0, 0.9)';
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
     ctx.lineWidth = 2;
-    
+
     // Main triangle
     ctx.beginPath();
     ctx.moveTo(0, -15);
@@ -358,36 +360,77 @@ function drawRadar() {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    
+
     // Center dot
     ctx.beginPath();
     ctx.arc(0, 0, 3, 0, Math.PI * 2);
     ctx.fillStyle = 'white';
     ctx.fill();
-    
+
     ctx.restore();
+
+    // Draw player's own callsign below the player triangle (not as a separate dot)
+    if (playerCallsign) {
+        // Position for player callsign (below the triangle)
+        const playerTextY = cy + 25; // Position below the player triangle
+
+        // Draw background for player callsign
+        ctx.fillStyle = 'rgba(0, 100, 0, 0.8)';
+        ctx.strokeStyle = 'rgba(0, 255, 0, 0.9)';
+        ctx.lineWidth = 1;
+
+        const playerText = playerCallsign.substring(0, 12); // Limit length
+        const playerTextWidth = ctx.measureText(playerText).width;
+
+        // Background rectangle
+        ctx.fillRect(
+            cx - playerTextWidth/2 - 6,
+            playerTextY - 10,
+            playerTextWidth + 12,
+            20
+        );
+
+        // Border around background
+        ctx.strokeRect(
+            cx - playerTextWidth/2 - 6,
+            playerTextY - 10,
+            playerTextWidth + 12,
+            20
+        );
+
+        // Player callsign text
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.9)';
+        ctx.font = 'bold 11px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(playerText, cx, playerTextY);
+
+        // Add "YOU" indicator above the callsign
+        ctx.fillStyle = 'rgba(255, 255, 0, 0.9)';
+        ctx.font = 'bold 10px Arial';
+        ctx.fillText("YOU", cx, playerTextY - 15);
+    }
 
     // Draw other aircraft
     if (aircraftListCache.length > 0 && player) {
         const playerLat = player.llaLocation[0];
         const playerLon = player.llaLocation[1];
-        const playerCallsign = player.callsign || '';
-        
+
         let aircraftCount = 0;
-        
+
         aircraftListCache.forEach(ac => {
-            // Skip self
+            // Skip self - we already show the player separately
             if (ac.cs === playerCallsign) return;
-            
+
             // Skip aircraft without coordinates
             if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
-            
+
             const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
             const distance = Math.sqrt(dx*dx + dy*dy);
-            
+
             // Skip if too far (outside radar range)
             if (distance > radarRange) return;
-            
+
             const radarX = cx + (dx / radarRange) * (radarSize / 2);
             const radarY = cy - (dy / radarRange) * (radarSize / 2);
 
@@ -401,36 +444,36 @@ function drawRadar() {
                 ctx.arc(radarX, radarY, 5, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.shadowBlur = 0;
-                
+
                 // Draw outline
                 ctx.strokeStyle = 'white';
                 ctx.lineWidth = 1;
                 ctx.stroke();
-                
+
                 // Calculate direction indicator (small line showing aircraft heading)
                 const acHeading = ac.h || 0;
                 const indicatorLength = 8;
                 const indicatorX = radarX + Math.cos((acHeading * Math.PI) / 180) * indicatorLength;
                 const indicatorY = radarY + Math.sin((acHeading * Math.PI) / 180) * indicatorLength;
-                
+
                 ctx.beginPath();
                 ctx.moveTo(radarX, radarY);
                 ctx.lineTo(indicatorX, indicatorY);
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
                 ctx.lineWidth = 2;
                 ctx.stroke();
-                
-                // Draw aircraft name/callsign
+
+                // Draw other aircraft name/callsign
                 if (ac.cs) {
                     ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
                     ctx.font = 'bold 11px Arial';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'top';
-                    
+
                     // Background for text
                     const text = ac.cs.substring(0, 12); // Limit length
                     const textWidth = ctx.measureText(text).width;
-                    
+
                     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
                     ctx.fillRect(
                         radarX - textWidth/2 - 3,
@@ -438,18 +481,18 @@ function drawRadar() {
                         textWidth + 6,
                         16
                     );
-                    
+
                     // Text
                     ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
                     ctx.fillText(text, radarX, radarY + 12);
                 }
-                
+
                 // Draw distance below name
                 ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
                 ctx.font = '10px Arial';
                 const distText = `${Math.round(distance)}m`;
                 const distWidth = ctx.measureText(distText).width;
-                
+
                 // Background for distance
                 ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
                 ctx.fillRect(
@@ -458,33 +501,34 @@ function drawRadar() {
                     distWidth + 4,
                     14
                 );
-                
+
                 // Distance text
                 ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
                 ctx.fillText(distText, radarX, radarY + 30);
-                
+
                 aircraftCount++;
             }
         });
-        
+
         // Draw radar info box
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(5, 5, 120, 40);
-        
+        ctx.fillRect(5, 5, 140, 50);
+
         ctx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
         ctx.lineWidth = 1;
-        ctx.strokeRect(5, 5, 120, 40);
-        
+        ctx.strokeRect(5, 5, 140, 50);
+
         // Draw radar info text
         ctx.fillStyle = 'rgba(0, 255, 0, 0.9)';
         ctx.font = 'bold 12px Arial';
         ctx.textAlign = 'left';
         ctx.fillText(`RADAR: ${radarRange/1000}km`, 10, 20);
-        
+
         ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
         ctx.font = '11px Arial';
         ctx.fillText(`Aircraft: ${aircraftCount}`, 10, 35);
         ctx.fillText(`Range: ${radarSize/2}px = ${radarRange/1000}km`, 10, 50);
+        ctx.fillText(`You: ${playerCallsign}`, 10, 65);
     } else {
         // Draw "scanning" message
         ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
