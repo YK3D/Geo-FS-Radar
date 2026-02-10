@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Geo-FS-Radar
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.1
 // @description  A mini-map Radar toggle with Alt+Z, drag to move
 // @author       Massiv4515 & YK3D
 // @match        https://www.geo-fs.com/geofs.php?v=3.9
@@ -10,8 +10,8 @@
 // ==/UserScript==
 
 // === Radar Settings ===
-const radarRange = 5000; // meters, adjust to zoom in/out (max distance radar can detect aircrafts)
-const radarSize = 300; // px (size on screen)
+const radarRange = 6000; // meters, adjust to zoom in/out (max distance radar can detect aircrafts)
+const radarSize = 450; // px (size on screen)
 const updateInterval = 750; // time in ms
 
 // === Create radar canvas with drag handles ===
@@ -43,6 +43,12 @@ let spinTrail = [];
 let isDragging = false;
 let dragOffsetX = 0;
 let dragOffsetY = 0;
+
+// === Player Information ===
+let playerCallsign = "YOU";
+let playerLat = 0;
+let playerLon = 0;
+let playerData = null;
 
 // === Make Radar Draggable ===
 radarCanvas.addEventListener('mousedown', startDrag);
@@ -171,12 +177,59 @@ if (!wasVisible) {
 // === Global variable to store aircraft ===
 let aircraftListCache = [];
 
+// === Function to get current player data ===
+function updatePlayerData() {
+    try {
+        const player = geofs.aircraft?.instance;
+        if (player) {
+            playerData = player;
+            playerCallsign = player.callsign || "YOU";
+            playerLat = player.llaLocation[0];
+            playerLon = player.llaLocation[1];
+        }
+    } catch (e) {
+        console.log("Could not get player data yet");
+    }
+}
+
 // === Fetch aircraft every second and update cache ===
 async function updateAircraftCache() {
     try {
         const res = await fetch('https://mps.geo-fs.com/map');
         const data = await res.json();
-        aircraftListCache = data.users || [];
+
+        // Update player data first
+        updatePlayerData();
+
+        // Filter out the current player from the list
+        if (playerCallsign && playerCallsign !== "YOU") {
+            aircraftListCache = (data.users || []).filter(ac => {
+                // Skip if aircraft doesn't have callsign
+                if (!ac.cs) return true;
+
+                // Skip if it matches player callsign (case insensitive)
+                if (ac.cs.toLowerCase() === playerCallsign.toLowerCase()) {
+                    return false;
+                }
+
+                // Additional check: if aircraft is very close to player position
+                if (playerLat && playerLon && ac.co && ac.co.length >= 2) {
+                    const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
+                    const distance = Math.sqrt(dx*dx + dy*dy);
+                    // If aircraft is within 10 meters, it's probably the player
+                    if (distance < 10) {
+                        return false;
+                    }
+                }
+
+                return true;
+            });
+        } else {
+            aircraftListCache = data.users || [];
+        }
+
+        // Debug info
+        console.log(`Radar: Total fetched: ${data.users?.length || 0}, Filtered: ${aircraftListCache.length}, Player: ${playerCallsign}`);
     } catch (e) {
         console.error('Could not fetch live users:', e);
     }
@@ -185,6 +238,9 @@ async function updateAircraftCache() {
 // Start fetching aircraft data
 setInterval(updateAircraftCache, 1000);
 updateAircraftCache(); // Initial fetch
+
+// Update player data frequently
+setInterval(updatePlayerData, 500);
 
 // === Convert lat/lon to meters relative to player (rough approximation) ===
 function latLonToMeters(lat1, lon1, lat2, lon2) {
@@ -272,6 +328,28 @@ function drawSpinningLine() {
     ctx.stroke();
 }
 
+// === Function to check if aircraft is the player ===
+function isPlayerAircraft(ac) {
+    if (!ac.cs) return false;
+
+    // Check callsign match (case insensitive)
+    if (playerCallsign !== "YOU" && ac.cs.toLowerCase() === playerCallsign.toLowerCase()) {
+        return true;
+    }
+
+    // Check position proximity (if player data is available)
+    if (playerLat && playerLon && ac.co && ac.co.length >= 2) {
+        const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
+        const distance = Math.sqrt(dx*dx + dy*dy);
+        // If within 10 meters, it's probably the player
+        if (distance < 10) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // === Draw radar ===
 function drawRadar() {
     // Clear canvas with slight fade effect for trails
@@ -305,16 +383,16 @@ function drawRadar() {
 
     // Draw compass directions
     ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
-    ctx.font = 'bold 12px Arial';
+    ctx.font = 'bold 14px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
     const directions = ['N', 'E', 'S', 'W'];
     const dirPositions = [
-        {x: radarSize/2, y: 15},
-        {x: radarSize - 15, y: radarSize/2},
-        {x: radarSize/2, y: radarSize - 15},
-        {x: 15, y: radarSize/2}
+        {x: radarSize/2, y: 20},
+        {x: radarSize - 20, y: radarSize/2},
+        {x: radarSize/2, y: radarSize - 20},
+        {x: 20, y: radarSize/2}
     ];
 
     directions.forEach((dir, i) => {
@@ -327,19 +405,10 @@ function drawRadar() {
     const cx = radarSize / 2;
     const cy = radarSize / 2;
 
-    // Get player data
+    // Get player heading
     let playerHeading = 0;
-    let player = null;
-    let playerCallsign = "YOU";
-
-    try {
-        player = geofs.aircraft?.instance;
-        if (player) {
-            playerHeading = player.animationValue?.heading360 || 0;
-            playerCallsign = player.callsign || "YOU";
-        }
-    } catch (e) {
-        console.log("Could not get player data yet");
+    if (playerData && playerData.animationValue) {
+        playerHeading = playerData.animationValue.heading360 || 0;
     }
 
     // Draw player triangle (rotated to heading)
@@ -354,73 +423,79 @@ function drawRadar() {
 
     // Main triangle
     ctx.beginPath();
-    ctx.moveTo(0, -15);
-    ctx.lineTo(8, 8);
-    ctx.lineTo(-8, 8);
+    ctx.moveTo(0, -20);
+    ctx.lineTo(10, 10);
+    ctx.lineTo(-10, 10);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
     // Center dot
     ctx.beginPath();
-    ctx.arc(0, 0, 3, 0, Math.PI * 2);
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
     ctx.fillStyle = 'white';
     ctx.fill();
 
     ctx.restore();
 
-    // Draw player's own callsign below the player triangle (not as a separate dot)
+    // Draw player's own callsign below the player triangle
     if (playerCallsign) {
         // Position for player callsign (below the triangle)
-        const playerTextY = cy + 25; // Position below the player triangle
+        const playerTextY = cy + 35; // Position below the player triangle
 
         // Draw background for player callsign
-        ctx.fillStyle = 'rgba(0, 100, 0, 0.8)';
-        ctx.strokeStyle = 'rgba(0, 255, 0, 0.9)';
-        ctx.lineWidth = 1;
+        ctx.fillStyle = 'rgba(0, 100, 0, 0.9)';
+        ctx.strokeStyle = 'rgba(0, 255, 0, 1)';
+        ctx.lineWidth = 2;
 
-        const playerText = playerCallsign.substring(0, 12); // Limit length
+        const playerText = playerCallsign.substring(0, 15); // Limit length
         const playerTextWidth = ctx.measureText(playerText).width;
 
-        // Background rectangle
-        ctx.fillRect(
-            cx - playerTextWidth/2 - 6,
-            playerTextY - 10,
-            playerTextWidth + 12,
-            20
-        );
+        // Background rectangle with rounded corners
+        const borderRadius = 10;
+        const rectX = cx - playerTextWidth/2 - 10;
+        const rectY = playerTextY - 15;
+        const rectWidth = playerTextWidth + 20;
+        const rectHeight = 30;
 
-        // Border around background
-        ctx.strokeRect(
-            cx - playerTextWidth/2 - 6,
-            playerTextY - 10,
-            playerTextWidth + 12,
-            20
-        );
+        // Draw rounded rectangle
+        ctx.beginPath();
+        ctx.moveTo(rectX + borderRadius, rectY);
+        ctx.lineTo(rectX + rectWidth - borderRadius, rectY);
+        ctx.quadraticCurveTo(rectX + rectWidth, rectY, rectX + rectWidth, rectY + borderRadius);
+        ctx.lineTo(rectX + rectWidth, rectY + rectHeight - borderRadius);
+        ctx.quadraticCurveTo(rectX + rectWidth, rectY + rectHeight, rectX + rectWidth - borderRadius, rectY + rectHeight);
+        ctx.lineTo(rectX + borderRadius, rectY + rectHeight);
+        ctx.quadraticCurveTo(rectX, rectY + rectHeight, rectX, rectY + rectHeight - borderRadius);
+        ctx.lineTo(rectX, rectY + borderRadius);
+        ctx.quadraticCurveTo(rectX, rectY, rectX + borderRadius, rectY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
 
         // Player callsign text
-        ctx.fillStyle = 'rgba(0, 255, 0, 0.9)';
-        ctx.font = 'bold 11px Arial';
+        ctx.fillStyle = 'rgba(0, 255, 0, 1)';
+        ctx.font = 'bold 14px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(playerText, cx, playerTextY);
 
         // Add "YOU" indicator above the callsign
-        ctx.fillStyle = 'rgba(255, 255, 0, 0.9)';
-        ctx.font = 'bold 10px Arial';
-        ctx.fillText("YOU", cx, playerTextY - 15);
+        ctx.fillStyle = 'rgba(255, 255, 0, 1)';
+        ctx.font = 'bold 12px Arial';
+        ctx.fillText("YOU", cx, playerTextY - 25);
     }
 
     // Draw other aircraft
-    if (aircraftListCache.length > 0 && player) {
-        const playerLat = player.llaLocation[0];
-        const playerLon = player.llaLocation[1];
+    let aircraftCount = 0;
 
-        let aircraftCount = 0;
-
+    if (aircraftListCache.length > 0 && playerLat && playerLon) {
         aircraftListCache.forEach(ac => {
-            // Skip self - we already show the player separately
-            if (ac.cs === playerCallsign) return;
+            // Double-check: skip if this is the player aircraft
+            if (isPlayerAircraft(ac)) {
+                console.log(`Skipping player aircraft: ${ac.cs}`);
+                return;
+            }
 
             // Skip aircraft without coordinates
             if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
@@ -438,103 +513,102 @@ function drawRadar() {
             if (Math.hypot(radarX - cx, radarY - cy) <= radarSize / 2) {
                 // Draw aircraft dot with glow effect
                 ctx.shadowColor = 'rgba(255, 50, 50, 0.8)';
-                ctx.shadowBlur = 10;
+                ctx.shadowBlur = 15;
                 ctx.fillStyle = 'red';
                 ctx.beginPath();
-                ctx.arc(radarX, radarY, 5, 0, Math.PI * 2);
+                ctx.arc(radarX, radarY, 7, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.shadowBlur = 0;
 
                 // Draw outline
                 ctx.strokeStyle = 'white';
-                ctx.lineWidth = 1;
+                ctx.lineWidth = 2;
                 ctx.stroke();
 
                 // Calculate direction indicator (small line showing aircraft heading)
                 const acHeading = ac.h || 0;
-                const indicatorLength = 8;
+                const indicatorLength = 12;
                 const indicatorX = radarX + Math.cos((acHeading * Math.PI) / 180) * indicatorLength;
                 const indicatorY = radarY + Math.sin((acHeading * Math.PI) / 180) * indicatorLength;
 
                 ctx.beginPath();
                 ctx.moveTo(radarX, radarY);
                 ctx.lineTo(indicatorX, indicatorY);
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-                ctx.lineWidth = 2;
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+                ctx.lineWidth = 3;
                 ctx.stroke();
 
                 // Draw other aircraft name/callsign
                 if (ac.cs) {
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-                    ctx.font = 'bold 11px Arial';
+                    ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+                    ctx.font = 'bold 13px Arial';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'top';
 
                     // Background for text
-                    const text = ac.cs.substring(0, 12); // Limit length
+                    const text = ac.cs.substring(0, 15); // Limit length
                     const textWidth = ctx.measureText(text).width;
 
-                    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
                     ctx.fillRect(
-                        radarX - textWidth/2 - 3,
-                        radarY + 10,
-                        textWidth + 6,
-                        16
+                        radarX - textWidth/2 - 5,
+                        radarY + 15,
+                        textWidth + 10,
+                        20
                     );
 
                     // Text
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-                    ctx.fillText(text, radarX, radarY + 12);
+                    ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+                    ctx.fillText(text, radarX, radarY + 17);
                 }
 
                 // Draw distance below name
-                ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
-                ctx.font = '10px Arial';
+                ctx.fillStyle = 'rgba(0, 255, 255, 1)';
+                ctx.font = '12px Arial';
                 const distText = `${Math.round(distance)}m`;
                 const distWidth = ctx.measureText(distText).width;
 
                 // Background for distance
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
                 ctx.fillRect(
-                    radarX - distWidth/2 - 2,
-                    radarY + 28,
-                    distWidth + 4,
-                    14
+                    radarX - distWidth/2 - 4,
+                    radarY + 38,
+                    distWidth + 8,
+                    18
                 );
 
                 // Distance text
-                ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
-                ctx.fillText(distText, radarX, radarY + 30);
+                ctx.fillStyle = 'rgba(0, 255, 255, 1)';
+                ctx.fillText(distText, radarX, radarY + 40);
 
                 aircraftCount++;
             }
         });
+    }
 
-        // Draw radar info box
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(5, 5, 140, 50);
+    // Draw radar info box
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.fillRect(5, 5, 160, 75);
 
-        ctx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(5, 5, 140, 50);
+    ctx.strokeStyle = 'rgba(0, 255, 0, 0.7)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(5, 5, 160, 75);
 
-        // Draw radar info text
-        ctx.fillStyle = 'rgba(0, 255, 0, 0.9)';
-        ctx.font = 'bold 12px Arial';
-        ctx.textAlign = 'left';
-        ctx.fillText(`RADAR: ${radarRange/1000}km`, 10, 20);
+    // Draw radar info text
+    ctx.fillStyle = 'rgba(0, 255, 0, 1)';
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(`RADAR: ${radarRange/1000}km`, 10, 25);
 
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-        ctx.font = '11px Arial';
-        ctx.fillText(`Aircraft: ${aircraftCount}`, 10, 35);
-        ctx.fillText(`Range: ${radarSize/2}px = ${radarRange/1000}km`, 10, 50);
-        ctx.fillText(`You: ${playerCallsign}`, 10, 65);
+    ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+    ctx.font = '13px Arial';
+    ctx.fillText(`Aircraft: ${aircraftCount}`, 10, 45);
+    ctx.fillText(`Range: ${radarSize/2}px`, 10, 65);
+
+    if (playerCallsign && playerCallsign !== "YOU") {
+        ctx.fillText(`You: ${playerCallsign.substring(0, 12)}`, 10, 85);
     } else {
-        // Draw "scanning" message
-        ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
-        ctx.font = '14px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('SCANNING...', cx, cy);
+        ctx.fillText(`You: ${playerCallsign}`, 10, 85);
     }
 }
 
