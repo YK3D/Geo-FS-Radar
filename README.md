@@ -2,6 +2,16 @@
 Drag and drop radar for Geo-FS
 Original code made by: @Massiv4515 https://github.com/Massiv4515/GeoFS-MiniRadar
 
+How to use:
+
+  You must download Tampermonkey
+  Create a new script and paste https://github.com/YK3D/Geo-FS-Radar/blob/main/Geo-FS-Radar.js into it after deleting all previous text
+
+Instructions:
+  1. On first use you will be prompted to enter your callsign YOU MUST ENTER THIS EXACTLY AS IN YOUR ACCOUNT
+  2. To change size, distance and speed of updates go to 'Radar Settings' section in the code (line 12)
+  3. If you have changed your callsign, to re-enter it, click on the red button on the top left of the radar
+  4. if the red button isnt visible, simply drag the radar a bit and it should auto move towards the radar
 Changes: 
   1. Drag and drop
        -lock with ALT+Z
@@ -24,6 +34,3 @@ Changes:
        -Black background behind text for better readability
        -Names positioned beneath the aircraft indicator
 
-How to use:
-  You must download Tampermonkey
-  Create a new script and paste https://github.com/YK3D/Geo-FS-Radar/blob/main/Geo-FS-Radar.js into it after deleting all previous text
