@@ -15,13 +15,11 @@ Instructions:
   5. 
 Geo-FS Radar - Complete Feature List
 
-Core Radar Features
-  -Real-time aircraft detection - Fetches and displays other players from Geo-FS multiplayer server
-  
-  -300px circular radar display - Clean, semi-transparent green-themed radar screen
-  
-  -Player position tracking - Automatically detects your aircraft's position and heading
-  -Live aircraft updates - Fetches new data every second from https://mps.geo-fs.com/map
+Core Radar Features:
+    -Real-time aircraft detection - Fetches and displays other players from Geo-FS multiplayer server
+    -300px circular radar display - Clean, semi-transparent green-themed radar screen
+    -Player position tracking - Automatically detects your aircraft's position and heading
+    -Live aircraft updates - Fetches new data every second from https://mps.geo-fs.com/map
   -Automatic self-filtering - Hides your own aircraft using saved callsign to avoid false detection
   -Distance calculation - Shows exact meter distance to each detected aircraft
   -Aircraft heading indicators - Small directional lines showing which way other planes are flying
