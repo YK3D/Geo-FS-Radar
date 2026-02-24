@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS Radar
 // @namespace    http://tampermonkey.net/
-// @version      4.72
+// @version      4.78
 // @description  On screen radar for GeoFS
 // @author       Massiv4515 & YK3D
 // @match        https://www.geo-fs.com/geofs.php?v=3.9
@@ -13,11 +13,14 @@
 let radarRange = 5000; // default start range in meters, adjust to zoom in/out using scroll wheel
 const radarSize = 450; // size of radar on screen in px
 const updateInterval = 500; // Update rate in ms
-const scrollIncrement = 1000; // How much to increment/decrement range per scroll tick (in meters)
+const scrollIncrement = 500; // How much to increment/decrement range per scroll tick (in meters)
 
 // === Range Settings ===
-const MIN_RANGE = 500; // 0.5km minimum
-const MAX_RANGE = 20000; // 20km maximum
+const MIN_RANGE = 500;
+const MAX_RANGE = 40000;
+
+// === Game State ===
+let isGamePaused = false;
 
 // === Create radar canvas with drag handles ===
 let radarCanvas = document.createElement('canvas');
@@ -52,6 +55,30 @@ let spinTrail = [];
 let isDragging = false;
 let dragOffsetX = 0;
 let dragOffsetY = 0;
+
+// === Runway data cache ===
+let runwayCache = [];
+let lastRunwayFetch = 0;
+const RUNWAY_FETCH_INTERVAL = 30000; // Fetch runways every 30 seconds
+
+// === Initialize callsign from localStorage immediately ===
+(function initCallsign() {
+    // Try all possible storage keys
+    const savedCallsign = localStorage.getItem('playerCallsign') ||
+                          localStorage.getItem('callsign') ||
+                          localStorage.getItem('geoFSRadarCallsign');
+
+    if (savedCallsign) {
+        window.playerCallsign = savedCallsign;
+        // Ensure it's saved in all formats for consistency
+        localStorage.setItem('playerCallsign', savedCallsign);
+        localStorage.setItem('callsign', savedCallsign);
+        localStorage.setItem('geoFSRadarCallsign', savedCallsign);
+        console.log("Radar: Loaded saved callsign:", savedCallsign);
+    } else {
+        console.log("Radar: No saved callsign found");
+    }
+})();
 
 // === Make Radar Draggable ===
 radarCanvas.addEventListener('mousedown', startDrag);
@@ -215,14 +242,17 @@ function createResetButton() {
             // Clear saved callsign
             localStorage.removeItem('callsign');
             localStorage.removeItem('playerCallsign');
+            localStorage.removeItem('geoFSRadarCallsign');
+            window.playerCallsign = null;
 
-            // Prompt for new callsign
+            // Prompt for new callsign - NO MORE TOUPPERCASE
             setTimeout(() => {
                 const newCallsign = prompt("Enter your Geo-FS callsign to prevent showing yourself on radar:");
                 if (newCallsign && newCallsign.trim()) {
-                    const trimmedCallsign = newCallsign.trim().toUpperCase();
+                    const trimmedCallsign = newCallsign.trim(); // Keep original case
                     localStorage.setItem('callsign', trimmedCallsign);
                     localStorage.setItem('playerCallsign', trimmedCallsign);
+                    localStorage.setItem('geoFSRadarCallsign', trimmedCallsign);
                     window.playerCallsign = trimmedCallsign;
                     alert(`Callsign set to: ${trimmedCallsign}`);
                 }
@@ -341,10 +371,18 @@ setTimeout(() => {
     createResetButton();
     createDistanceDisplay();
 
-    // Load saved callsign if exists
-    const savedCallsign = localStorage.getItem('playerCallsign') || localStorage.getItem('callsign');
+    // Load saved callsign if exists - preserve case (redundant but safe)
+    const savedCallsign = localStorage.getItem('playerCallsign') ||
+                          localStorage.getItem('callsign') ||
+                          localStorage.getItem('geoFSRadarCallsign');
+
     if (savedCallsign) {
-        window.playerCallsign = savedCallsign;
+        window.playerCallsign = savedCallsign; // Keep original case
+        // Ensure it's saved in all formats for consistency
+        localStorage.setItem('playerCallsign', savedCallsign);
+        localStorage.setItem('callsign', savedCallsign);
+        localStorage.setItem('geoFSRadarCallsign', savedCallsign);
+        console.log("Radar: Verified saved callsign:", savedCallsign);
     }
 }, 500);
 
@@ -376,11 +414,48 @@ if (!wasVisible) {
     radarCanvas.style.display = 'none';
 }
 
+// === Check if game is paused ===
+function checkGamePaused() {
+    try {
+        // Check various pause indicators in GeoFS
+        if (window.geofs) {
+            if (geofs.gui && geofs.gui.pause !== undefined) {
+                isGamePaused = geofs.gui.pause;
+            } else if (geofs.pause !== undefined) {
+                isGamePaused = geofs.pause;
+            } else {
+                // Check for pause menu elements
+                const pauseMenu = document.querySelector('.pause-menu, .paused, [class*="pause"]');
+                isGamePaused = !!pauseMenu;
+            }
+        }
+
+        // Update radar appearance when paused
+        if (isGamePaused) {
+            radarCanvas.style.opacity = '0.5';
+            radarCanvas.style.boxShadow = '0 0 10px rgba(255, 255, 0, 0.5)';
+        } else {
+            radarCanvas.style.opacity = '1';
+            radarCanvas.style.boxShadow = '0 0 15px rgba(0, 255, 0, 0.5)';
+        }
+    } catch (e) {
+        console.log("Could not check game pause state");
+    }
+}
+
+// Check game pause state frequently
+setInterval(checkGamePaused, 500);
+
 // === Global variable to store aircraft ===
 let aircraftListCache = [];
 
 // === Fetch aircraft every second and update cache ===
 async function updateAircraftCache() {
+    // Don't fetch if game is paused
+    if (isGamePaused) {
+        return;
+    }
+
     try {
         const res = await fetch('https://mps.geo-fs.com/map');
         const data = await res.json();
@@ -394,6 +469,88 @@ async function updateAircraftCache() {
 setInterval(updateAircraftCache, 1000);
 updateAircraftCache(); // Initial fetch
 
+// === Fetch runway data - IMPROVED VERSION ===
+async function fetchRunwayData() {
+    // Don't fetch if game is paused
+    if (isGamePaused) return;
+
+    try {
+        // Try multiple methods to get runway data
+        let airports = [];
+
+        // Method 1: Try geofs.airports.data
+        if (window.geofs && geofs.airports && geofs.airports.data) {
+            airports = geofs.airports.data;
+            console.log("Got airports from geofs.airports.data:", airports.length);
+        }
+        // Method 2: Try geofs.data.airports
+        else if (window.geofs && geofs.data && geofs.data.airports) {
+            airports = geofs.data.airports;
+            console.log("Got airports from geofs.data.airports:", airports.length);
+        }
+        // Method 3: Try window.airports
+        else if (window.airports) {
+            airports = window.airports;
+            console.log("Got airports from window.airports:", airports.length);
+        }
+
+        if (airports && Array.isArray(airports) && airports.length > 0) {
+            runwayCache = [];
+            let runwayCount = 0;
+
+            // Process each airport
+            airports.forEach(airport => {
+                if (airport) {
+                    // Check different possible runway data structures
+                    let runways = [];
+
+                    if (airport.runways && Array.isArray(airport.runways)) {
+                        runways = airport.runways;
+                    } else if (airport.rwy && Array.isArray(airport.rwy)) {
+                        runways = airport.rwy;
+                    } else if (airport.runway && Array.isArray(airport.runway)) {
+                        runways = airport.runway;
+                    }
+
+                    runways.forEach(runway => {
+                        // Try different coordinate property names
+                        const lat1 = runway.lat1 || runway.lat?.[0] || (runway.geometry?.coordinates?.[0]?.[1]);
+                        const lon1 = runway.lon1 || runway.lon?.[0] || (runway.geometry?.coordinates?.[0]?.[0]);
+                        const lat2 = runway.lat2 || runway.lat?.[1] || (runway.geometry?.coordinates?.[1]?.[1]);
+                        const lon2 = runway.lon2 || runway.lon?.[1] || (runway.geometry?.coordinates?.[1]?.[0]);
+
+                        if (lat1 && lon1 && lat2 && lon2) {
+                            runwayCache.push({
+                                lat1: parseFloat(lat1),
+                                lon1: parseFloat(lon1),
+                                lat2: parseFloat(lat2),
+                                lon2: parseFloat(lon2),
+                                name: airport.icao || airport.id || airport.name || "RWY",
+                                length: runway.length || runway.len || 0
+                            });
+                            runwayCount++;
+                        }
+                    });
+                }
+            });
+
+            if (runwayCount > 0) {
+                console.log(`Loaded ${runwayCount} runways from ${airports.length} airports`);
+                lastRunwayFetch = Date.now();
+            }
+        }
+
+    } catch (e) {
+        console.error('Could not fetch runway data:', e);
+    }
+}
+
+// Fetch runways more aggressively
+setTimeout(fetchRunwayData, 1000);
+setTimeout(fetchRunwayData, 3000);
+setTimeout(fetchRunwayData, 5000);
+setInterval(fetchRunwayData, RUNWAY_FETCH_INTERVAL);
+
 // === Convert lat/lon to meters relative to player (rough approximation) ===
 function latLonToMeters(lat1, lon1, lat2, lon2) {
     const R = 6371000; // Earth radius in meters
@@ -406,6 +563,9 @@ function latLonToMeters(lat1, lon1, lat2, lon2) {
 
 // === Draw spinning line with trail ===
 function drawSpinningLine() {
+    // Don't animate if game is paused
+    if (isGamePaused) return;
+
     const centerX = radarSize / 2;
     const centerY = radarSize / 2;
     const lineLength = radarSize / 2 - 10;
@@ -529,8 +689,16 @@ function drawRadar() {
         ctx.fillText(dir, dirPositions[i].x, dirPositions[i].y);
     });
 
-    // Draw spinning line
-    drawSpinningLine();
+    // Draw spinning line (only if not paused)
+    if (!isGamePaused) {
+        drawSpinningLine();
+    } else {
+        // Draw paused indicator
+        ctx.fillStyle = 'rgba(255, 255, 0, 0.7)';
+        ctx.font = 'bold 16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('PAUSED', radarSize/2, radarSize/2);
+    }
 
     const cx = radarSize / 2;
     const cy = radarSize / 2;
@@ -546,9 +714,15 @@ function drawRadar() {
             playerHeading = player.animationValue?.heading360 || 0;
             playerCallsign = player.callsign || "YOU";
 
-            // Also set window.playerCallsign if we have a callsign from GeoFS
-            if (player.callsign) {
-                window.playerCallsign = player.callsign;
+            // Also set window.playerCallsign if we have a callsign from GeoFS and no saved one exists
+            // But NEVER overwrite a saved callsign
+            if (player.callsign && !window.playerCallsign) {
+                window.playerCallsign = player.callsign; // Keep original case
+                // Also save to localStorage for persistence
+                localStorage.setItem('playerCallsign', player.callsign);
+                localStorage.setItem('callsign', player.callsign);
+                localStorage.setItem('geoFSRadarCallsign', player.callsign);
+                console.log("Radar: Saved GeoFS callsign:", player.callsign);
             }
         }
     } catch (e) {
@@ -561,7 +735,7 @@ function drawRadar() {
     ctx.rotate((playerHeading * Math.PI) / 180);
 
     // Draw player aircraft with better graphics
-    ctx.fillStyle = 'rgba(0, 255, 0, 0.9)';
+    ctx.fillStyle = isGamePaused ? 'rgba(150, 150, 150, 0.9)' : 'rgba(0, 255, 0, 0.9)';
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
     ctx.lineWidth = 2;
 
@@ -582,17 +756,25 @@ function drawRadar() {
 
     ctx.restore();
 
+    // Determine what to display as player callsign
+    let displayCallsign = "YOU";
+    if (window.playerCallsign) {
+        displayCallsign = window.playerCallsign;
+    } else if (playerCallsign && playerCallsign !== "YOU") {
+        displayCallsign = playerCallsign;
+    }
+
     // Draw player's own callsign below the player triangle
-    if (playerCallsign) {
+    if (displayCallsign) {
         // Position for player callsign (below the triangle)
-        const playerTextY = cy + 25; // Position below the player triangle
+        const playerTextY = cy + 25;
 
         // Draw background for player callsign
-        ctx.fillStyle = 'rgba(0, 100, 0, 0.8)';
-        ctx.strokeStyle = 'rgba(0, 255, 0, 0.9)';
+        ctx.fillStyle = isGamePaused ? 'rgba(80, 80, 80, 0.8)' : 'rgba(0, 100, 0, 0.8)';
+        ctx.strokeStyle = isGamePaused ? 'rgba(200, 200, 200, 0.9)' : 'rgba(0, 255, 0, 0.9)';
         ctx.lineWidth = 1;
 
-        const playerText = playerCallsign.substring(0, 12); // Limit length
+        const playerText = displayCallsign.substring(0, 12);
         const playerTextWidth = ctx.measureText(playerText).width;
 
         // Background rectangle
@@ -612,38 +794,106 @@ function drawRadar() {
         );
 
         // Player callsign text
-        ctx.fillStyle = 'rgba(0, 255, 0, 0.9)';
+        ctx.fillStyle = isGamePaused ? 'rgba(200, 200, 200, 0.9)' : 'rgba(0, 255, 0, 0.9)';
         ctx.font = 'bold 11px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(playerText, cx, playerTextY);
-
-        // NEVER show "YOU" text - removed entirely regardless of callsign
     }
 
-    // Draw other aircraft
-    if (aircraftListCache.length > 0 && player) {
+    // Draw runways (only if not paused)
+    if (!isGamePaused && player && runwayCache.length > 0) {
+        const playerLat = player.llaLocation[0];
+        const playerLon = player.llaLocation[1];
+
+        let runwayCount = 0;
+
+        runwayCache.forEach(runway => {
+            // Calculate positions for both runway ends
+            const [dx1, dy1] = latLonToMeters(playerLat, playerLon, runway.lat1, runway.lon1);
+            const [dx2, dy2] = latLonToMeters(playerLat, playerLon, runway.lat2, runway.lon2);
+
+            const distance1 = Math.sqrt(dx1*dx1 + dy1*dy1);
+            const distance2 = Math.sqrt(dx2*dx2 + dy2*dy2);
+
+            // Only draw if at least one end is within range
+            if (distance1 <= radarRange || distance2 <= radarRange) {
+                const radarX1 = cx + (dx1 / radarRange) * (radarSize / 2);
+                const radarY1 = cy - (dy1 / radarRange) * (radarSize / 2);
+                const radarX2 = cx + (dx2 / radarRange) * (radarSize / 2);
+                const radarY2 = cy - (dy2 / radarRange) * (radarSize / 2);
+
+                // Check if either end is within the radar circle
+                const inCircle1 = Math.hypot(radarX1 - cx, radarY1 - cy) <= radarSize / 2;
+                const inCircle2 = Math.hypot(radarX2 - cx, radarY2 - cy) <= radarSize / 2;
+
+                if (inCircle1 || inCircle2) {
+                    runwayCount++;
+
+                    // Draw runway line
+                    ctx.beginPath();
+                    ctx.moveTo(radarX1, radarY1);
+                    ctx.lineTo(radarX2, radarY2);
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                    ctx.lineWidth = 4;
+                    ctx.stroke();
+
+                    // Draw runway center point
+                    const centerX = (radarX1 + radarX2) / 2;
+                    const centerY = (radarY1 + radarY2) / 2;
+
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Draw runway name if close enough
+                    const centerDistance = (distance1 + distance2) / 2;
+                    if (centerDistance < radarRange * 0.6) {
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                        ctx.font = 'bold 10px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(runway.name.substring(0, 6), centerX, centerY - 15);
+
+                        // Draw runway length
+                        if (runway.length > 0) {
+                            ctx.fillStyle = 'rgba(200, 200, 200, 0.9)';
+                            ctx.font = '9px Arial';
+                            ctx.fillText(`${Math.round(runway.length)}m`, centerX, centerY + 20);
+                        }
+                    }
+                }
+            }
+        });
+
+        // Update runway count in info box
+        window.lastRunwayCount = runwayCount;
+    }
+
+    // Draw other aircraft (only if not paused)
+    if (!isGamePaused && aircraftListCache.length > 0 && player) {
         const playerLat = player.llaLocation[0];
         const playerLon = player.llaLocation[1];
 
         let aircraftCount = 0;
 
         aircraftListCache.forEach(ac => {
-            // Skip self - we already show the player separately
-            // Use the manually entered callsign if available, otherwise use the one from GeoFS
-            const selfCallsign = window.playerCallsign || playerCallsign;
-            if (ac.cs === selfCallsign) return;
-
-            // Also skip if the aircraft has no callsign or callsign is "foo" (default GeoFS callsign)
-            if (!ac.cs || ac.cs === "" || ac.cs.toUpperCase() === "FOO") return;
-
             // Skip aircraft without coordinates
             if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
+
+            // Get the player's callsign for comparison (case insensitive)
+            const myCallsign = window.playerCallsign || playerCallsign;
+
+            // CRITICAL FIX: Skip if this aircraft has the same callsign as me (case insensitive)
+            // This prevents detecting myself as another aircraft
+            if (ac.cs && myCallsign && ac.cs.toLowerCase() === myCallsign.toLowerCase()) {
+                return;
+            }
 
             const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
             const distance = Math.sqrt(dx*dx + dy*dy);
 
-            // Skip if too far (outside radar range) - using radarRange variable
+            // Skip if too far (outside radar range)
             if (distance > radarRange) return;
 
             const radarX = cx + (dx / radarRange) * (radarSize / 2);
@@ -686,7 +936,7 @@ function drawRadar() {
                     ctx.textBaseline = 'top';
 
                     // Background for text
-                    const text = ac.cs.substring(0, 12); // Limit length
+                    const text = ac.cs.substring(0, 12);
                     const textWidth = ctx.measureText(text).width;
 
                     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
@@ -727,14 +977,14 @@ function drawRadar() {
 
         // Draw radar info box
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(5, 5, 140, 50);
+        ctx.fillRect(5, 5, 140, 80);
 
-        ctx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
+        ctx.strokeStyle = isGamePaused ? 'rgba(255, 255, 0, 0.5)' : 'rgba(0, 255, 0, 0.5)';
         ctx.lineWidth = 1;
-        ctx.strokeRect(5, 5, 140, 50);
+        ctx.strokeRect(5, 5, 140, 80);
 
-        // Draw radar info text - using radarRange variable
-        ctx.fillStyle = 'rgba(0, 255, 0, 0.9)';
+        // Draw radar info text
+        ctx.fillStyle = isGamePaused ? 'rgba(255, 255, 0, 0.9)' : 'rgba(0, 255, 0, 0.9)';
         ctx.font = 'bold 12px Arial';
         ctx.textAlign = 'left';
         ctx.fillText(`RADAR: ${radarRange/1000}km`, 10, 20);
@@ -742,14 +992,23 @@ function drawRadar() {
         ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
         ctx.font = '11px Arial';
         ctx.fillText(`Aircraft: ${aircraftCount}`, 10, 35);
-        ctx.fillText(`Range: ${radarSize/2}px = ${radarRange/1000}km`, 10, 50);
-        ctx.fillText(`You: ${window.playerCallsign || playerCallsign}`, 10, 65);
-    } else {
+        ctx.fillText(`Runways: ${runwayCache.length}`, 10, 50);
+        ctx.fillText(`Nearby: ${window.lastRunwayCount || 0}`, 10, 65);
+        ctx.fillText(`You: ${displayCallsign}`, 10, 80);
+    } else if (!isGamePaused) {
         // Draw "scanning" message
         ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
         ctx.font = '14px Arial';
         ctx.textAlign = 'center';
         ctx.fillText('SCANNING...', cx, cy);
+    }
+
+    // Show paused status
+    if (isGamePaused) {
+        ctx.fillStyle = 'rgba(255, 255, 0, 0.7)';
+        ctx.font = 'bold 16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('GAME PAUSED', radarSize/2, radarSize - 30);
     }
 }
 
