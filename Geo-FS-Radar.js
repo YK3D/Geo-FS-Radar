@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GeoFS Radar
 // @namespace    http://tampermonkey.net/
-// @version      8.04
-// @description  
+// @version      57.9
+// @description
 // @author       YK3D
 // @match        https://www.geo-fs.com/geofs.php?v=3.9
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=geo-fs.com
@@ -20,143 +20,115 @@ const SCROLL_INC = 500;   // m  — range change per scroll wheel tick
 
 // ═══════════════════════════════════════════════════
 // SECTION 1b — TIMING & INTERVALS
-// All delays and poll rates live here so they are easy to tune.
-// All values are in milliseconds unless noted otherwise.
 // ═══════════════════════════════════════════════════
 
-// ── Multiplayer map fetch (mps.geo-fs.com/map) ────────────────────────────
-// Fetching too fast triggers HTTP 429 (Too Many Requests).
-// The scheduler uses exponential backoff: on each 429 the delay is doubled
-// up to FETCH_DELAY_MAX, then recovers toward FETCH_DELAY_BASE on success.
-const FETCH_DELAY_BASE    =  250; // ms — normal poll interval
-const FETCH_DELAY_MAX     =  2000; // ms — longest back-off delay after repeated 429s
-const FETCH_DELAY_INITIAL =   500; // ms — delay before the very first fetch after page load
-// Speed-delta window: position snapshots outside this range are discarded when
-// computing ground speed from successive positions (avoids bad readings on
-// teleport / first-seen aircraft).
-const FETCH_SPEED_DT_MIN  =   0.5; // seconds — ignore snapshots closer than this
-const FETCH_SPEED_DT_MAX  =  30;   // seconds — ignore snapshots further apart than this
-
-// ── Airport / runway data (ourairports-data CDN) ──────────────────────────
-const AIRPORT_FETCH_INITIAL  =  2000; // ms — delay before the first airport fetch
-const AIRPORT_REFETCH        = 300000; // ms — how often to re-fetch airport data (5 min)
-
-// ── Draw loop ─────────────────────────────────────────────────────────────
-// Radar does not need 60 fps. 120 ms ≈ 8 fps is smooth enough for ATC-style
-// display while using ~85 % less CPU than requestAnimationFrame.
-const DRAW_INTERVAL          =   120; // ms — main radar canvas redraw interval
-
-// ── Pause / game-state poll ───────────────────────────────────────────────
-const PAUSE_POLL_INTERVAL    =   500; // ms — how often to check geofs.gui.pause
-
-// ── UI reposition poll ────────────────────────────────────────────────────
-// Repositions the range box, menu button, and nearest HUD relative to the
-// radar canvas. Runs on a slow timer as a safety net (drag handles the rest).
-const REPOSITION_INTERVAL    =  1000; // ms
-
-// ── In-frame throttles ────────────────────────────────────────────────────
-// These limit how often expensive DOM operations run inside the draw loop.
-const MENU_INFO_UPDATE_INTERVAL =  1000; // ms — callsign / position readout in menu
-const HUD_UPDATE_INTERVAL       =   500; // ms — nearest-aircraft HUD panel HTML rebuild
-
-// ── Radar initialisation delay ────────────────────────────────────────────
-// Gives the GeoFS page time to finish its own setup before the radar reads
-// geofs.aircraft, creates the menu, and positions the UI.
-const INIT_DELAY             =   300; // ms — setTimeout before createMenu / loadPosition
-
-// ── Drag: reposition safety timeout ──────────────────────────────────────
-const DRAG_REPOSITION_DELAY  =   120; // ms — setTimeout(repositionUI) after loadPosition
-
-// ── Scan-line animation ───────────────────────────────────────────────────
-// Angle (radians) added to the sweep line on every draw frame.
-// At DRAW_INTERVAL = 120 ms this gives one full rotation every ~2.5 s.
-// Increase for a faster sweep; decrease for a slower one.
-const SPIN_SPEED             =  0.1; // rad per frame
+const FETCH_DELAY_BASE    =  250;
+const FETCH_DELAY_MAX     =  2000;
+const FETCH_DELAY_INITIAL =   500;
+const FETCH_SPEED_DT_MIN  =   0.5;
+const FETCH_SPEED_DT_MAX  =  30;
+const AIRPORT_FETCH_INITIAL  =  2000;
+const AIRPORT_REFETCH        = 300000;
+const DRAW_INTERVAL          =   120;
+const PAUSE_POLL_INTERVAL    =   500;
+const REPOSITION_INTERVAL    =  1000;
+const MENU_INFO_UPDATE_INTERVAL =  1000;
+const HUD_UPDATE_INTERVAL       =   500;
+const INIT_DELAY             =   300;
+const DRAG_REPOSITION_DELAY  =   120;
+const SPIN_SPEED             =  0.1;
 
 // ═══════════════════════════════════════════════════
-// SECTION 1c — UI CONFIGURATION
+// SECTION 1c — FONT FAMILIES
+// Change these strings to globally swap typefaces.
+// ═══════════════════════════════════════════════════
+
+const FONT_SANS   = 'Arial, sans-serif';   // UI panels, menu, labels
+const FONT_MONO   = '"Courier New", Courier, monospace'; // HUD, popup data
+const FONT_CANVAS = 'Arial';               // Canvas 2D ctx.font strings
+
+// ═══════════════════════════════════════════════════
+// SECTION 1d — UI CONFIGURATION
 // All sizes are logical CSS / canvas pixels.
-// Edit these values to customise the look without touching drawing code.
 // ═══════════════════════════════════════════════════
+
 const UI = {
 
     // ── Other-aircraft blip — dot mode ───────────────────────────────────
-    // Used when 'Traffic Triangles' is disabled or the aircraft has no heading.
-    blipDotR:            5,   // px — radius of a normal blip dot
-    blipDotRActive:      8,   // px — radius when a popup is open on that blip
+    blipDotR:            5,
+    blipDotRActive:      8,
 
     // ── Other-aircraft blip — triangle mode ──────────────────────────────
-    // A directional isosceles triangle pointing in the aircraft's heading.
-    blipTriTip:          11,  // px — distance from centre to the nose (forward point)
-    blipTriBase:         6,   // px — half-width of the rear base of the triangle
+    blipTriTip:          11,
+    blipTriBase:         6,
 
-    // ── Blip label tags (callsign / altitude / speed / distance rows) ─────
-    blipLabelFont:       11,  // px — font size for all blip label text
-    blipLabelRowH:       18,  // px — vertical height allocated per label row
-    blipLabelPadX:       4,   // px — horizontal padding inside each label background
+    // ── Blip label tags ───────────────────────────────────────────────────
+    blipLabelFont:       11,
+    blipLabelRowH:       18,
+    blipLabelPadX:       4,
 
     // ── Range rings ───────────────────────────────────────────────────────
-    // Three concentric circles drawn at 1/3, 2/3 and 3/3 of radarRange.
-    ringLineW:           6,   // px — stroke width of each ring
-    ringLabelFont:       15,  // px — font size for the distance label on each ring
+    ringLineW:           6,
+    ringLabelFont:       15,
 
-    // ── Compass cardinal letters (N / E / S / W) ──────────────────────────
-    compassFont:         22,  // px — size of the N / E / S / W letters on the rim
-    compassHdgFont:      14,  // px — size of the 'HDG 045°' readout in track-up mode
+    // ── Compass cardinal letters ──────────────────────────────────────────
+    compassFont:         22,
+    compassHdgFont:      14,
 
     // ── Own-aircraft triangle ─────────────────────────────────────────────
-    // Always drawn at the canvas centre, points in the aircraft's heading.
-    playerTriTip:        15,  // px — distance from centre to the nose
-    playerTriBase:       8,   // px — half-width of the rear base
-    playerTriBaseOff:    8,   // px — how far the base sits behind centre
+    playerTriTip:        15,
+    playerTriBase:       8,
+    playerTriBaseOff:    8,
 
     // ── Own-aircraft labels ───────────────────────────────────────────────
-    playerCsFont:        15,  // px — font size for the own-callsign tag below the triangle
-    playerDistFont:      14,  // px — font size for the nearest-aircraft distance label
+    playerCsFont:        15,
+    playerDistFont:      14,
 
     // ── Range display box ─────────────────────────────────────────────────
-    // Floating pill above the radar showing current range (e.g. "5.0 km").
-    rangeBoxW:           130, // px — width of the range box
-    rangeBoxH:           54,  // px — height of the range box
-    rangeBoxFont:        20,  // px — font size for the range value
+    rangeBoxW:           130,
+    rangeBoxH:           54,
+    rangeBoxFont:        20,
 
     // ── Settings menu panel ───────────────────────────────────────────────
-    menuW:               280, // px — width of the slide-out settings panel
-    menuTitleFont:       15,  // px — 'RADAR SETTINGS' header text
-    menuSectionFont:     11,  // px — section divider labels (DISPLAY, TRAFFIC, …)
-    menuRowFont:         14,  // px — toggle / radio button row labels
-    menuRowPadY:         7,   // px — top + bottom padding for each menu row
-    menuSwitchW:         40,  // px — width  of a toggle switch track
-    menuSwitchH:         22,  // px — height of a toggle switch track
-    menuKnobSize:        14,  // px — diameter of the toggle switch knob
-    menuRadioFont:       12,  // px — font size for radio button pair labels (GS / IAS, N↑ / TRK↑)
-    menuInfoFont:        13,  // px — font size for read-only info rows (callsign, position, API status)
+    menuW:               280,
+    menuTitleFont:       15,
+    menuSectionFont:     13,
+    menuRowFont:         14,
+    menuRowPadY:         7,
+    menuSwitchW:         40,
+    menuSwitchH:         22,
+    menuKnobSize:        14,
+    menuRadioFont:       12,
+    menuInfoFont:        14,
 
     // ── Click-to-inspect popup ────────────────────────────────────────────
-    // Appears when you click a blip; shows callsign, distance, bearing, alt, speed, heading.
-    popupTitleFont:      16,  // px — callsign line at the top of the popup
-    popupBodyFont:       14,  // px — data rows inside the popup
+    popupTitleFont:      18,
+    popupBodyFont:       17,
+    popupAltDeltaFont:   15,  // altitude delta span inside popup (was popupBodyFont-2)
 
     // ── TCAS velocity vectors ─────────────────────────────────────────────
-    // Dashed lines projecting from each blip in its heading direction,
-    // scaled to represent ~30 s of travel at current ground speed.
-    vectorLineW:         1.5, // px — stroke width of the velocity vector line
+    vectorLineW:         1.5,
+
+    // ── Nearest Traffic / Tracking HUD ───────────────────────────────────
+    hudHeaderLabelFont:  13,  // "NEARBY TRAFFIC" / "TRACKING" header text
+    hudSectionLabelFont: 17,  // section row labels (Callsign, Aircraft, Distance…)
+    hudCallsignFont:     18,  // callsign value
+    hudDataFont:         15,  // grid data values (bearing, altitude, speed, heading)
+    hudAltDeltaFont:     12,  // altitude delta indicator (▲/▼)
+    hudIsolateLabelFont: 14,  // "Isolate aircraft" toggle label
+    hudStopBtnFont:      15,  // "STOP TRACKING" button
+
+    // ── Airport label drawn on canvas ─────────────────────────────────────
+    airportLabelFont:    10,  // airport / ICAO name text
 
     // ── Miscellaneous ─────────────────────────────────────────────────────
-    pausedFont:          22,  // px — 'PAUSED' overlay text when the game is paused
-    gridLineW:           1,   // px — cross-hair grid lines through the canvas centre
+    pausedFont:          22,
+    gridLineW:           2,
 };
 
 let radarRange   = parseInt(localStorage.getItem('radarRange') || '5000');
 let isGamePaused = false;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FIX #1 — Last-valid player position fallback
-// These are now ACTUALLY written every frame (previously declared but never set)
-// and used as a fallback when geofs.aircraft.instance is temporarily null.
-// Without this, playerLat/playerLon default to 0,0 → every aircraft is thousands
-// of km away → range check filters them all out → no blips appear.
-// ─────────────────────────────────────────────────────────────────────────────
 let _lastValidLat   = null;
 let _lastValidLon   = null;
 let _lastValidAltFt = 0;
@@ -168,23 +140,18 @@ const settings = {
     showVectors:        true,
     showAltitude:       true,
     showSpeed:          true,
-    speedMode:          'GS',
+    speedMode:          'IAS',
     orientMode:         'north',
     nightMode:          false,
     showAirports:       true,
-    // Traffic (other aircraft) display controls
-    showCallsign:       true,   // show OTHER players' callsigns on blips
-    showAircraftName:   true,   // show OTHER players' aircraft type on blips
+    showCallsign:       true,
     showPlayerTriangle: true,
-    showNearestHUD:     true,   // show the Tracking / Nearby Traffic HUD panel
+    showNearestHUD:     true,
     showTraffic:        true,
     showBlipTriangle:   true,
     showBlipDist:       true,
-    // My Aircraft display controls (canvas labels on own triangle)
-    showMyCallsign:     true,   // show own callsign tag on canvas
-    showMyAircraftType: true,   // show own aircraft type tag on canvas
-    // Tracking behaviour
-    isolateTracked:     false,  // when tracking, hide all blips except the tracked one
+    showMyCallsign:     true,
+    isolateTracked:     false,
 };
 
 try {
@@ -237,7 +204,6 @@ const THEMES = {
         hudDist:       'rgba(255,160,40,0.95)',
         hudHdg:        'rgba(180,255,180,0.9)',
         hudSep:        'rgba(0,255,0,0.12)',
-        // Menu chrome
         menuBg:        'rgba(0,12,0,0.97)',
         menuBorder:    'rgba(0,255,0,0.35)',
         menuTitle:     'rgba(0,255,0,0.9)',
@@ -259,14 +225,12 @@ const THEMES = {
         radioTextOn:   '#0f0',
         radioTextOff:  'rgba(150,200,150,0.7)',
         radioBorder:   'rgba(0,255,0,0.3)',
-        // Range box
         rangeBoxBg:    'rgba(0,40,0,0.82)',
         rangeBoxBorder:'rgba(0,255,0,0.6)',
         rangeBoxGlow:  '0 0 12px rgba(0,255,0,0.35)',
         rangeVal:      '#0f0',
         rangeValGlow:  '0 0 5px rgba(0,255,0,0.6)',
         rangeLabel:    'rgba(0,255,0,0.7)',
-        // Menu button
         menuBtnBg:     'rgba(0,60,0,0.92)',
         menuBtnBgHov:  'rgba(0,100,0,0.95)',
         menuBtnColor:  '#0f0',
@@ -305,7 +269,6 @@ const THEMES = {
         hudDist:       'rgba(255,140,70,0.98)',
         hudHdg:        'rgba(235,170,145,0.95)',
         hudSep:        'rgba(200,50,30,0.22)',
-        // Menu chrome
         menuBg:        'rgba(22,4,0,0.97)',
         menuBorder:    'rgba(220,60,40,0.55)',
         menuTitle:     'rgba(255,120,80,0.95)',
@@ -327,14 +290,12 @@ const THEMES = {
         radioTextOn:   'rgba(255,160,80,1)',
         radioTextOff:  'rgba(160,90,60,0.8)',
         radioBorder:   'rgba(200,70,40,0.4)',
-        // Range box
         rangeBoxBg:    'rgba(30,5,0,0.88)',
         rangeBoxBorder:'rgba(220,60,40,0.7)',
         rangeBoxGlow:  '0 0 14px rgba(220,40,20,0.5)',
         rangeVal:      'rgba(255,140,80,1)',
         rangeValGlow:  '0 0 6px rgba(220,60,20,0.7)',
         rangeLabel:    'rgba(200,90,60,0.8)',
-        // Menu button
         menuBtnBg:     'rgba(40,8,0,0.92)',
         menuBtnBgHov:  'rgba(70,15,0,0.95)',
         menuBtnColor:  'rgba(255,120,70,1)',
@@ -348,11 +309,9 @@ function T() { return settings.nightMode ? THEMES.night : THEMES.normal; }
 function applyTheme() {
     const t = T();
 
-    // ── Canvas border / glow ────────────────────────────────────────────
     radarCanvas.style.border    = `2px solid ${t.canvasBorder}`;
     radarCanvas.style.boxShadow = t.canvasGlow;
 
-    // ── Range box ───────────────────────────────────────────────────────
     const rb = document.getElementById('radarRangeBox');
     if (rb) {
         rb.style.background = t.rangeBoxBg;
@@ -367,7 +326,6 @@ function applyTheme() {
         if (rl && rl.id !== 'rangeVal') rl.style.color = t.rangeLabel;
     }
 
-    // ── Menu button ─────────────────────────────────────────────────────
     const mb = document.getElementById('radarMenuBtn');
     if (mb) {
         mb.style.background = t.menuBtnBg;
@@ -378,31 +336,26 @@ function applyTheme() {
         mb.onmouseout  = () => mb.style.background = t.menuBtnBg;
     }
 
-    // ── Settings panel ──────────────────────────────────────────────────
     const mp = document.getElementById('radarMenuPanel');
     if (mp) {
         mp.style.background    = t.menuBg;
         mp.style.border        = `1.5px solid ${t.menuBorder}`;
         mp.style.scrollbarColor = t.menuScrollbar;
 
-        // Title
         const titleEl = mp.querySelector('[data-menu-title]');
         if (titleEl) {
             titleEl.style.color       = t.menuTitle;
             titleEl.style.borderColor = t.menuSep;
         }
 
-        // Section headers
         mp.querySelectorAll('[data-menu-section]').forEach(el => {
             el.style.color = t.menuSection;
         });
 
-        // Separator lines
         mp.querySelectorAll('[data-menu-sep]').forEach(el => {
             el.style.borderTopColor = t.menuSep;
         });
 
-        // Toggle rows
         mp.querySelectorAll('[data-menu-row]').forEach(el => {
             el.style.color = t.menuRow;
             el.onmouseover = () => el.style.background = t.menuRowHover;
@@ -420,7 +373,6 @@ function applyTheme() {
             }
         });
 
-        // Radio buttons
         mp.querySelectorAll('[data-radio-key]').forEach(el => {
             const key = el.dataset.radioKey;
             const opt = el.dataset.radioOpt;
@@ -430,7 +382,6 @@ function applyTheme() {
             el.style.borderColor = t.radioBorder;
         });
 
-        // Info rows
         mp.querySelectorAll('[data-menu-infolbl]').forEach(el => {
             el.style.color = t.menuInfo;
         });
@@ -438,16 +389,12 @@ function applyTheme() {
             el.style.color = t.menuInfoVal;
         });
 
-        // Status row
         const statusEl = document.getElementById('radarInfo_apistatus');
-        // Only reset if it was already OK-coloured; error colour stays until next update
         if (statusEl && statusEl.dataset.statusOk === 'true') {
             statusEl.style.color = t.menuStatus;
         }
     }
 
-    // ── HUD ─────────────────────────────────────────────────────────────
-    // Force a full HUD rebuild so all inline colours update
     updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
 }
 
@@ -478,8 +425,8 @@ rangeBox.style.cssText = `
     align-items:center; justify-content:center; pointer-events:none;
 `;
 rangeBox.innerHTML = `
-    <span id="rangeVal" style="font:bold ${UI.rangeBoxFont}px Arial;text-shadow:0 0 5px rgba(0,255,0,0.6)">${(radarRange/1000).toFixed(1)} km</span>
-    <span style="font:11px Arial;opacity:.8;margin-top:2px">RANGE</span>
+    <span id="rangeVal" style="font:bold ${UI.rangeBoxFont}px ${FONT_SANS};text-shadow:0 0 5px rgba(0,255,0,0.6)">${(radarRange/1000).toFixed(1)} km</span>
+    <span style="font:11px ${FONT_SANS};opacity:.8;margin-top:2px">RANGE</span>
 `;
 document.body.appendChild(rangeBox);
 
@@ -501,7 +448,7 @@ nearestHUD.style.cssText = `
     border-radius:10px;
     padding:0;
     pointer-events:none;
-    font-family:"Courier New",Courier,monospace;
+    font-family:${FONT_MONO};
     transition:opacity 0.3s;
     display:none;
 `;
@@ -561,19 +508,16 @@ function fmtDistMetric(meters) {
 }
 
 let _hudNearestData = null;
-let _trackedAc      = null;  // non-null when user has locked onto a specific aircraft
-let _trackedId      = null;  // session id of tracked aircraft (unique, unlike callsign)
+let _trackedAc      = null;
+let _trackedId      = null;
 
-// Stop tracking and return to nearest-aircraft mode.
 function stopTracking() {
     _trackedAc     = null;
     _trackedId     = null;
     activePopupCs  = null;
-    _lastNearestCs = null; // force HUD to rebuild next frame
+    _lastNearestCs = null;
 }
 
-// Look up a fresh copy of the tracked aircraft from the live cache by session id.
-// Falls back to the stale cached object if the aircraft is temporarily missing.
 function refreshTracked() {
     if (!_trackedId) return null;
     const fresh = aircraftListCache.find(a => a.id === _trackedId);
@@ -581,7 +525,6 @@ function refreshTracked() {
     return _trackedAc;
 }
 
-// Shared helper: compute distance + bearing string pair from myData → target ac
 function _hudDistBrg(myData, ac) {
     if (!myData || !ac.co) return { distStr: 'N/A', brgStr: 'N/A' };
     const nm  = calcDistNm(myData.lat, myData.lon, ac.co[0], ac.co[1]);
@@ -595,7 +538,6 @@ function _hudDistBrg(myData, ac) {
 function updateNearestHUD(nearest, myData) {
     const t = T();
 
-    // Determine which aircraft to display: tracked takes priority over nearest
     const displayAc  = _trackedAc || nearest;
     const isTracking = !!_trackedAc;
 
@@ -607,15 +549,12 @@ function updateNearestHUD(nearest, myData) {
 
     _hudNearestData = { nearest: displayAc, myData };
     nearestHUD.style.display    = 'block';
-    // Pointer events must be on when tracking so the buttons are clickable
     nearestHUD.style.pointerEvents = isTracking ? 'auto' : 'none';
 
     const cs  = displayAc.cs && displayAc.cs !== 'Foo' ? displayAc.cs : `Foo #${displayAc.id || '???'}`;
-    const acN = displayAc._shortName || null;
 
     const { distStr, brgStr } = _hudDistBrg(myData, displayAc);
 
-    // Altitude
     const nearAl = (() => {
         const v = parseFloat(displayAc.al);
         if (isFinite(v)) return v;
@@ -630,11 +569,10 @@ function updateNearestHUD(nearest, myData) {
         const delta = Math.round(nearAl - myData.altFt);
         const sign  = delta >= 0 ? '▲+' : '▼';
         const col   = delta > 0 ? 'rgba(100,255,140,0.9)' : 'rgba(255,120,120,0.9)';
-        altDeltaStr = ` <span style="color:${col};font-size:12px">${sign}${Math.abs(delta).toLocaleString()} ft</span>`;
+        altDeltaStr = ` <span style="color:${col};font-size:${UI.hudAltDeltaFont}px">${sign}${Math.abs(delta).toLocaleString()} ft</span>`;
     }
     const altStr = nearAl !== null ? (fmtAlt(nearAl) ?? '–') : '–';
 
-    // Speed
     const nearSpdRaw = isFinite(parseFloat(displayAc.s))
         ? parseFloat(displayAc.s)
         : (typeof displayAc._computedSpd === 'number' && isFinite(displayAc._computedSpd)
@@ -642,14 +580,12 @@ function updateNearestHUD(nearest, myData) {
     const spdStr = nearSpdRaw !== null ? (fmtSpd(nearSpdRaw) ?? '–') : '–';
     const hdgStr = fmtHdg(displayAc.h);
 
-    // Tracking mode colours
     const trackBorder = isTracking ? 'rgba(255,200,60,0.55)' : t.hudBorder;
     const trackGlow   = isTracking ? ', 0 0 14px rgba(255,180,30,0.2)' : '';
     const headerDot   = isTracking ? 'rgba(255,200,60,1)'    : t.hudTitle;
     const headerLabel = isTracking ? 'TRACKING'              : 'NEARBY TRAFFIC';
     const headerColor = isTracking ? 'rgba(255,200,60,0.98)' : t.hudTitle;
 
-    // Isolate toggle (only shown in tracking mode)
     const isolateChecked  = settings.isolateTracked;
     const isolateSwBg     = isolateChecked ? t.switchOn    : t.switchOff;
     const isolateKnobBg   = isolateChecked ? t.knobOn      : t.knobOff;
@@ -662,7 +598,7 @@ function updateNearestHUD(nearest, myData) {
     display:flex; align-items:center; justify-content:space-between;
     cursor:pointer;
   " id="radarIsolateRow">
-    <span style="color:${t.hudLabel};font-size:12px;letter-spacing:0.5px;">Isolate aircraft</span>
+    <span style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont}px;letter-spacing:0.5px;">Isolate aircraft</span>
     <div id="radarIsolateSw" style="
       width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
       border-radius:${UI.menuSwitchH/2}px; position:relative;
@@ -679,14 +615,13 @@ function updateNearestHUD(nearest, myData) {
     </div>
   </div>` : '';
 
-    // Stop Tracking button
     const stopBtn = isTracking ? `
   <div style="padding:4px 14px 8px;">
     <button id="radarStopTrackBtn" style="
       width:100%; padding:6px 0;
       background:${t.hudBg}; border:1px solid ${t.hudBorder};
       border-radius:6px; color:${t.hudLabel};
-      font:bold 12px Arial; letter-spacing:1px;
+      font:bold ${UI.hudStopBtnFont}px ${FONT_SANS}; letter-spacing:1px;
       cursor:pointer; transition:background .15s;
     ">✕  STOP TRACKING</button>
   </div>` : '';
@@ -697,48 +632,47 @@ function updateNearestHUD(nearest, myData) {
     border:1.5px solid ${trackBorder};
     border-radius:10px; overflow:hidden;
     box-shadow:0 4px 20px rgba(0,0,0,0.75)${trackGlow};
-    font-family:'Courier New',Courier,monospace;
+    font-family:${FONT_MONO};
 ">
   <div style="padding:9px 14px 7px; border-bottom:1px solid ${t.hudSep};
     display:flex; align-items:center; gap:8px;">
     <span style="display:inline-block;width:10px;height:10px;border-radius:50%;
       background:${headerDot};box-shadow:0 0 6px ${headerDot};flex-shrink:0;"></span>
-    <span style="color:${headerColor};font-size:13px;letter-spacing:1.5px;
+    <span style="color:${headerColor};font-size:${UI.hudHeaderLabelFont}px;letter-spacing:1.5px;
       text-transform:uppercase;font-weight:bold;">${headerLabel}</span>
   </div>
 
   <div style="padding:8px 14px 6px;border-bottom:1px solid ${t.hudSep};">
-    <div style="color:${t.hudLabel};font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Callsign</div>
-    <div style="color:${t.hudValue};font-size:18px;font-weight:bold;letter-spacing:1px">${cs}${acN ? `<span style="color:${t.hudLabel};font-size:12px;font-weight:normal;margin-left:7px">${acN}</span>` : ''}</div>
+    <div style="color:${t.hudLabel};font-size:${UI.hudSectionLabelFont}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Callsign</div>
+    <div style="color:${t.hudValue};font-size:${UI.hudCallsignFont}px;font-weight:bold;letter-spacing:1px">${cs}</div>
   </div>
 
   <div style="padding:8px 14px 8px;display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;">
     <div>
-      <div style="color:${t.hudLabel};font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Distance</div>
-      <div style="color:${t.hudDist};font-size:14px;font-weight:bold">${distStr}</div>
+      <div style="color:${t.hudLabel};font-size:${UI.hudSectionLabelFont}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Distance</div>
+      <div style="color:${t.hudDist};font-size:${UI.hudDataFont}px;font-weight:bold">${distStr}</div>
     </div>
     <div>
-      <div style="color:${t.hudLabel};font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Bearing</div>
-      <div style="color:${t.hudHdg};font-size:14px;font-weight:bold">${brgStr}</div>
+      <div style="color:${t.hudLabel};font-size:${UI.hudSectionLabelFont}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Bearing</div>
+      <div style="color:${t.hudHdg};font-size:${UI.hudDataFont}px;font-weight:bold">${brgStr}</div>
     </div>
     <div>
-      <div style="color:${t.hudLabel};font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Altitude</div>
-      <div style="color:${t.hudAlt};font-size:14px;font-weight:bold">${altStr}${altDeltaStr}</div>
+      <div style="color:${t.hudLabel};font-size:${UI.hudSectionLabelFont}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Altitude</div>
+      <div style="color:${t.hudAlt};font-size:${UI.hudDataFont}px;font-weight:bold">${altStr}${altDeltaStr}</div>
     </div>
     <div>
-      <div style="color:${t.hudLabel};font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Speed (GS)</div>
-      <div style="color:${t.hudSpeed};font-size:14px;font-weight:bold">${spdStr}</div>
+      <div style="color:${t.hudLabel};font-size:${UI.hudSectionLabelFont}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Speed (GS)</div>
+      <div style="color:${t.hudSpeed};font-size:${UI.hudDataFont}px;font-weight:bold">${spdStr}</div>
     </div>
     <div style="grid-column:1/-1">
-      <div style="color:${t.hudLabel};font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Heading</div>
-      <div style="color:${t.hudHdg};font-size:14px;font-weight:bold">${hdgStr}</div>
+      <div style="color:${t.hudLabel};font-size:${UI.hudSectionLabelFont}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Heading</div>
+      <div style="color:${t.hudHdg};font-size:${UI.hudDataFont}px;font-weight:bold">${hdgStr}</div>
     </div>
   </div>
   ${isolateRow}
   ${stopBtn}
 </div>`;
 
-    // Wire isolate toggle
     const isolateRowEl = document.getElementById('radarIsolateRow');
     if (isolateRowEl) {
         isolateRowEl.onclick = (e) => {
@@ -749,7 +683,6 @@ function updateNearestHUD(nearest, myData) {
         };
     }
 
-    // Wire stop-tracking button
     const stopEl = document.getElementById('radarStopTrackBtn');
     if (stopEl) {
         stopEl.onmouseover = () => stopEl.style.background = T().hudBorder;
@@ -763,6 +696,8 @@ function repositionNearestHUD() {
     const rt = parseInt(radarCanvas.style.top)  || 0;
     nearestHUD.style.left = (rl + radarSize + 12) + 'px';
     nearestHUD.style.top  = rt + 'px';
+
+    repositionMenu();
 }
 
 // ═══════════════════════════════════════════════════
@@ -892,7 +827,7 @@ function createMenu() {
         border-radius:12px; padding:12px 0 10px;
         z-index:2147483646; display:none;
         box-shadow:0 4px 28px rgba(0,0,0,0.75);
-        font-family:Arial,sans-serif;
+        font-family:${FONT_SANS};
         user-select:none;
         height:600px;
         overflow-y:auto;
@@ -904,7 +839,7 @@ function createMenu() {
     const title = document.createElement('div');
     title.dataset.menuTitle = '1';
     title.style.cssText = `
-        color:rgba(0,255,0,0.9); font:bold ${UI.menuTitleFont}px Arial;
+        color:rgba(0,255,0,0.9); font:bold ${UI.menuTitleFont}px ${FONT_SANS};
         text-align:center; padding:2px 14px 10px;
         border-bottom:1px solid rgba(0,255,0,0.18);
         margin-bottom:4px; letter-spacing:1.5px;
@@ -916,7 +851,7 @@ function createMenu() {
         const s = document.createElement('div');
         s.dataset.menuSection = '1';
         s.style.cssText = `
-            color:rgba(0,255,0,0.5); font:bold ${UI.menuSectionFont}px Arial;
+            color:rgba(0,255,0,0.5); font:bold ${UI.menuSectionFont}px ${FONT_SANS};
             padding:8px 16px 3px; letter-spacing:1.5px; text-transform:uppercase;
         `;
         s.textContent = label;
@@ -935,7 +870,7 @@ function createMenu() {
 
         const lbl = document.createElement('span');
         lbl.dataset.menuRowlbl = '1';
-        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px Arial;`;
+        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
         lbl.textContent = label;
 
         const sw = document.createElement('div');
@@ -981,7 +916,7 @@ function createMenu() {
         `;
         const lbl = document.createElement('span');
         lbl.dataset.menuRowlbl = '1';
-        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px Arial; flex:1;`;
+        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
         lbl.textContent = label;
 
         const wrap = document.createElement('div');
@@ -994,7 +929,7 @@ function createMenu() {
             b.dataset.radioOpt = opt;
             b.textContent = [label1, label2][i];
             b.style.cssText = `
-                padding:4px 10px; font:bold ${UI.menuRadioFont}px Arial;
+                padding:4px 10px; font:bold ${UI.menuRadioFont}px ${FONT_SANS};
                 border-radius:5px; cursor:pointer;
                 border:1px solid rgba(0,255,0,0.3); transition:all .15s;
                 background:${settings[key]===opt ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)'};
@@ -1031,12 +966,12 @@ function createMenu() {
         row.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:5px 16px;`;
         const lbl = document.createElement('span');
         lbl.dataset.menuInfolbl = '1';
-        lbl.style.cssText = `color:rgba(150,200,150,0.7); font:${UI.menuInfoFont}px Arial;`;
+        lbl.style.cssText = `color:rgba(150,200,150,0.7); font:${UI.menuInfoFont}px ${FONT_SANS};`;
         lbl.textContent = label;
         const val = document.createElement('span');
         val.id = `radarInfo_${idSuffix}`;
         val.dataset.menuInfoval = '1';
-        val.style.cssText = `color:rgba(0,255,0,0.9); font:bold ${UI.menuInfoFont}px "Courier New",monospace; text-align:right; max-width:155px; word-break:break-all;`;
+        val.style.cssText = `color:rgba(0,255,0,0.9); font:bold ${UI.menuInfoFont}px ${FONT_MONO}; text-align:right; max-width:155px; word-break:break-all;`;
         val.textContent = '—';
         row.appendChild(lbl); row.appendChild(val);
         panel.appendChild(row);
@@ -1048,7 +983,7 @@ function createMenu() {
         const val = document.createElement('span');
         val.id = 'radarInfo_apistatus';
         val.dataset.statusOk = 'true';
-        val.style.cssText = `color:rgba(0,200,0,0.8); font:${UI.menuInfoFont - 1}px "Courier New",monospace; word-break:break-all;`;
+        val.style.cssText = `color:rgba(0,200,0,0.8); font:${UI.menuInfoFont - 1}px ${FONT_MONO}; word-break:break-all;`;
         val.textContent = 'Waiting for data…';
         row.appendChild(val);
         panel.appendChild(row);
@@ -1068,12 +1003,10 @@ function createMenu() {
     addSection('Traffic');
     addToggle('Show Traffic',           'showTraffic');
     addToggle('Traffic Triangles',      'showBlipTriangle');
-    addToggle('Callsign',               'showCallsign');   // other players only
-    addToggle('Aircraft Type',          'showAircraftName'); // other players only
+    addToggle('Callsign',               'showCallsign');
     addToggle('Altitude',               'showAltitude');
     addToggle('Speed',                  'showSpeed');
     addToggle('Distance',               'showBlipDist');
-    addRadio ('Speed Source',           'speedMode',        'GS', 'IAS', 'GS', 'IAS');
     addToggle('Heading Vectors',        'showVectors');
     addToggle('Tracking / Nearby Traffic', 'showNearestHUD', (v) => {
         if (!v) nearestHUD.style.display = 'none';
@@ -1090,10 +1023,8 @@ function createMenu() {
     // ── My Aircraft ───────────────────────────────────────────────────────
     addSection('My Aircraft');
     addInfoRow('Callsign', 'callsign');
-    addInfoRow('Aircraft', 'acname');
     addInfoRow('Position', 'position');
     addToggle('Show My Callsign',       'showMyCallsign');
-    addToggle('Show My Aircraft Type',  'showMyAircraftType');
 
     addSep();
 
@@ -1103,10 +1034,6 @@ function createMenu() {
 
     document.body.appendChild(panel);
 
-    // Remove the document click handler that auto-closes the menu
-    // Only the menu button can close it now
-
-    // Initial positioning
     repositionMenu();
 }
 
@@ -1115,52 +1042,38 @@ function repositionMenu() {
     const panel = document.getElementById('radarMenuPanel');
     if (!btn || !panel) return;
 
-    // Get radar position and dimensions
     const rl = parseInt(radarCanvas.style.left) || 5;
     const rt = parseInt(radarCanvas.style.top) || 0;
-    const menuFullHeight = 600; // Full menu height
+    const menuFullHeight = 600;
     const buttonSize = 40;
     const spacing = 5;
-    const bottomMargin = 60; // 60px margin from bottom of screen
-
-    // Calculate window dimensions
+    const bottomMargin = 60;
     const windowHeight = window.innerHeight;
 
-    // Position button to the right of radar (aligned with top)
     btn.style.left = (rl + radarSize + spacing) + 'px';
     btn.style.top = rt + 'px';
 
-    // Position panel with top fixed to button bottom
     const panelTop = rt + buttonSize + spacing;
     panel.style.top = panelTop + 'px';
 
-    // Calculate maximum allowed height (stop 40px from bottom of screen)
     const maxAllowedHeight = windowHeight - panelTop - bottomMargin;
-
-    // Set panel height - use full height if within limits, otherwise cap at maxAllowedHeight
     const panelHeight = Math.min(menuFullHeight, maxAllowedHeight);
     panel.style.height = panelHeight + 'px';
-
-    // Position panel horizontally (aligned with button)
     panel.style.left = (rl + radarSize + spacing) + 'px';
 
-    // Ensure panel doesn't go off screen horizontally
     const panelRight = parseInt(panel.style.left) + UI.menuW;
     if (panelRight > window.innerWidth) {
         panel.style.left = (window.innerWidth - UI.menuW - spacing) + 'px';
     }
 
-    // Add a small visual indicator if menu is truncated
     const isTruncated = panelHeight < menuFullHeight;
     panel.style.borderBottom = isTruncated ? '2px solid rgba(255,200,0,0.5)' : '1.5px solid rgba(0,255,0,0.35)';
 }
 
-function updateMenuInfoCallsign(cs, lat, lon, acName) {
+function updateMenuInfoCallsign(cs, lat, lon) {
     const csEl = document.getElementById('radarInfo_callsign');
     const posEl = document.getElementById('radarInfo_position');
-    const acEl  = document.getElementById('radarInfo_acname');
     if (csEl) csEl.textContent = cs || '—';
-    if (acEl) acEl.textContent = acName || '—';
     if (posEl && lat != null) {
         const latStr = Math.abs(lat).toFixed(3) + (lat >= 0 ? '°N' : '°S');
         const lonStr = Math.abs(lon).toFixed(3) + (lon >= 0 ? '°E' : '°W');
@@ -1185,7 +1098,7 @@ function openMenu() {
     const p = document.getElementById('radarMenuPanel');
     if (p) {
         p.style.display = 'block';
-        repositionMenu(); // Ensure correct position when opening
+        repositionMenu();
     }
 }
 
@@ -1195,22 +1108,11 @@ function closeMenu() {
     if (p) p.style.display = 'none';
 }
 
-// Update repositionNearestHUD to also reposition menu
-function repositionNearestHUD() {
-    const rl = parseInt(radarCanvas.style.left) || 5;
-    const rt = parseInt(radarCanvas.style.top)  || 0;
-    nearestHUD.style.left = (rl + radarSize + 12) + 'px';
-    nearestHUD.style.top  = rt + 'px';
-
-    // Also reposition menu when radar moves
-    repositionMenu();
-}
-
-// Add window resize handler
 window.addEventListener('resize', () => {
     repositionMenu();
     repositionNearestHUD();
 });
+
 // ═══════════════════════════════════════════════════
 // SECTION 6 — BLIP POPUP
 // ═══════════════════════════════════════════════════
@@ -1226,7 +1128,7 @@ function createPopupEl() {
         background:rgba(0,12,0,0.97); border:1.5px solid rgba(0,255,0,0.5);
         border-radius:10px; padding:11px 15px;
         z-index:2147483647; pointer-events:none; display:none;
-        font-family:"Courier New",Courier,monospace; font-size:${UI.popupBodyFont}px;
+        font-family:${FONT_MONO}; font-size:${UI.popupBodyFont}px;
         box-shadow:0 3px 20px rgba(0,0,0,0.88);
     `;
     document.body.appendChild(p);
@@ -1267,7 +1169,7 @@ function showPopup(ac, distance, screenX, screenY, myData) {
         const d = Math.round(acAl - myData.altFt);
         const sign = d >= 0 ? '▲+' : '▼';
         const col  = d > 0 ? '#88ff88' : '#ff8888';
-        altDelta = ` <span style="color:${col};font-size:${UI.popupBodyFont - 2}px">${sign}${Math.abs(d).toLocaleString()} ft</span>`;
+        altDelta = ` <span style="color:${col};font-size:${UI.popupAltDeltaFont}px">${sign}${Math.abs(d).toLocaleString()} ft</span>`;
     }
 
     popup.innerHTML = `
@@ -1318,14 +1220,11 @@ radarCanvas.addEventListener('click', (e) => {
     });
 
     if (closest) {
-        // Use session id (unique per player) not callsign (multiple players can share "Foo")
         const isSameBlip = _trackedId && _trackedId === closest.ac.id;
         if (isSameBlip) {
-            // Second click on same aircraft → deselect
             hidePopup();
             stopTracking();
         } else {
-            // New aircraft clicked → lock tracking onto it by session id
             activePopupCs   = closest.ac.cs;
             _trackedAc      = closest.ac;
             _trackedId      = closest.ac.id;
@@ -1335,7 +1234,6 @@ radarCanvas.addEventListener('click', (e) => {
             hidePopup();
         }
     } else {
-        // Clicked empty space → clear
         hidePopup();
         stopTracking();
     }
@@ -1417,212 +1315,224 @@ setInterval(() => {
             : t.canvasGlow;
     } catch(e) {}
 }, PAUSE_POLL_INTERVAL);
-// ═══════════════════════════════════════════════════
 
 let aircraftListCache = [];
-const prevAcData = new Map();
+const prevAcData = new Map();  // used by internal source speed-delta
 
-// ═══════════════════════════════════════════════════
-// SECTION 10b — AIRCRAFT NAME LOOKUP
-// Maps GeoFS aircraft type IDs (the "ac" field in the multiplayer API) to short
-// display names.  Boeing → B prefix, Airbus → A prefix, others as recognised.
-// Unknown IDs fall back to "#ID" so something always shows.
-// ═══════════════════════════════════════════════════
-
-const AIRCRAFT_NAMES = {
-    1:   'C172',      // Cessna 172 Skyhawk
-    2:   'B737',      // Boeing 737-800
-    3:   'A380',      // Airbus A380
-    4:   'F/A-18',    // F/A-18 Hornet
-    5:   'B747',      // Boeing 747-400
-    6:   'DC-3',      // Douglas DC-3
-    7:   'SR22',      // Cirrus SR-22
-    8:   'PA-28',     // Piper PA-28 Cherokee
-    9:   'Concorde',  // Concorde
-    10:  'B-17',      // Boeing B-17 Flying Fortress
-    11:  'B787',      // Boeing 787 Dreamliner
-    12:  'DHC-2',     // de Havilland Canada DHC-2 Beaver
-    13:  'Extra330',  // Extra 330
-    14:  'CitX',      // Cessna Citation X
-    15:  'Shuttle',   // Space Shuttle
-    16:  'J-3',       // Piper J-3 Cub
-    17:  'B777',      // Boeing 777
-    18:  'A320',      // Airbus A320
-    19:  'CRJ200',    // Bombardier CRJ-200
-    20:  'Q400',      // Bombardier Dash 8 Q400
-    21:  'R44',       // Robinson R44 helicopter
-    22:  'A330',      // Airbus A330
-    23:  'E175',      // Embraer 175
-    24:  'B737M',     // Boeing 737 MAX 8
-    25:  'B757',      // Boeing 757
-    26:  'B767',      // Boeing 767
-    27:  'A319',      // Airbus A319
-    28:  'A321',      // Airbus A321
-    29:  'A350',      // Airbus A350
-    30:  'B747SP',    // Boeing 747SP
-    31:  'C208',      // Cessna 208 Caravan
-    32:  'TBM930',    // Daher TBM 930
-    33:  'A220',      // Airbus A220
-    34:  'E190',      // Embraer 190
-    35:  'B737NG',    // Boeing 737 Next Gen
-    36:  'B777X',     // Boeing 777X
-    37:  'A340',      // Airbus A340
-    38:  'ATR72',     // ATR 72
-    39:  'E145',      // Embraer ERJ-145
-    40:  'Dash8',     // Bombardier Dash 8 Q200
-    41:  'PC-12',     // Pilatus PC-12
-    42:  'CRJ900',    // Bombardier CRJ-900
-    43:  'B737CL',    // Boeing 737 Classic
-    44:  'MD-11',     // McDonnell Douglas MD-11
-    45:  'DC-10',     // McDonnell Douglas DC-10
-    46:  'L-1011',    // Lockheed L-1011
-    47:  'B707',      // Boeing 707
-    48:  'B727',      // Boeing 727
-    49:  'B717',      // Boeing 717
-    50:  'B720',      // Boeing 720
-    51:  'Spitfire',  // Supermarine Spitfire
-    52:  'P-51',      // North American P-51 Mustang
-    53:  'F-16',      // General Dynamics F-16
-    54:  'F-14',      // Grumman F-14 Tomcat
-    55:  'F-22',      // Lockheed F-22 Raptor
-    56:  'F-35',      // Lockheed F-35 Lightning II
-    57:  'MiG-29',    // Mikoyan MiG-29
-    58:  'Su-27',     // Sukhoi Su-27
-    59:  'Gripen',    // Saab JAS 39 Gripen
-    60:  'Eurofighter',// Eurofighter Typhoon
-    61:  'C-130',     // Lockheed C-130 Hercules
-    62:  'C-17',      // Boeing C-17 Globemaster
-    63:  'B-52',      // Boeing B-52 Stratofortress
-    64:  'B-2',       // Northrop B-2 Spirit
-    65:  'U-2',       // Lockheed U-2
-    66:  'SR-71',     // Lockheed SR-71 Blackbird
-    67:  'X-15',      // North American X-15
-    68:  'MV-22',     // Bell-Boeing V-22 Osprey
-    69:  'UH-60',     // Sikorsky UH-60 Black Hawk
-    70:  'Mi-8',      // Mil Mi-8
-    71:  'CH-47',     // Boeing CH-47 Chinook
-};
-
-// Attempt to derive a short name from a full aircraft name string.
-// Boeing → B prefix, Airbus → A prefix, Cessna → C prefix, common patterns.
-function formatAircraftName(fullName) {
-    if (!fullName || typeof fullName !== 'string') return null;
-    const n = fullName.trim();
-    if (n.length === 0) return null;
-
-    // Direct regex matches for major manufacturers
-    const boeingM  = n.match(/boeing\s*(\d{3}[-\w]*)/i);
-    if (boeingM) return 'B' + boeingM[1].replace(/\s+/g, '');
-
-    const airbusM  = n.match(/airbus\s*[Aa]?(\d{3}[-\w]*)/i);
-    if (airbusM) return 'A' + airbusM[1].replace(/\s+/g, '');
-
-    // Airbus written as "A320", "A380", etc. already
-    const airbusShort = n.match(/^[Aa](\d{3}[-\w]*)$/);
-    if (airbusShort) return 'A' + airbusShort[1];
-
-    const cessnaM  = n.match(/cessna\s*(\w+)/i);
-    if (cessnaM) return 'C' + cessnaM[1];
-
-    const embraerM = n.match(/embraer\s*([\w-]+)/i);
-    if (embraerM) return 'E' + embraerM[1];
-
-    // Already short — return as-is or truncate
-    return n.length <= 9 ? n : n.slice(0, 9);
-}
-
-// Get a short aircraft type name from a GeoFS aircraft type ID.
-// First tries the static table, then tries GeoFS's own definitions, then falls back.
-function getAircraftShortName(acId) {
-    if (acId == null) return null;
-    const id = parseInt(acId);
-
-    // Static table (covers built-in GeoFS aircraft)
-    if (AIRCRAFT_NAMES[id]) return AIRCRAFT_NAMES[id];
-
-    // Try GeoFS's live aircraft definitions for custom/community aircraft
-    try {
-        const def = window.geofs?.aircraft?.aircraftList?.[id]
-                 || window.geofs?.aircraft?.definitions?.[id];
-        if (def?.name) return formatAircraftName(def.name) || def.name.slice(0, 9);
-    } catch(e) {}
-
-    // Final fallback: show the numeric ID so it's at least informative
-    return id > 0 ? `#${id}` : null;
-}
-
-// Get the short type name for the local player's own aircraft.
-let _cachedPlayerAcName  = null; // cached so we don't re-derive every frame
-let _cachedPlayerAcId    = null;
-
-function getPlayerAircraftName() {
-    try {
-        const inst = window.geofs?.aircraft?.instance;
-        if (!inst) return _cachedPlayerAcName;
-
-        // The instance aircraft ID (type, not the player session id)
-        const acId = inst.aircraftRecord?.id ?? inst.id ?? inst.ac;
-
-        // Only re-derive when the aircraft type changes (e.g. after switching aircraft)
-        if (acId != null && acId !== _cachedPlayerAcId) {
-            _cachedPlayerAcId   = acId;
-            // Try the full name from the record first, then fall back to ID table
-            const fullName = inst.aircraftRecord?.name || inst.name || inst.model?.name;
-            _cachedPlayerAcName = (fullName ? formatAircraftName(fullName) : null)
-                               || getAircraftShortName(acId);
-        }
-    } catch(e) {}
-    return _cachedPlayerAcName;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// code uses.  The GeoFS multiplayer API does NOT have ac.al / ac.h / ac.s.
-// The actual layout of the co[] array is:
-//   co[0] lat   co[1] lon   co[2] altitude (metres)
-//   co[3] heading (degrees)  co[4] pitch  co[5] roll
-// Speed is in st.as (airspeed, knots).
-// Without this normalisation every heading read is NaN → no triangles, no
-// vectors; every altitude read falls back to co[2] * 3.28084 via the existing
-// fallback so that part worked, but heading / speed were always missing.
-// ─────────────────────────────────────────────────────────────────────────────
 function normalizeAc(raw) {
-    const ac = Object.assign({}, raw); // shallow clone — don't mutate the raw object
-
-    // heading: co[3]
+    const ac = Object.assign({}, raw);
     if (ac.h == null && Array.isArray(ac.co) && ac.co.length > 3) {
         const v = parseFloat(ac.co[3]);
         if (isFinite(v)) ac.h = v;
     }
-
-    // altitude: co[2] is METRES → convert to feet
-    // Set ac.al so the rest of the code's `parseFloat(ac.al)` path is used directly
     if (ac.al == null && Array.isArray(ac.co) && ac.co.length > 2) {
         const v = parseFloat(ac.co[2]);
         if (isFinite(v)) ac.al = v * 3.28084;
     }
-
-    // speed: st.as (airspeed knots) — prefer over computed delta
     if (ac.s == null && ac.st && ac.st.as != null) {
         const v = parseFloat(ac.st.as);
         if (isFinite(v)) ac.s = v;
     }
-
-    // short aircraft type name from the "ac" field (integer type ID)
-    if (ac._shortName == null && ac.ac != null) {
-        ac._shortName = getAircraftShortName(ac.ac);
-    }
-
     return ac;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FIX — Rate limiting & exponential backoff
-// Original: setInterval every 1 000 ms = 60 requests/min → HTTP 429 always
-// Fix: base interval 5 000 ms; on 429 double the delay up to 60 s, then
-// recover back toward 5 s on success.
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════
+// SECTION 11 — MULTIPLAYER DATA SOURCE
+//
+// Priority 1 — Internal (geofs.multiplayer live cache)
+//   GeoFS already maintains a real-time player list via its own WebSocket.
+//   Reading from it directly costs zero HTTP requests and has zero rate-limit
+//   risk. We probe several known property paths on geofs.multiplayer and
+//   normalise whichever one returns valid player objects.
+//
+// Priority 2 — REST fallback (mps.geo-fs.com/map)
+//   Used only when the internal cache is unavailable (e.g. multiplayer is
+//   disabled in the options, or GeoFS hasn't finished initialising yet).
+//   Retains full exponential backoff to handle HTTP 429 responses.
+// ═══════════════════════════════════════════════════
+
+// ── Shared speed-delta helper (used by both sources) ─────────────────────
+const prevAcData_rest = new Map(); // separate history map for REST path
+
+function _applySpeedDelta(ac, prevMap, now) {
+    if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
+    const id   = ac.id || ac.cs || `${Math.round(ac.co[0]*1000)},${Math.round(ac.co[1]*1000)}`;
+    const prev = prevMap.get(id);
+    if (prev) {
+        const dt = (now - prev.time) / 1000;
+        if (dt > FETCH_SPEED_DT_MIN && dt <= FETCH_SPEED_DT_MAX) {
+            const dLat = (ac.co[0] - prev.lat) * Math.PI / 180;
+            const dLon = (ac.co[1] - prev.lon) * Math.PI / 180;
+            const R    = 6371000;
+            const a    = Math.sin(dLat/2)**2
+                       + Math.cos(prev.lat * Math.PI/180)
+                       * Math.cos(ac.co[0]  * Math.PI/180)
+                       * Math.sin(dLon/2)**2;
+            const distM   = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const speedKt = (distM / dt) / 0.514444;
+            if (ac.s == null && speedKt <= 3000) ac._computedSpd = speedKt;
+            else if (ac.s == null && typeof prev._computedSpd === 'number') {
+                ac._computedSpd = prev._computedSpd;
+            }
+        } else if (ac.s == null && typeof prev._computedSpd === 'number') {
+            ac._computedSpd = prev._computedSpd;
+        }
+    }
+    prevMap.set(id, {
+        lat: ac.co[0], lon: ac.co[1], time: now,
+        ...(typeof ac._computedSpd === 'number' && { _computedSpd: ac._computedSpd }),
+    });
+}
+
+// ── Internal source — reads geofs.multiplayer directly ───────────────────
+// GeoFS stores other players in its multiplayer module. The exact property
+// path has varied across versions; we try all known paths in order.
+// Each player entry in the internal cache uses a different shape from the
+// REST API: position is in `llaLocation[]`, heading in `animationValue`,
+// speed in `animationValue.speed` etc.  `_normalizeInternal` converts this
+// to the same `co[]` / `h` / `s` shape that the rest of the radar expects.
+
+function _normalizeInternal(raw) {
+    if (!raw) return null;
+    try {
+        const ac = {};
+
+        // ── Session / callsign identity ──────────────────────────────────
+        ac.id = raw.id ?? raw.userId ?? raw.sessionId ?? null;
+        ac.cs = raw.callsign ?? raw.cs ?? null;
+
+        // ── Aircraft type ID ─────────────────────────────────────────────
+        ac.ac = raw.aircraftIndex ?? raw.ac ?? raw.aircraftId ?? null;
+
+        // ── Position — try llaLocation first, then co[] ──────────────────
+        if (Array.isArray(raw.llaLocation) && raw.llaLocation.length >= 2) {
+            const lat = parseFloat(raw.llaLocation[0]);
+            const lon = parseFloat(raw.llaLocation[1]);
+            const alt = parseFloat(raw.llaLocation[2]);
+            if (!isFinite(lat) || !isFinite(lon)) return null;
+            // co[2] in the REST API is metres; llaLocation[2] is also metres
+            ac.co = [lat, lon, isFinite(alt) ? alt : 0];
+            if (isFinite(alt)) ac.al = alt * 3.28084; // feet
+        } else if (Array.isArray(raw.co) && raw.co.length >= 2) {
+            ac.co = raw.co;
+        } else {
+            return null; // no position — skip
+        }
+
+        // ── Heading ──────────────────────────────────────────────────────
+        const hdg = raw.animationValue?.heading360
+                 ?? raw.animationValue?.heading
+                 ?? raw.heading
+                 ?? (Array.isArray(raw.co) && raw.co[3] != null ? raw.co[3] : null)
+                 ?? raw.h
+                 ?? null;
+        if (hdg != null && isFinite(parseFloat(hdg))) ac.h = parseFloat(hdg);
+
+        // ── Altitude (feet) — override if not set above ───────────────────
+        if (ac.al == null) {
+            const altFt = raw.animationValue?.altitude ?? raw.altitude ?? null;
+            if (altFt != null && isFinite(parseFloat(altFt))) ac.al = parseFloat(altFt);
+        }
+
+        // ── Speed (knots) ─────────────────────────────────────────────────
+        const spd = raw.animationValue?.speed           // kts in animation
+                 ?? raw.animationValue?.kias
+                 ?? raw.st?.as
+                 ?? raw.s
+                 ?? null;
+        if (spd != null && isFinite(parseFloat(spd))) ac.s = parseFloat(spd);
+
+        return ac;
+    } catch(e) {
+        return null;
+    }
+}
+
+// Returns an array of normalised aircraft objects from the internal GeoFS
+// multiplayer cache, or null if no suitable data was found.
+function _readInternalMultiplayer() {
+    try {
+        const mp = window.geofs?.multiplayer;
+        if (!mp) return null;
+
+        // Candidate property paths, tried in order
+        const candidates = [
+            mp._users,      // common in 3.x builds
+            mp.users,
+            mp._clients,
+            mp.clients,
+            mp._otherAircraft,
+            mp.otherAircraft,
+            mp._aircraft,
+        ];
+
+        for (const raw of candidates) {
+            if (!raw) continue;
+
+            let list;
+            if (raw instanceof Map) {
+                list = Array.from(raw.values());
+            } else if (Array.isArray(raw)) {
+                list = raw;
+            } else if (typeof raw === 'object') {
+                list = Object.values(raw);
+            } else {
+                continue;
+            }
+
+            if (!list.length) continue;
+
+            // Quick sanity-check: does the first item look like a player?
+            const sample = list[0];
+            const hasPos = Array.isArray(sample?.llaLocation) || Array.isArray(sample?.co);
+            if (!hasPos) continue;
+
+            // Normalise and filter out bad entries
+            const now  = Date.now();
+            const acList = [];
+            list.forEach(raw => {
+                const ac = _normalizeInternal(raw);
+                if (!ac) return;
+                _applySpeedDelta(ac, prevAcData, now);
+                acList.push(ac);
+            });
+
+            if (acList.length > 0) return acList;
+        }
+    } catch(e) {}
+    return null;
+}
+
+// ── Internal polling loop ─────────────────────────────────────────────────
+// Runs at the draw-interval cadence so blips update every frame.
+let _internalSourceActive = false;
+let _internalConsecutiveFails = 0;
+const INTERNAL_FAIL_THRESHOLD = 10; // give up on internal after N misses
+
+function _tickInternalSource() {
+    if (isGamePaused) return;
+    const result = _readInternalMultiplayer();
+    if (result !== null) {
+        aircraftListCache       = result;
+        _internalSourceActive   = true;
+        _internalConsecutiveFails = 0;
+        updateApiStatus(`Internal — ${result.length} aircraft (real-time)`, true);
+    } else {
+        _internalConsecutiveFails++;
+        if (_internalSourceActive && _internalConsecutiveFails >= INTERNAL_FAIL_THRESHOLD) {
+            // Internal source has gone away — restart REST fallback
+            _internalSourceActive = false;
+            updateApiStatus('Internal unavailable — switching to REST…', false);
+            scheduleFetch(FETCH_DELAY_BASE);
+        }
+    }
+}
+
+setInterval(_tickInternalSource, DRAW_INTERVAL);
+
+// ── REST fallback — polls mps.geo-fs.com/map when internal is unavailable ─
 let _fetchConsecutiveErrors = 0;
-let _fetchDelay = FETCH_DELAY_BASE; // current interval — grows on 429, shrinks on success
+let _fetchDelay = FETCH_DELAY_BASE;
 const FETCH_MIN = FETCH_DELAY_BASE;
 const FETCH_MAX = FETCH_DELAY_MAX;
 let _fetchTimer = null;
@@ -1633,12 +1543,17 @@ function scheduleFetch(delay) {
 }
 
 async function doFetch() {
+    // Skip REST entirely while the internal source is healthy
+    if (_internalSourceActive) {
+        scheduleFetch(2000); // check again in 2 s in case internal drops
+        return;
+    }
+
     if (!isGamePaused) {
         try {
             const res = await fetch('https://mps.geo-fs.com/map');
 
             if (res.status === 429) {
-                // Rate limited — double the delay
                 _fetchDelay = Math.min(_fetchDelay * 2, FETCH_MAX);
                 _fetchConsecutiveErrors++;
                 updateApiStatus(`429 Rate limited — retrying in ${_fetchDelay/1000}s (×${_fetchConsecutiveErrors})`, false);
@@ -1646,62 +1561,31 @@ async function doFetch() {
                 return;
             }
 
-            if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
-            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
             const data  = await res.json();
             const now   = Date.now();
             const users = (data.users || []).map(normalizeAc);
 
             users.forEach(ac => {
-                if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
-                const id   = ac.cs || `${Math.round(ac.co[0]*1000)},${Math.round(ac.co[1]*1000)}`;
-                const prev = prevAcData.get(id);
-                if (prev) {
-                    const dt = (now - prev.time) / 1000;
-                    if (dt > FETCH_SPEED_DT_MIN && dt <= FETCH_SPEED_DT_MAX) {
-                        const dLat = (ac.co[0] - prev.lat) * Math.PI / 180;
-                        const dLon = (ac.co[1] - prev.lon) * Math.PI / 180;
-                        const R    = 6371000;
-                        const a    = Math.sin(dLat/2)**2
-                                   + Math.cos(prev.lat * Math.PI/180)
-                                   * Math.cos(ac.co[0]  * Math.PI/180)
-                                   * Math.sin(dLon/2)**2;
-                        const distM   = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-                        const speedKt = (distM / dt) / 0.514444;
-                        // Only use position-delta speed if st.as is missing
-                        if (ac.s == null && speedKt <= 3000) ac._computedSpd = speedKt;
-                        else if (ac.s == null && typeof prev._computedSpd === 'number') {
-                            ac._computedSpd = prev._computedSpd;
-                        }
-                    } else if (ac.s == null && typeof prev._computedSpd === 'number') {
-                        ac._computedSpd = prev._computedSpd;
-                    }
-                }
-                prevAcData.set(id, {
-                    lat: ac.co[0], lon: ac.co[1], time: now,
-                    ...(typeof ac._computedSpd === 'number' && { _computedSpd: ac._computedSpd }),
-                });
+                _applySpeedDelta(ac, prevAcData_rest, now);
             });
 
-            aircraftListCache    = users;
+            aircraftListCache       = users;
             _fetchConsecutiveErrors = 0;
-            // Gradually recover toward minimum interval on success
             _fetchDelay = Math.max(FETCH_MIN, _fetchDelay * 0.75);
-            updateApiStatus(`OK — ${users.length} aircraft`, true);
+            updateApiStatus(`REST — ${users.length} aircraft`, true);
 
         } catch(e) {
             _fetchConsecutiveErrors++;
             _fetchDelay = Math.min(_fetchDelay * 1.5, FETCH_MAX);
             updateApiStatus(`Error (×${_fetchConsecutiveErrors}): ${e.message}`, false);
-            // Keep stale cache — don't wipe blips on a transient hiccup
         }
     }
     scheduleFetch(_fetchDelay);
 }
 
-// Kick off the first fetch
+// Kick off the initial REST fetch (internal source will suppress it once ready)
 scheduleFetch(FETCH_DELAY_INITIAL);
 
 // ═══════════════════════════════════════════════════
@@ -1801,9 +1685,8 @@ async function fetchAirportData() {
             }
         });
         lastAirportFetch = Date.now();
-        // FIX #5 — Force airport cache to rebuild on next draw after a re-fetch
         drawAirportsAndRunways._cachedGroups = null;
-        _airportCache_lastLat  = null; // force position-check to trigger rebuild
+        _airportCache_lastLat  = null;
         _airportCache_lastLon  = null;
         console.log(`OurAirports: ${airportCache.length} airports, ${runwayCache.length} runways`);
     } catch(e) { console.error('Airport fetch error:', e); }
@@ -1962,7 +1845,7 @@ function drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad) {
         const labelAnchorY = allPlaceholder
             ? (g.centY - 10)
             : (g.centY - g.circleR - 5);
-        ctx.font = 'bold 10px Arial';
+        ctx.font = `bold ${UI.airportLabelFont}px ${FONT_CANVAS}`;
         ctx.textAlign = 'center';
         const tw = ctx.measureText(name).width;
         ctx.fillStyle = 'rgba(0,18,50,0.78)';
@@ -2036,19 +1919,6 @@ function drawRadar() {
     ctx.fillStyle = t.bg;
     ctx.fill();
 
-    // ─────────────────────────────────────────────────────────────────────
-    // FIX #1 + FIX #2 — Own-aircraft position with last-valid fallback
-    //
-    // Original code:
-    //   • Declared _lastValidLat/Lon at the top but NEVER wrote or read them
-    //   • Gated the entire traffic render on `player` being truthy
-    //
-    // Fix:
-    //   • Write _lastValidLat/Lon every frame when geofs gives us a valid position
-    //   • Use those stored values when geofs.aircraft.instance is temporarily null
-    //   • Gate traffic on `hasPos` (position available) not `player` (live object)
-    //     so blips keep rendering through brief instance-null gaps (loading, respawn)
-    // ─────────────────────────────────────────────────────────────────────
     let player = null, playerHeading = 0, playerCallsign = 'YOU';
     let playerLat = 0, playerLon = 0, playerAlt = 0, playerAltFt = 0;
 
@@ -2062,7 +1932,6 @@ function drawRadar() {
             playerAlt      = player.llaLocation[2];
             playerAltFt    = geofs.animation?.values?.altitude || (playerAlt * 3.28084);
 
-            // FIX #1 — Actually store the last valid position (was declared but never written)
             if (isFinite(playerLat) && isFinite(playerLon) && (playerLat !== 0 || playerLon !== 0)) {
                 _lastValidLat   = playerLat;
                 _lastValidLon   = playerLon;
@@ -2071,8 +1940,6 @@ function drawRadar() {
         }
     } catch(e) {}
 
-    // FIX #2 — Fall back to last-known position when instance is temporarily unavailable
-    // This means blips continue to render during brief null-instance windows.
     const hasPos = !!player || (_lastValidLat !== null);
     if (!player && _lastValidLat !== null) {
         playerLat   = _lastValidLat;
@@ -2080,9 +1947,6 @@ function drawRadar() {
         playerAltFt = _lastValidAltFt;
     }
 
-    // FIX #3 — Always read live callsign; never freeze it from a one-time set.
-    // Now we refresh it every second from detectCallsign() which reads the live
-    // geofs fields each time, falling back to cached value only if geofs is unavailable.
     const _now = Date.now();
     if (_now - _lastMenuInfoUpdate > MENU_INFO_UPDATE_INTERVAL) {
         _lastMenuInfoUpdate = _now;
@@ -2091,10 +1955,8 @@ function drawRadar() {
     }
     const displayCallsign = _cachedCallsign || playerCallsign;
 
-    // Update menu info rows (once/sec, same throttle as callsign refresh above)
     {
-        const _playerAcName = getPlayerAircraftName();
-        updateMenuInfoCallsign(displayCallsign, hasPos ? playerLat : null, hasPos ? playerLon : null, _playerAcName);
+        updateMenuInfoCallsign(displayCallsign, hasPos ? playerLat : null, hasPos ? playerLon : null);
     }
 
     const myData = hasPos ? {
@@ -2130,7 +1992,7 @@ function drawRadar() {
                 const lbl  = dist >= 1000
                     ? (dist/1000).toFixed(dist%1000===0?0:1)+' km'
                     : Math.round(dist)+' m';
-                ctx.font = `bold ${UI.ringLabelFont}px Arial`;
+                ctx.font = `bold ${UI.ringLabelFont}px ${FONT_CANVAS}`;
                 const tw = ctx.measureText(lbl).width;
                 const lx = cx + 8;
                 const ly = cy - rr + 10;
@@ -2148,7 +2010,7 @@ function drawRadar() {
     {
         const dirs  = ['N','E','S','W'];
         const edgeR = radarSize/2 - 16;
-        ctx.font         = `bold ${UI.compassFont}px Arial`;
+        ctx.font         = `bold ${UI.compassFont}px ${FONT_CANVAS}`;
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
 
@@ -2166,7 +2028,7 @@ function drawRadar() {
         });
 
         if (settings.orientMode === 'track') {
-            ctx.font      = `bold ${UI.compassHdgFont}px Arial`;
+            ctx.font      = `bold ${UI.compassHdgFont}px ${FONT_CANVAS}`;
             ctx.fillStyle = 'rgba(180,180,180,0.55)';
             ctx.fillText(`HDG ${Math.round(playerHeading).toString().padStart(3,'0')}°`, cx, 30);
         }
@@ -2192,10 +2054,8 @@ function drawRadar() {
             try {
                 if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
 
-                // Self-filter: skip own aircraft (callsign match)
                 if (ac.cs && myCs && myCs !== 'YOU' && ac.cs.toLowerCase() === myCs.toLowerCase()) return;
 
-                // Isolate mode: when tracking, only draw the tracked aircraft
                 if (_trackedId && settings.isolateTracked && ac.id !== _trackedId) return;
 
                 const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
@@ -2240,7 +2100,6 @@ function drawRadar() {
                 const blipColor  = isTrackedBlip ? 'rgba(255,220,60,1)' : T().blipFill;
                 const blipStroke = isTrackedBlip ? 'rgba(255,240,120,0.9)' : 'rgba(255,255,255,0.7)';
 
-                // Selection ring for tracked aircraft
                 if (isTrackedBlip) {
                     ctx.beginPath();
                     ctx.arc(rx, ry, (settings.showBlipTriangle && isFinite(acH) ? UI.blipTriTip : UI.blipDotR) + 7, 0, Math.PI*2);
@@ -2279,7 +2138,7 @@ function drawRadar() {
                 let labelY = blipBottom;
                 ctx.textAlign    = 'center';
                 ctx.textBaseline = 'top';
-                ctx.font = `bold ${UI.blipLabelFont}px Arial`;
+                ctx.font = `bold ${UI.blipLabelFont}px ${FONT_CANVAS}`;
 
                 function drawTag(text, color, yOff) {
                     const tw   = ctx.measureText(text).width;
@@ -2292,14 +2151,8 @@ function drawRadar() {
                     return yOff + rowH;
                 }
 
-                // showCallsign = OTHER players' callsigns only
                 if (settings.showCallsign && ac.cs) {
                     labelY = drawTag(ac.cs.substring(0, 12), T().blipLabel, labelY);
-                }
-
-                // showAircraftName = OTHER players' aircraft types only
-                if (settings.showAircraftName && ac._shortName) {
-                    labelY = drawTag(ac._shortName, T().blipAlt, labelY);
                 }
 
                 const rawAlt = isFinite(parseFloat(ac.al))
@@ -2331,11 +2184,11 @@ function drawRadar() {
 
     ctx.restore(); // end circle clip
 
-    // ── Player callsign tag (showMyCallsign) ──────
+    // ── Player callsign tag ───────────────────────
     let _playerTagBottomY = cy + UI.playerTriBaseOff + UI.playerTriTip + 13;
     if (settings.showMyCallsign && displayCallsign) {
         const lbl = displayCallsign.substring(0, 12);
-        ctx.font = `bold ${UI.playerCsFont}px Arial`;
+        ctx.font = `bold ${UI.playerCsFont}px ${FONT_CANVAS}`;
         const tw = ctx.measureText(lbl).width;
         const ty = _playerTagBottomY;
         ctx.fillStyle   = isGamePaused ? 'rgba(80,80,80,0.85)' : 'rgba(0,80,0,0.85)';
@@ -2348,25 +2201,11 @@ function drawRadar() {
         _playerTagBottomY = ty + 14;
     }
 
-    // ── Player aircraft type tag (showMyAircraftType) ─
-    if (settings.showMyAircraftType) {
-        const acName = getPlayerAircraftName();
-        if (acName) {
-            ctx.font = `bold ${UI.playerDistFont}px Arial`;
-            const tw3 = ctx.measureText(acName).width;
-            const ty3 = _playerTagBottomY + 3;
-            ctx.fillStyle = 'rgba(0,0,0,0.65)';
-            ctx.fillRect(cx - tw3/2 - 6, ty3 - 10, tw3 + 12, 18);
-            ctx.fillStyle   = T().blipAlt;
-            ctx.textAlign   = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText(acName, cx, ty3);
-        }
-    }
-
+    // ── Player aircraft type tag ──────────────────
     // ── Paused overlay ───────────────────────────
     if (isGamePaused) {
         ctx.fillStyle = T().pauseText;
-        ctx.font = `bold ${UI.pausedFont}px Arial`; ctx.textAlign = 'center';
+        ctx.font = `bold ${UI.pausedFont}px ${FONT_CANVAS}`; ctx.textAlign = 'center';
         ctx.fillText('PAUSED', cx, radarSize - 30);
     }
 
@@ -2378,7 +2217,6 @@ function drawRadar() {
         const _hudNow = Date.now();
 
         if (_trackedId) {
-            // Refresh the tracked aircraft from the live cache by session ID
             const freshTracked = refreshTracked();
             const trackKey = freshTracked ? freshTracked.id : _trackedId;
             if (trackKey !== _lastNearestCs || _hudNow - _lastHudUpdate > HUD_UPDATE_INTERVAL) {
