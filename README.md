@@ -3,7 +3,7 @@
 A Tampermonkey userscript that adds an ATC-style radar overlay to [GeoFS](https://www.geo-fs.com/geofs.php?v=3.9). Displays all nearby multiplayer aircraft in real time with callsigns, altitudes, speeds, headings, velocity vectors, range rings, and airport/runway data — all on a draggable circular canvas directly in-game.
 
 ---
-
+ 
 ## Installation
 
 1. Install the [Tampermonkey](https://www.tampermonkey.net/) browser extension.
