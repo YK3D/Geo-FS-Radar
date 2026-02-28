@@ -1,62 +1,150 @@
 // ==UserScript==
 // @name         GeoFS Radar
 // @namespace    http://tampermonkey.net/
-// @version      8.02-fix
-// @description  On screen radar for GeoFS with menu, TCAS vectors, night mode, track-up, blip popups, nearest player HUD
-// @author       Massiv4515 & YK3D  (bugs fixed by patch 8.02)
+// @version      8.04
+// @description  Radar for GeoFS
+// @author       YK3D
 // @match        https://www.geo-fs.com/geofs.php?v=3.9
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=geo-fs.com
 // @grant        none
 // ==/UserScript==
 
 // ═══════════════════════════════════════════════════
-// SECTION 1 — CONSTANTS & STATE
+// SECTION 1 — RADAR CONSTANTS
 // ═══════════════════════════════════════════════════
 
-const radarSize       = 450;
-const MIN_RANGE       = 500;
-const MAX_RANGE       = 40000;
-const SCROLL_INC      = 500;
-const AIRPORT_REFETCH = 30000;
+const radarSize  = 450;   // px — canvas width and height (circle diameter)
+const MIN_RANGE  = 500;   // m  — minimum radar range (innermost zoom)
+const MAX_RANGE  = 50000; // m  — maximum radar range (outermost zoom)
+const SCROLL_INC = 500;   // m  — range change per scroll wheel tick
 
 // ═══════════════════════════════════════════════════
-// SECTION 1b — UI CONFIGURATION
+// SECTION 1b — TIMING & INTERVALS
+// All delays and poll rates live here so they are easy to tune.
+// All values are in milliseconds unless noted otherwise.
+// ═══════════════════════════════════════════════════
+
+// ── Multiplayer map fetch (mps.geo-fs.com/map) ────────────────────────────
+// Fetching too fast triggers HTTP 429 (Too Many Requests).
+// The scheduler uses exponential backoff: on each 429 the delay is doubled
+// up to FETCH_DELAY_MAX, then recovers toward FETCH_DELAY_BASE on success.
+const FETCH_DELAY_BASE    =  200; // ms — normal poll interval
+const FETCH_DELAY_MAX     =  1000; // ms — longest back-off delay after repeated 429s
+const FETCH_DELAY_INITIAL =   500; // ms — delay before the very first fetch after page load
+// Speed-delta window: position snapshots outside this range are discarded when
+// computing ground speed from successive positions (avoids bad readings on
+// teleport / first-seen aircraft).
+const FETCH_SPEED_DT_MIN  =   0.5; // seconds — ignore snapshots closer than this
+const FETCH_SPEED_DT_MAX  =  30;   // seconds — ignore snapshots further apart than this
+
+// ── Airport / runway data (ourairports-data CDN) ──────────────────────────
+const AIRPORT_FETCH_INITIAL  =  2000; // ms — delay before the first airport fetch
+const AIRPORT_REFETCH        = 300000; // ms — how often to re-fetch airport data (5 min)
+
+// ── Draw loop ─────────────────────────────────────────────────────────────
+// Radar does not need 60 fps. 120 ms ≈ 8 fps is smooth enough for ATC-style
+// display while using ~85 % less CPU than requestAnimationFrame.
+const DRAW_INTERVAL          =   120; // ms — main radar canvas redraw interval
+
+// ── Pause / game-state poll ───────────────────────────────────────────────
+const PAUSE_POLL_INTERVAL    =   500; // ms — how often to check geofs.gui.pause
+
+// ── UI reposition poll ────────────────────────────────────────────────────
+// Repositions the range box, menu button, and nearest HUD relative to the
+// radar canvas. Runs on a slow timer as a safety net (drag handles the rest).
+const REPOSITION_INTERVAL    =  1000; // ms
+
+// ── In-frame throttles ────────────────────────────────────────────────────
+// These limit how often expensive DOM operations run inside the draw loop.
+const MENU_INFO_UPDATE_INTERVAL =  1000; // ms — callsign / position readout in menu
+const HUD_UPDATE_INTERVAL       =   500; // ms — nearest-aircraft HUD panel HTML rebuild
+
+// ── Radar initialisation delay ────────────────────────────────────────────
+// Gives the GeoFS page time to finish its own setup before the radar reads
+// geofs.aircraft, creates the menu, and positions the UI.
+const INIT_DELAY             =   300; // ms — setTimeout before createMenu / loadPosition
+
+// ── Drag: reposition safety timeout ──────────────────────────────────────
+const DRAG_REPOSITION_DELAY  =   120; // ms — setTimeout(repositionUI) after loadPosition
+
+// ── Scan-line animation ───────────────────────────────────────────────────
+// Angle (radians) added to the sweep line on every draw frame.
+// At DRAW_INTERVAL = 120 ms this gives one full rotation every ~2.5 s.
+// Increase for a faster sweep; decrease for a slower one.
+const SPIN_SPEED             =  0.1; // rad per frame
+
+// ═══════════════════════════════════════════════════
+// SECTION 1c — UI CONFIGURATION
+// All sizes are logical CSS / canvas pixels.
+// Edit these values to customise the look without touching drawing code.
 // ═══════════════════════════════════════════════════
 const UI = {
-    blipDotR:            5,
-    blipDotRActive:      8,
-    blipTriTip:          13,
-    blipTriBase:         7,
-    blipLabelFont:       13,
-    blipLabelRowH:       18,
-    blipLabelPadX:       4,
-    ringLineW:           6,
-    ringLabelFont:       15,
-    compassFont:         22,
-    compassHdgFont:      14,
-    playerTriTip:        15,
-    playerTriBase:       8,
-    playerTriBaseOff:    8,
-    playerCsFont:        15,
-    playerDistFont:      14,
-    rangeBoxW:           130,
-    rangeBoxH:           54,
-    rangeBoxFont:        20,
-    menuW:               280,
-    menuTitleFont:       15,
-    menuSectionFont:     11,
-    menuRowFont:         14,
-    menuRowPadY:         7,
-    menuSwitchW:         40,
-    menuSwitchH:         22,
-    menuKnobSize:        14,
-    menuRadioFont:       12,
-    menuInfoFont:        13,
-    popupTitleFont:      16,
-    popupBodyFont:       14,
-    vectorLineW:         1.5,
-    pausedFont:          22,
-    gridLineW:           1,
+
+    // ── Other-aircraft blip — dot mode ───────────────────────────────────
+    // Used when 'Traffic Triangles' is disabled or the aircraft has no heading.
+    blipDotR:            5,   // px — radius of a normal blip dot
+    blipDotRActive:      8,   // px — radius when a popup is open on that blip
+
+    // ── Other-aircraft blip — triangle mode ──────────────────────────────
+    // A directional isosceles triangle pointing in the aircraft's heading.
+    blipTriTip:          11,  // px — distance from centre to the nose (forward point)
+    blipTriBase:         6,   // px — half-width of the rear base of the triangle
+
+    // ── Blip label tags (callsign / altitude / speed / distance rows) ─────
+    blipLabelFont:       11,  // px — font size for all blip label text
+    blipLabelRowH:       18,  // px — vertical height allocated per label row
+    blipLabelPadX:       4,   // px — horizontal padding inside each label background
+
+    // ── Range rings ───────────────────────────────────────────────────────
+    // Three concentric circles drawn at 1/3, 2/3 and 3/3 of radarRange.
+    ringLineW:           6,   // px — stroke width of each ring
+    ringLabelFont:       15,  // px — font size for the distance label on each ring
+
+    // ── Compass cardinal letters (N / E / S / W) ──────────────────────────
+    compassFont:         22,  // px — size of the N / E / S / W letters on the rim
+    compassHdgFont:      14,  // px — size of the 'HDG 045°' readout in track-up mode
+
+    // ── Own-aircraft triangle ─────────────────────────────────────────────
+    // Always drawn at the canvas centre, points in the aircraft's heading.
+    playerTriTip:        15,  // px — distance from centre to the nose
+    playerTriBase:       8,   // px — half-width of the rear base
+    playerTriBaseOff:    8,   // px — how far the base sits behind centre
+
+    // ── Own-aircraft labels ───────────────────────────────────────────────
+    playerCsFont:        15,  // px — font size for the own-callsign tag below the triangle
+    playerDistFont:      14,  // px — font size for the nearest-aircraft distance label
+
+    // ── Range display box ─────────────────────────────────────────────────
+    // Floating pill above the radar showing current range (e.g. "5.0 km").
+    rangeBoxW:           130, // px — width of the range box
+    rangeBoxH:           54,  // px — height of the range box
+    rangeBoxFont:        20,  // px — font size for the range value
+
+    // ── Settings menu panel ───────────────────────────────────────────────
+    menuW:               280, // px — width of the slide-out settings panel
+    menuTitleFont:       15,  // px — 'RADAR SETTINGS' header text
+    menuSectionFont:     11,  // px — section divider labels (DISPLAY, TRAFFIC, …)
+    menuRowFont:         14,  // px — toggle / radio button row labels
+    menuRowPadY:         7,   // px — top + bottom padding for each menu row
+    menuSwitchW:         40,  // px — width  of a toggle switch track
+    menuSwitchH:         22,  // px — height of a toggle switch track
+    menuKnobSize:        14,  // px — diameter of the toggle switch knob
+    menuRadioFont:       12,  // px — font size for radio button pair labels (GS / IAS, N↑ / TRK↑)
+    menuInfoFont:        13,  // px — font size for read-only info rows (callsign, position, API status)
+
+    // ── Click-to-inspect popup ────────────────────────────────────────────
+    // Appears when you click a blip; shows callsign, distance, bearing, alt, speed, heading.
+    popupTitleFont:      16,  // px — callsign line at the top of the popup
+    popupBodyFont:       14,  // px — data rows inside the popup
+
+    // ── TCAS velocity vectors ─────────────────────────────────────────────
+    // Dashed lines projecting from each blip in its heading direction,
+    // scaled to represent ~30 s of travel at current ground speed.
+    vectorLineW:         1.5, // px — stroke width of the velocity vector line
+
+    // ── Miscellaneous ─────────────────────────────────────────────────────
+    pausedFont:          22,  // px — 'PAUSED' overlay text when the game is paused
+    gridLineW:           1,   // px — cross-hair grid lines through the canvas centre
 };
 
 let radarRange   = parseInt(localStorage.getItem('radarRange') || '5000');
@@ -84,13 +172,19 @@ const settings = {
     orientMode:         'north',
     nightMode:          false,
     showAirports:       true,
-    showCallsign:       true,
+    // Traffic (other aircraft) display controls
+    showCallsign:       true,   // show OTHER players' callsigns on blips
+    showAircraftName:   true,   // show OTHER players' aircraft type on blips
     showPlayerTriangle: true,
-    showNearestHUD:     true,
-    showDistLabel:      true,
+    showNearestHUD:     true,   // show the Tracking / Nearby Traffic HUD panel
     showTraffic:        true,
     showBlipTriangle:   true,
     showBlipDist:       true,
+    // My Aircraft display controls (canvas labels on own triangle)
+    showMyCallsign:     true,   // show own callsign tag on canvas
+    showMyAircraftType: true,   // show own aircraft type tag on canvas
+    // Tracking behaviour
+    isolateTracked:     false,  // when tracking, hide all blips except the tracked one
 };
 
 try {
@@ -112,70 +206,140 @@ function saveSettings() {
 // ── Colour theme ─────────────────────────────────────
 const THEMES = {
     normal: {
-        bg:          'rgba(0, 20, 0, 0.85)',
-        ring:        'rgba(0, 255, 0, 0.22)',
-        ringLabel:   'rgba(0, 255, 0, 0.7)',
-        grid:        'rgba(0, 255, 0, 0.15)',
-        compass:     'rgba(0, 255, 0, 0.75)',
-        scanLine:    ['rgba(0,255,0,0.8)', 'rgba(0,255,0,0.3)'],
-        trailColor:  (a) => `rgba(0,255,0,${a})`,
-        playerFill:  'rgba(0, 255, 0, 0.9)',
-        playerLabel: 'rgba(0, 255, 0, 0.9)',
-        blipFill:    'rgba(255, 60, 60, 1)',
-        blipGlow:    'rgba(255, 60, 60, 0.8)',
-        blipLabel:   'rgba(255, 255, 255, 0.95)',
-        blipAlt:     'rgba(0, 240, 255, 0.95)',
-        blipSpeed:   'rgba(255, 220, 80, 0.95)',
-        vector:      'rgba(255, 200, 50, 0.85)',
-        canvasBorder:'rgba(255,255,255,0.3)',
-        canvasGlow:  '0 0 15px rgba(0,255,0,0.5)',
-        infoBox:     'rgba(0,0,0,0.7)',
-        infoBorder:  'rgba(0,255,0,0.5)',
-        infoText:    'rgba(0,255,0,0.9)',
-        pauseText:   'rgba(255,255,0,0.8)',
-        hudBg:       'rgba(0,12,0,0.92)',
-        hudBorder:   'rgba(0,255,0,0.35)',
-        hudTitle:    '#00ff88',
-        hudLabel:    'rgba(0,200,0,0.7)',
-        hudValue:    'rgba(200,255,200,0.95)',
-        hudAlt:      'rgba(0,240,255,0.95)',
-        hudSpeed:    'rgba(255,220,80,0.95)',
-        hudDist:     'rgba(255,160,40,0.95)',
-        hudHdg:      'rgba(180,255,180,0.9)',
-        hudSep:      'rgba(0,255,0,0.12)',
+        bg:            'rgba(0, 20, 0, 0.85)',
+        ring:          'rgba(0, 255, 0, 0.22)',
+        ringLabel:     'rgba(0, 255, 0, 0.7)',
+        grid:          'rgba(0, 255, 0, 0.15)',
+        compass:       'rgba(0, 255, 0, 0.75)',
+        scanLine:      ['rgba(0,255,0,0.8)', 'rgba(0,255,0,0.3)'],
+        trailColor:    (a) => `rgba(0,255,0,${a})`,
+        playerFill:    'rgba(0, 255, 0, 0.9)',
+        playerLabel:   'rgba(0, 255, 0, 0.9)',
+        blipFill:      'rgba(255, 60, 60, 1)',
+        blipGlow:      'rgba(255, 60, 60, 0.8)',
+        blipLabel:     'rgba(255, 255, 255, 0.95)',
+        blipAlt:       'rgba(0, 240, 255, 0.95)',
+        blipSpeed:     'rgba(255, 220, 80, 0.95)',
+        vector:        'rgba(255, 200, 50, 0.85)',
+        canvasBorder:  'rgba(255,255,255,0.3)',
+        canvasGlow:    '0 0 15px rgba(0,255,0,0.5)',
+        infoBox:       'rgba(0,0,0,0.7)',
+        infoBorder:    'rgba(0,255,0,0.5)',
+        infoText:      'rgba(0,255,0,0.9)',
+        pauseText:     'rgba(255,255,0,0.8)',
+        hudBg:         'rgba(0,12,0,0.92)',
+        hudBorder:     'rgba(0,255,0,0.35)',
+        hudTitle:      '#00ff88',
+        hudLabel:      'rgba(0,200,0,0.7)',
+        hudValue:      'rgba(200,255,200,0.95)',
+        hudAlt:        'rgba(0,240,255,0.95)',
+        hudSpeed:      'rgba(255,220,80,0.95)',
+        hudDist:       'rgba(255,160,40,0.95)',
+        hudHdg:        'rgba(180,255,180,0.9)',
+        hudSep:        'rgba(0,255,0,0.12)',
+        // Menu chrome
+        menuBg:        'rgba(0,12,0,0.97)',
+        menuBorder:    'rgba(0,255,0,0.35)',
+        menuTitle:     'rgba(0,255,0,0.9)',
+        menuSection:   'rgba(0,255,0,0.5)',
+        menuRow:       'rgba(200,255,200,0.9)',
+        menuRowHover:  'rgba(0,255,0,0.07)',
+        menuSep:       'rgba(0,255,0,0.1)',
+        menuInfo:      'rgba(150,200,150,0.7)',
+        menuInfoVal:   'rgba(0,255,0,0.9)',
+        menuStatus:    'rgba(0,200,0,0.8)',
+        menuScrollbar: 'rgba(0,200,0,0.4) rgba(0,30,0,0.5)',
+        switchOn:      'rgba(0,200,0,0.75)',
+        switchOff:     'rgba(80,80,80,0.5)',
+        switchBorder:  'rgba(0,255,0,0.3)',
+        knobOn:        '#0f0',
+        knobOff:       '#888',
+        radioBtnOn:    'rgba(0,180,0,0.5)',
+        radioBtnOff:   'rgba(0,40,0,0.5)',
+        radioTextOn:   '#0f0',
+        radioTextOff:  'rgba(150,200,150,0.7)',
+        radioBorder:   'rgba(0,255,0,0.3)',
+        // Range box
+        rangeBoxBg:    'rgba(0,40,0,0.82)',
+        rangeBoxBorder:'rgba(0,255,0,0.6)',
+        rangeBoxGlow:  '0 0 12px rgba(0,255,0,0.35)',
+        rangeVal:      '#0f0',
+        rangeValGlow:  '0 0 5px rgba(0,255,0,0.6)',
+        rangeLabel:    'rgba(0,255,0,0.7)',
+        // Menu button
+        menuBtnBg:     'rgba(0,60,0,0.92)',
+        menuBtnBgHov:  'rgba(0,100,0,0.95)',
+        menuBtnColor:  '#0f0',
+        menuBtnBorder: 'rgba(0,255,0,0.5)',
+        menuBtnGlow:   '0 0 10px rgba(0,255,0,0.4)',
     },
     night: {
-        bg:          'rgba(10, 0, 0, 0.9)',
-        ring:        'rgba(200, 40, 40, 0.2)',
-        ringLabel:   'rgba(200, 50, 50, 0.7)',
-        grid:        'rgba(180, 30, 30, 0.15)',
-        compass:     'rgba(200, 50, 50, 0.75)',
-        scanLine:    ['rgba(200,40,40,0.7)', 'rgba(180,30,30,0.2)'],
-        trailColor:  (a) => `rgba(180,30,30,${a})`,
-        playerFill:  'rgba(220, 80, 80, 0.9)',
-        playerLabel: 'rgba(220, 80, 80, 0.9)',
-        blipFill:    'rgba(255, 120, 60, 1)',
-        blipGlow:    'rgba(255, 100, 50, 0.7)',
-        blipLabel:   'rgba(255, 200, 180, 0.95)',
-        blipAlt:     'rgba(255, 170, 100, 0.95)',
-        blipSpeed:   'rgba(255, 220, 120, 0.95)',
-        vector:      'rgba(255, 160, 60, 0.8)',
-        canvasBorder:'rgba(180,50,50,0.4)',
-        canvasGlow:  '0 0 12px rgba(180,30,30,0.5)',
-        infoBox:     'rgba(20,0,0,0.8)',
-        infoBorder:  'rgba(180,40,40,0.5)',
-        infoText:    'rgba(200,80,80,0.9)',
-        pauseText:   'rgba(255,200,50,0.8)',
-        hudBg:       'rgba(20,5,0,0.94)',
-        hudBorder:   'rgba(180,60,40,0.45)',
-        hudTitle:    'rgba(255,140,80,0.95)',
-        hudLabel:    'rgba(180,70,50,0.75)',
-        hudValue:    'rgba(255,200,180,0.95)',
-        hudAlt:      'rgba(255,170,100,0.95)',
-        hudSpeed:    'rgba(255,220,100,0.95)',
-        hudDist:     'rgba(255,130,60,0.95)',
-        hudHdg:      'rgba(220,160,130,0.9)',
-        hudSep:      'rgba(180,50,30,0.15)',
+        bg:            'rgba(15, 0, 0, 0.93)',
+        ring:          'rgba(255, 40, 40, 0.35)',
+        ringLabel:     'rgba(255, 80, 80, 0.85)',
+        grid:          'rgba(220, 30, 30, 0.25)',
+        compass:       'rgba(255, 70, 70, 0.9)',
+        scanLine:      ['rgba(255,50,50,0.9)', 'rgba(200,30,30,0.3)'],
+        trailColor:    (a) => `rgba(220,40,40,${a})`,
+        playerFill:    'rgba(255, 90, 90, 0.95)',
+        playerLabel:   'rgba(255, 90, 90, 0.95)',
+        blipFill:      'rgba(255, 140, 60, 1)',
+        blipGlow:      'rgba(255, 80, 40, 0.9)',
+        blipLabel:     'rgba(255, 210, 200, 0.98)',
+        blipAlt:       'rgba(255, 180, 110, 0.98)',
+        blipSpeed:     'rgba(255, 230, 130, 0.98)',
+        vector:        'rgba(255, 170, 70, 0.9)',
+        canvasBorder:  'rgba(255, 60, 60, 0.75)',
+        canvasGlow:    '0 0 28px rgba(255,30,30,0.85), 0 0 8px rgba(255,60,60,0.6)',
+        infoBox:       'rgba(25,0,0,0.88)',
+        infoBorder:    'rgba(220,50,50,0.65)',
+        infoText:      'rgba(255,100,100,0.95)',
+        pauseText:     'rgba(255,210,60,0.9)',
+        hudBg:         'rgba(22,4,0,0.96)',
+        hudBorder:     'rgba(220,60,40,0.65)',
+        hudTitle:      'rgba(255,150,90,0.98)',
+        hudLabel:      'rgba(200,80,60,0.85)',
+        hudValue:      'rgba(255,210,195,0.98)',
+        hudAlt:        'rgba(255,180,110,0.98)',
+        hudSpeed:      'rgba(255,230,110,0.98)',
+        hudDist:       'rgba(255,140,70,0.98)',
+        hudHdg:        'rgba(235,170,145,0.95)',
+        hudSep:        'rgba(200,50,30,0.22)',
+        // Menu chrome
+        menuBg:        'rgba(22,4,0,0.97)',
+        menuBorder:    'rgba(220,60,40,0.55)',
+        menuTitle:     'rgba(255,120,80,0.95)',
+        menuSection:   'rgba(200,80,50,0.65)',
+        menuRow:       'rgba(255,200,180,0.9)',
+        menuRowHover:  'rgba(255,60,30,0.08)',
+        menuSep:       'rgba(200,50,30,0.2)',
+        menuInfo:      'rgba(180,100,70,0.75)',
+        menuInfoVal:   'rgba(255,160,100,0.95)',
+        menuStatus:    'rgba(220,120,80,0.85)',
+        menuScrollbar: 'rgba(200,60,40,0.5) rgba(30,5,0,0.6)',
+        switchOn:      'rgba(200,60,30,0.8)',
+        switchOff:     'rgba(80,40,30,0.55)',
+        switchBorder:  'rgba(220,80,50,0.4)',
+        knobOn:        'rgba(255,140,80,1)',
+        knobOff:       'rgba(120,70,50,1)',
+        radioBtnOn:    'rgba(180,50,20,0.6)',
+        radioBtnOff:   'rgba(40,10,0,0.6)',
+        radioTextOn:   'rgba(255,160,80,1)',
+        radioTextOff:  'rgba(160,90,60,0.8)',
+        radioBorder:   'rgba(200,70,40,0.4)',
+        // Range box
+        rangeBoxBg:    'rgba(30,5,0,0.88)',
+        rangeBoxBorder:'rgba(220,60,40,0.7)',
+        rangeBoxGlow:  '0 0 14px rgba(220,40,20,0.5)',
+        rangeVal:      'rgba(255,140,80,1)',
+        rangeValGlow:  '0 0 6px rgba(220,60,20,0.7)',
+        rangeLabel:    'rgba(200,90,60,0.8)',
+        // Menu button
+        menuBtnBg:     'rgba(40,8,0,0.92)',
+        menuBtnBgHov:  'rgba(70,15,0,0.95)',
+        menuBtnColor:  'rgba(255,120,70,1)',
+        menuBtnBorder: 'rgba(220,70,40,0.6)',
+        menuBtnGlow:   '0 0 12px rgba(200,40,20,0.5)',
     }
 };
 
@@ -183,9 +347,108 @@ function T() { return settings.nightMode ? THEMES.night : THEMES.normal; }
 
 function applyTheme() {
     const t = T();
-    radarCanvas.style.border     = `2px solid ${t.canvasBorder}`;
-    radarCanvas.style.boxShadow  = t.canvasGlow;
-    updateNearestHUD(null, null);
+
+    // ── Canvas border / glow ────────────────────────────────────────────
+    radarCanvas.style.border    = `2px solid ${t.canvasBorder}`;
+    radarCanvas.style.boxShadow = t.canvasGlow;
+
+    // ── Range box ───────────────────────────────────────────────────────
+    const rb = document.getElementById('radarRangeBox');
+    if (rb) {
+        rb.style.background = t.rangeBoxBg;
+        rb.style.border     = `1.5px solid ${t.rangeBoxBorder}`;
+        rb.style.boxShadow  = t.rangeBoxGlow;
+        const rv = document.getElementById('rangeVal');
+        if (rv) {
+            rv.style.color      = t.rangeVal;
+            rv.style.textShadow = t.rangeValGlow;
+        }
+        const rl = rb.querySelector('span:last-child');
+        if (rl && rl.id !== 'rangeVal') rl.style.color = t.rangeLabel;
+    }
+
+    // ── Menu button ─────────────────────────────────────────────────────
+    const mb = document.getElementById('radarMenuBtn');
+    if (mb) {
+        mb.style.background = t.menuBtnBg;
+        mb.style.color      = t.menuBtnColor;
+        mb.style.border     = `1.5px solid ${t.menuBtnBorder}`;
+        mb.style.boxShadow  = t.menuBtnGlow;
+        mb.onmouseover = () => mb.style.background = t.menuBtnBgHov;
+        mb.onmouseout  = () => mb.style.background = t.menuBtnBg;
+    }
+
+    // ── Settings panel ──────────────────────────────────────────────────
+    const mp = document.getElementById('radarMenuPanel');
+    if (mp) {
+        mp.style.background    = t.menuBg;
+        mp.style.border        = `1.5px solid ${t.menuBorder}`;
+        mp.style.scrollbarColor = t.menuScrollbar;
+
+        // Title
+        const titleEl = mp.querySelector('[data-menu-title]');
+        if (titleEl) {
+            titleEl.style.color       = t.menuTitle;
+            titleEl.style.borderColor = t.menuSep;
+        }
+
+        // Section headers
+        mp.querySelectorAll('[data-menu-section]').forEach(el => {
+            el.style.color = t.menuSection;
+        });
+
+        // Separator lines
+        mp.querySelectorAll('[data-menu-sep]').forEach(el => {
+            el.style.borderTopColor = t.menuSep;
+        });
+
+        // Toggle rows
+        mp.querySelectorAll('[data-menu-row]').forEach(el => {
+            el.style.color = t.menuRow;
+            el.onmouseover = () => el.style.background = t.menuRowHover;
+            el.onmouseout  = () => el.style.background = '';
+            const lbl = el.querySelector('[data-menu-rowlbl]');
+            if (lbl) lbl.style.color = t.menuRow;
+            const sw = el.querySelector('[data-menu-sw]');
+            const kn = el.querySelector('[data-menu-knob]');
+            const key = el.dataset.menuRow;
+            if (sw && kn && key) {
+                const on = !!settings[key];
+                sw.style.background = on ? t.switchOn : t.switchOff;
+                sw.style.borderColor = t.switchBorder;
+                kn.style.background = on ? t.knobOn : t.knobOff;
+            }
+        });
+
+        // Radio buttons
+        mp.querySelectorAll('[data-radio-key]').forEach(el => {
+            const key = el.dataset.radioKey;
+            const opt = el.dataset.radioOpt;
+            const on  = settings[key] === opt;
+            el.style.background = on ? t.radioBtnOn : t.radioBtnOff;
+            el.style.color      = on ? t.radioTextOn : t.radioTextOff;
+            el.style.borderColor = t.radioBorder;
+        });
+
+        // Info rows
+        mp.querySelectorAll('[data-menu-infolbl]').forEach(el => {
+            el.style.color = t.menuInfo;
+        });
+        mp.querySelectorAll('[data-menu-infoval]').forEach(el => {
+            el.style.color = t.menuInfoVal;
+        });
+
+        // Status row
+        const statusEl = document.getElementById('radarInfo_apistatus');
+        // Only reset if it was already OK-coloured; error colour stays until next update
+        if (statusEl && statusEl.dataset.statusOk === 'true') {
+            statusEl.style.color = t.menuStatus;
+        }
+    }
+
+    // ── HUD ─────────────────────────────────────────────────────────────
+    // Force a full HUD rebuild so all inline colours update
+    updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
 }
 
 // ═══════════════════════════════════════════════════
@@ -215,8 +478,8 @@ rangeBox.style.cssText = `
     align-items:center; justify-content:center; pointer-events:none;
 `;
 rangeBox.innerHTML = `
-    <span id="rangeVal" style="color:#0f0;font:bold ${UI.rangeBoxFont}px Arial;text-shadow:0 0 5px rgba(0,255,0,0.6)">${(radarRange/1000).toFixed(1)} km</span>
-    <span style="color:#0f0;font:11px Arial;opacity:.7;margin-top:2px">RANGE</span>
+    <span id="rangeVal" style="font:bold ${UI.rangeBoxFont}px Arial;text-shadow:0 0 5px rgba(0,255,0,0.6)">${(radarRange/1000).toFixed(1)} km</span>
+    <span style="font:11px Arial;opacity:.8;margin-top:2px">RANGE</span>
 `;
 document.body.appendChild(rangeBox);
 
@@ -298,97 +561,158 @@ function fmtDistMetric(meters) {
 }
 
 let _hudNearestData = null;
+let _trackedAc      = null;  // non-null when user has locked onto a specific aircraft
+let _trackedId      = null;  // session id of tracked aircraft (unique, unlike callsign)
+
+// Stop tracking and return to nearest-aircraft mode.
+function stopTracking() {
+    _trackedAc     = null;
+    _trackedId     = null;
+    activePopupCs  = null;
+    _lastNearestCs = null; // force HUD to rebuild next frame
+}
+
+// Look up a fresh copy of the tracked aircraft from the live cache by session id.
+// Falls back to the stale cached object if the aircraft is temporarily missing.
+function refreshTracked() {
+    if (!_trackedId) return null;
+    const fresh = aircraftListCache.find(a => a.id === _trackedId);
+    if (fresh) _trackedAc = fresh;
+    return _trackedAc;
+}
+
+// Shared helper: compute distance + bearing string pair from myData → target ac
+function _hudDistBrg(myData, ac) {
+    if (!myData || !ac.co) return { distStr: 'N/A', brgStr: 'N/A' };
+    const nm  = calcDistNm(myData.lat, myData.lon, ac.co[0], ac.co[1]);
+    const brg = calcBearing(myData.lat, myData.lon, ac.co[0], ac.co[1]);
+    return {
+        distStr: fmtDist(nm),
+        brgStr:  `${Math.round(brg).toString().padStart(3,'0')}° ${bearingCompass(brg)}`,
+    };
+}
 
 function updateNearestHUD(nearest, myData) {
     const t = T();
 
-    if (!settings.showNearestHUD || !nearest) {
+    // Determine which aircraft to display: tracked takes priority over nearest
+    const displayAc  = _trackedAc || nearest;
+    const isTracking = !!_trackedAc;
+
+    if (!settings.showNearestHUD || !displayAc) {
         nearestHUD.style.display = 'none';
         _hudNearestData = null;
         return;
     }
 
-    _hudNearestData = { nearest, myData };
-    nearestHUD.style.display = 'block';
+    _hudNearestData = { nearest: displayAc, myData };
+    nearestHUD.style.display    = 'block';
+    // Pointer events must be on when tracking so the buttons are clickable
+    nearestHUD.style.pointerEvents = isTracking ? 'auto' : 'none';
 
-    const cs = nearest.cs || '???';
+    const cs  = displayAc.cs && displayAc.cs !== 'Foo' ? displayAc.cs : `Foo #${displayAc.id || '???'}`;
+    const acN = displayAc._shortName || null;
 
-    let distStr = 'N/A', brgStr = 'N/A';
-    if (myData && nearest.co) {
-        const nm  = calcDistNm(myData.lat, myData.lon, nearest.co[0], nearest.co[1]);
-        const brg = calcBearing(myData.lat, myData.lon, nearest.co[0], nearest.co[1]);
-        distStr = fmtDist(nm);
-        brgStr  = `${Math.round(brg).toString().padStart(3,'0')}° ${bearingCompass(brg)}`;
-    }
+    const { distStr, brgStr } = _hudDistBrg(myData, displayAc);
 
-    let altDeltaStr = '', altDeltaColor = t.hudValue;
+    // Altitude
     const nearAl = (() => {
-        const v = parseFloat(nearest.al);
+        const v = parseFloat(displayAc.al);
         if (isFinite(v)) return v;
-        if (nearest.co && nearest.co.length >= 3) {
-            const vCo = parseFloat(nearest.co[2]);
+        if (displayAc.co && displayAc.co.length >= 3) {
+            const vCo = parseFloat(displayAc.co[2]);
             if (isFinite(vCo)) return vCo * 3.28084;
         }
         return null;
     })();
+    let altDeltaStr = '';
     if (myData && nearAl !== null) {
         const delta = Math.round(nearAl - myData.altFt);
         const sign  = delta >= 0 ? '▲+' : '▼';
-        altDeltaColor = delta > 0 ? 'rgba(100,255,140,0.9)' : 'rgba(255,120,120,0.9)';
-        altDeltaStr = ` <span style="color:${altDeltaColor};font-size:12px">${sign}${Math.abs(delta).toLocaleString()} ft</span>`;
+        const col   = delta > 0 ? 'rgba(100,255,140,0.9)' : 'rgba(255,120,120,0.9)';
+        altDeltaStr = ` <span style="color:${col};font-size:12px">${sign}${Math.abs(delta).toLocaleString()} ft</span>`;
     }
+    const altStr = nearAl !== null ? (fmtAlt(nearAl) ?? '–') : '–';
 
-    const altFmtd = (() => {
-        const v = parseFloat(nearest.al);
-        if (isFinite(v)) return fmtAlt(v);
-        if (nearest.co && nearest.co.length >= 3) {
-            const vCo = parseFloat(nearest.co[2]);
-            if (isFinite(vCo)) return fmtAlt(vCo * 3.28084);
-        }
-        return null;
-    })();
-    const altStr  = altFmtd !== null ? altFmtd : '–';
-    const nearSpdRaw = isFinite(parseFloat(nearest.s))
-        ? parseFloat(nearest.s)
-        : (typeof nearest._computedSpd === 'number' && isFinite(nearest._computedSpd) ? nearest._computedSpd : null);
-    const spdStr  = nearSpdRaw !== null ? (fmtSpd(nearSpdRaw) ?? '–') : '–';
-    const hdgStr  = fmtHdg(nearest.h);
+    // Speed
+    const nearSpdRaw = isFinite(parseFloat(displayAc.s))
+        ? parseFloat(displayAc.s)
+        : (typeof displayAc._computedSpd === 'number' && isFinite(displayAc._computedSpd)
+            ? displayAc._computedSpd : null);
+    const spdStr = nearSpdRaw !== null ? (fmtSpd(nearSpdRaw) ?? '–') : '–';
+    const hdgStr = fmtHdg(displayAc.h);
+
+    // Tracking mode colours
+    const trackBorder = isTracking ? 'rgba(255,200,60,0.55)' : t.hudBorder;
+    const trackGlow   = isTracking ? ', 0 0 14px rgba(255,180,30,0.2)' : '';
+    const headerDot   = isTracking ? 'rgba(255,200,60,1)'    : t.hudTitle;
+    const headerLabel = isTracking ? 'TRACKING'              : 'NEARBY TRAFFIC';
+    const headerColor = isTracking ? 'rgba(255,200,60,0.98)' : t.hudTitle;
+
+    // Isolate toggle (only shown in tracking mode)
+    const isolateChecked  = settings.isolateTracked;
+    const isolateSwBg     = isolateChecked ? t.switchOn    : t.switchOff;
+    const isolateKnobBg   = isolateChecked ? t.knobOn      : t.knobOff;
+    const isolateKnobLeft = isolateChecked ? (UI.menuSwitchW - UI.menuKnobSize - 3) : 3;
+
+    const isolateRow = isTracking ? `
+  <div style="
+    padding:5px 14px 6px;
+    border-top:1px solid ${t.hudSep};
+    display:flex; align-items:center; justify-content:space-between;
+    cursor:pointer;
+  " id="radarIsolateRow">
+    <span style="color:${t.hudLabel};font-size:12px;letter-spacing:0.5px;">Isolate aircraft</span>
+    <div id="radarIsolateSw" style="
+      width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
+      border-radius:${UI.menuSwitchH/2}px; position:relative;
+      background:${isolateSwBg}; border:1px solid ${t.switchBorder};
+      transition:background .2s; flex-shrink:0;
+    ">
+      <div id="radarIsolateKnob" style="
+        position:absolute; top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+        left:${isolateKnobLeft}px;
+        width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px;
+        border-radius:50%; background:${isolateKnobBg};
+        transition:left .2s, background .2s;
+      "></div>
+    </div>
+  </div>` : '';
+
+    // Stop Tracking button
+    const stopBtn = isTracking ? `
+  <div style="padding:4px 14px 8px;">
+    <button id="radarStopTrackBtn" style="
+      width:100%; padding:6px 0;
+      background:${t.hudBg}; border:1px solid ${t.hudBorder};
+      border-radius:6px; color:${t.hudLabel};
+      font:bold 12px Arial; letter-spacing:1px;
+      cursor:pointer; transition:background .15s;
+    ">✕  STOP TRACKING</button>
+  </div>` : '';
 
     nearestHUD.innerHTML = `
 <div style="
     background:${t.hudBg};
-    border:1.5px solid ${t.hudBorder};
-    border-radius:10px;
-    overflow:hidden;
-    box-shadow:0 4px 20px rgba(0,0,0,0.75);
+    border:1.5px solid ${trackBorder};
+    border-radius:10px; overflow:hidden;
+    box-shadow:0 4px 20px rgba(0,0,0,0.75)${trackGlow};
+    font-family:'Courier New',Courier,monospace;
 ">
-  <div style="
-    padding:9px 14px 7px;
-    border-bottom:1px solid ${t.hudSep};
-    display:flex;
-    align-items:center;
-    gap:8px;
-  ">
-    <span style="
-      display:inline-block; width:10px; height:10px; border-radius:50%;
-      background:${t.hudTitle}; box-shadow:0 0 6px ${t.hudTitle};
-      flex-shrink:0;
-    "></span>
-    <span style="
-      color:${t.hudTitle}; font-size:13px; letter-spacing:1.5px;
-      text-transform:uppercase; font-weight:bold;
-    ">NEAREST TRAFFIC</span>
+  <div style="padding:9px 14px 7px; border-bottom:1px solid ${t.hudSep};
+    display:flex; align-items:center; gap:8px;">
+    <span style="display:inline-block;width:10px;height:10px;border-radius:50%;
+      background:${headerDot};box-shadow:0 0 6px ${headerDot};flex-shrink:0;"></span>
+    <span style="color:${headerColor};font-size:13px;letter-spacing:1.5px;
+      text-transform:uppercase;font-weight:bold;">${headerLabel}</span>
   </div>
 
-  <div style="
-    padding:8px 14px 6px;
-    border-bottom:1px solid ${t.hudSep};
-  ">
+  <div style="padding:8px 14px 6px;border-bottom:1px solid ${t.hudSep};">
     <div style="color:${t.hudLabel};font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Callsign</div>
-    <div style="color:${t.hudValue};font-size:18px;font-weight:bold;letter-spacing:1px">${cs}</div>
+    <div style="color:${t.hudValue};font-size:18px;font-weight:bold;letter-spacing:1px">${cs}${acN ? `<span style="color:${t.hudLabel};font-size:12px;font-weight:normal;margin-left:7px">${acN}</span>` : ''}</div>
   </div>
 
-  <div style="padding:8px 14px 8px; display:grid; grid-template-columns:1fr 1fr; gap:8px 12px;">
+  <div style="padding:8px 14px 8px;display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;">
     <div>
       <div style="color:${t.hudLabel};font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Distance</div>
       <div style="color:${t.hudDist};font-size:14px;font-weight:bold">${distStr}</div>
@@ -410,7 +734,28 @@ function updateNearestHUD(nearest, myData) {
       <div style="color:${t.hudHdg};font-size:14px;font-weight:bold">${hdgStr}</div>
     </div>
   </div>
+  ${isolateRow}
+  ${stopBtn}
 </div>`;
+
+    // Wire isolate toggle
+    const isolateRowEl = document.getElementById('radarIsolateRow');
+    if (isolateRowEl) {
+        isolateRowEl.onclick = (e) => {
+            e.stopPropagation();
+            settings.isolateTracked = !settings.isolateTracked;
+            saveSettings();
+            updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+        };
+    }
+
+    // Wire stop-tracking button
+    const stopEl = document.getElementById('radarStopTrackBtn');
+    if (stopEl) {
+        stopEl.onmouseover = () => stopEl.style.background = T().hudBorder;
+        stopEl.onmouseout  = () => stopEl.style.background = T().hudBg;
+        stopEl.onclick     = (e) => { e.stopPropagation(); stopTracking(); };
+    }
 }
 
 function repositionNearestHUD() {
@@ -484,7 +829,7 @@ function loadPosition() {
         if (p.left) radarCanvas.style.left = p.left;
         if (p.top)  radarCanvas.style.top  = p.top;
     } catch(e) {}
-    setTimeout(repositionUI, 120);
+    setTimeout(repositionUI, DRAG_REPOSITION_DELAY);
 }
 
 function repositionUI() {
@@ -502,8 +847,11 @@ function repositionUI() {
     }
     const mp = document.getElementById('radarMenuPanel');
     if (mp) {
+        const panelH = mp.scrollHeight || 400;
+        const rawTop = rt;
+        const maxTop = window.innerHeight - Math.min(panelH, window.innerHeight - 24) - 12;
         mp.style.left = (rl + radarSize + 8) + 'px';
-        mp.style.top  = (rt) + 'px';
+        mp.style.top  = Math.max(12, Math.min(rawTop, maxTop)) + 'px';
     }
     repositionNearestHUD();
 }
@@ -527,8 +875,8 @@ function createMenu() {
         z-index:2147483647; display:flex; align-items:center; justify-content:center;
         box-shadow:0 0 10px rgba(0,255,0,0.4); transition:all .2s;
     `;
-    btn.onmouseover = () => btn.style.background = 'rgba(0,100,0,0.95)';
-    btn.onmouseout  = () => btn.style.background = 'rgba(0,60,0,0.92)';
+    btn.onmouseover = () => btn.style.background = T().menuBtnBgHov;
+    btn.onmouseout  = () => btn.style.background = T().menuBtnBg;
     btn.onclick = (e) => { e.stopPropagation(); toggleMenu(); };
     document.body.appendChild(btn);
 
@@ -543,10 +891,15 @@ function createMenu() {
         box-shadow:0 4px 28px rgba(0,0,0,0.75);
         font-family:Arial,sans-serif;
         user-select:none;
-        max-height:90vh; overflow-y:auto;
+        height:600px;
+        overflow-y:auto;
+        overflow-x:hidden;
+        scrollbar-width:thin;
+        scrollbar-color:rgba(0,200,0,0.4) rgba(0,30,0,0.5);
     `;
 
     const title = document.createElement('div');
+    title.dataset.menuTitle = '1';
     title.style.cssText = `
         color:rgba(0,255,0,0.9); font:bold ${UI.menuTitleFont}px Arial;
         text-align:center; padding:2px 14px 10px;
@@ -558,6 +911,7 @@ function createMenu() {
 
     function addSection(label) {
         const s = document.createElement('div');
+        s.dataset.menuSection = '1';
         s.style.cssText = `
             color:rgba(0,255,0,0.5); font:bold ${UI.menuSectionFont}px Arial;
             padding:8px 16px 3px; letter-spacing:1.5px; text-transform:uppercase;
@@ -568,25 +922,30 @@ function createMenu() {
 
     function addToggle(label, key, onChange) {
         const row = document.createElement('div');
+        row.dataset.menuRow = key;
         row.style.cssText = `
             display:flex; align-items:center; justify-content:space-between;
             padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;
         `;
-        row.onmouseover = () => row.style.background = 'rgba(0,255,0,0.07)';
+        row.onmouseover = () => row.style.background = T().menuRowHover;
         row.onmouseout  = () => row.style.background = '';
 
         const lbl = document.createElement('span');
+        lbl.dataset.menuRowlbl = '1';
         lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px Arial;`;
         lbl.textContent = label;
 
         const sw = document.createElement('div');
+        sw.dataset.menuSw = key;
         sw.style.cssText = `
-            width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px; border-radius:${UI.menuSwitchH/2}px; position:relative;
+            width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
+            border-radius:${UI.menuSwitchH/2}px; position:relative;
             background:${settings[key] ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
             border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;
         `;
         const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
         const knob = document.createElement('div');
+        knob.dataset.menuKnob = key;
         knob.style.cssText = `
             position:absolute; top:${(UI.menuSwitchH - UI.menuKnobSize)/2}px;
             left:${settings[key] ? knobOn : knobOff}px;
@@ -599,9 +958,11 @@ function createMenu() {
 
         row.onclick = () => {
             settings[key] = !settings[key];
-            sw.style.background   = settings[key] ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)';
+            const t = T();
+            sw.style.background   = settings[key] ? t.switchOn  : t.switchOff;
+            sw.style.borderColor  = t.switchBorder;
             knob.style.left       = settings[key] ? knobOn + 'px' : knobOff + 'px';
-            knob.style.background = settings[key] ? '#0f0' : '#888';
+            knob.style.background = settings[key] ? t.knobOn : t.knobOff;
             saveSettings();
             if (onChange) onChange(settings[key]);
         };
@@ -616,6 +977,7 @@ function createMenu() {
             padding:${UI.menuRowPadY}px 16px;
         `;
         const lbl = document.createElement('span');
+        lbl.dataset.menuRowlbl = '1';
         lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px Arial; flex:1;`;
         lbl.textContent = label;
 
@@ -625,20 +987,25 @@ function createMenu() {
         [opt1, opt2].forEach((opt, i) => {
             const b = document.createElement('button');
             b.id = `radarRadio_${key}_${opt}`;
+            b.dataset.radioKey = key;
+            b.dataset.radioOpt = opt;
             b.textContent = [label1, label2][i];
             b.style.cssText = `
-                padding:4px 10px; font:bold ${UI.menuRadioFont}px Arial; border-radius:5px; cursor:pointer;
+                padding:4px 10px; font:bold ${UI.menuRadioFont}px Arial;
+                border-radius:5px; cursor:pointer;
                 border:1px solid rgba(0,255,0,0.3); transition:all .15s;
                 background:${settings[key]===opt ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)'};
                 color:${settings[key]===opt ? '#0f0' : 'rgba(150,200,150,0.7)'};
             `;
             b.onclick = () => {
                 settings[key] = opt;
+                const t = T();
                 [opt1, opt2].forEach(o => {
                     const el = document.getElementById(`radarRadio_${key}_${o}`);
                     if (!el) return;
-                    el.style.background = settings[key]===o ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)';
-                    el.style.color      = settings[key]===o ? '#0f0' : 'rgba(150,200,150,0.7)';
+                    el.style.background  = settings[key]===o ? t.radioBtnOn  : t.radioBtnOff;
+                    el.style.color       = settings[key]===o ? t.radioTextOn : t.radioTextOff;
+                    el.style.borderColor = t.radioBorder;
                 });
                 saveSettings();
             };
@@ -651,75 +1018,83 @@ function createMenu() {
 
     function addSep() {
         const s = document.createElement('div');
+        s.dataset.menuSep = '1';
         s.style.cssText = 'border-top:1px solid rgba(0,255,0,0.1); margin:4px 0;';
         panel.appendChild(s);
     }
 
     function addInfoRow(label, idSuffix) {
         const row = document.createElement('div');
-        row.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding:5px 16px;
-        `;
+        row.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:5px 16px;`;
         const lbl = document.createElement('span');
+        lbl.dataset.menuInfolbl = '1';
         lbl.style.cssText = `color:rgba(150,200,150,0.7); font:${UI.menuInfoFont}px Arial;`;
         lbl.textContent = label;
         const val = document.createElement('span');
         val.id = `radarInfo_${idSuffix}`;
-        val.style.cssText = `color:rgba(0,255,0,0.9); font:bold ${UI.menuInfoFont}px "Courier New",monospace;`;
+        val.dataset.menuInfoval = '1';
+        val.style.cssText = `color:rgba(0,255,0,0.9); font:bold ${UI.menuInfoFont}px "Courier New",monospace; text-align:right; max-width:155px; word-break:break-all;`;
         val.textContent = '—';
         row.appendChild(lbl); row.appendChild(val);
         panel.appendChild(row);
     }
 
-    // ── FIX #6 — Add a debug info row to show API fetch status ──────────
     function addStatusRow() {
         const row = document.createElement('div');
         row.style.cssText = `padding:5px 16px;`;
         const val = document.createElement('span');
         val.id = 'radarInfo_apistatus';
+        val.dataset.statusOk = 'true';
         val.style.cssText = `color:rgba(0,200,0,0.8); font:${UI.menuInfoFont - 1}px "Courier New",monospace; word-break:break-all;`;
         val.textContent = 'Waiting for data…';
         row.appendChild(val);
         panel.appendChild(row);
     }
 
+    // ── Display ──────────────────────────────────────────────────────────
     addSection('Display');
-    addToggle('Night Mode',           'nightMode',     () => applyTheme());
-    addRadio ('Orientation',          'orientMode',    'north', 'track', 'N↑', 'TRK↑');
-    addToggle('Player Triangle',      'showPlayerTriangle');
-    addToggle('Range Rings',          'showRings');
-    addToggle('Ring Labels',          'showRingLabels');
+    addToggle('Night Mode',             'nightMode',        () => applyTheme());
+    addRadio ('Orientation',            'orientMode',       'north', 'track', 'N↑', 'TRK↑');
+    addToggle('Player Triangle',        'showPlayerTriangle');
+    addToggle('Range Rings',            'showRings');
+    addToggle('Ring Labels',            'showRingLabels');
 
     addSep();
 
+    // ── Traffic ───────────────────────────────────────────────────────────
     addSection('Traffic');
-    addToggle('Show Traffic',         'showTraffic');
-    addToggle('Traffic Triangles',    'showBlipTriangle');
-    addToggle('Callsign',             'showCallsign');
-    addToggle('Altitude',             'showAltitude');
-    addToggle('Speed',                'showSpeed');
-    addToggle('Distance',             'showBlipDist');
-    addRadio ('Speed Source',         'speedMode',    'GS', 'IAS', 'GS', 'IAS');
-    addToggle('Heading Vectors',      'showVectors');
-    addToggle('Nearest Player HUD',   'showNearestHUD', (v) => {
+    addToggle('Show Traffic',           'showTraffic');
+    addToggle('Traffic Triangles',      'showBlipTriangle');
+    addToggle('Callsign',               'showCallsign');   // other players only
+    addToggle('Aircraft Type',          'showAircraftName'); // other players only
+    addToggle('Altitude',               'showAltitude');
+    addToggle('Speed',                  'showSpeed');
+    addToggle('Distance',               'showBlipDist');
+    addRadio ('Speed Source',           'speedMode',        'GS', 'IAS', 'GS', 'IAS');
+    addToggle('Heading Vectors',        'showVectors');
+    addToggle('Tracking / Nearby Traffic', 'showNearestHUD', (v) => {
         if (!v) nearestHUD.style.display = 'none';
     });
-    addToggle('Nearest Distance',     'showDistLabel');
 
     addSep();
 
+    // ── Map ───────────────────────────────────────────────────────────────
     addSection('Map');
-    addToggle('Airports & Runways',   'showAirports');
+    addToggle('Airports & Runways',     'showAirports');
 
     addSep();
 
+    // ── My Aircraft ───────────────────────────────────────────────────────
     addSection('My Aircraft');
     addInfoRow('Callsign', 'callsign');
+    addInfoRow('Aircraft', 'acname');
     addInfoRow('Position', 'position');
+    addToggle('Show My Callsign',       'showMyCallsign');
+    addToggle('Show My Aircraft Type',  'showMyAircraftType');
 
     addSep();
 
+    // ── API Status ────────────────────────────────────────────────────────
     addSection('API Status');
     addStatusRow();
 
@@ -730,12 +1105,73 @@ function createMenu() {
             closeMenu();
         }
     });
+
+    // Initial positioning
+    repositionMenu();
 }
 
-function updateMenuInfoCallsign(cs, lat, lon) {
+function repositionMenu() {
+    const btn = document.getElementById('radarMenuBtn');
+    const panel = document.getElementById('radarMenuPanel');
+    if (!btn || !panel) return;
+
+    // Get radar position and dimensions
+    const rl = parseInt(radarCanvas.style.left) || 5;
+    const rt = parseInt(radarCanvas.style.top) || 0;
+    const menuHeight = 600; // Fixed menu height
+    const buttonSize = 40;
+    const spacing = 5;
+
+    // Calculate available space below radar
+    const windowHeight = window.innerHeight;
+    const spaceBelowRadar = windowHeight - (rt + radarSize);
+    const spaceAboveRadar = rt;
+
+    // Position button to the right of radar (aligned with top)
+    btn.style.left = (rl + radarSize + spacing) + 'px';
+    btn.style.top = rt + 'px';
+
+    // Determine best panel position (below button by default)
+    let panelTop = rt + buttonSize + spacing;
+
+    // Check if panel would go off screen
+    if (panelTop + menuHeight > windowHeight) {
+        // Not enough space below, try placing above
+        const panelTopAbove = rt - menuHeight - spacing;
+
+        if (panelTopAbove >= 0) {
+            // Enough space above radar
+            panelTop = panelTopAbove;
+        } else {
+            // Not enough space above either, place at bottom of screen with adjusted height
+            panelTop = Math.max(spacing, windowHeight - menuHeight - spacing);
+
+            // Adjust panel height to fit
+            const maxHeight = windowHeight - panelTop - spacing;
+            panel.style.height = Math.min(menuHeight, maxHeight) + 'px';
+        }
+    } else {
+        // Reset to full height if there's enough space
+        panel.style.height = menuHeight + 'px';
+    }
+
+    // Position panel horizontally (aligned with button)
+    panel.style.left = (rl + radarSize + spacing) + 'px';
+    panel.style.top = panelTop + 'px';
+
+    // Ensure panel doesn't go off screen horizontally
+    const panelRight = parseInt(panel.style.left) + UI.menuW;
+    if (panelRight > window.innerWidth) {
+        panel.style.left = (window.innerWidth - UI.menuW - spacing) + 'px';
+    }
+}
+
+function updateMenuInfoCallsign(cs, lat, lon, acName) {
     const csEl = document.getElementById('radarInfo_callsign');
     const posEl = document.getElementById('radarInfo_position');
+    const acEl  = document.getElementById('radarInfo_acname');
     if (csEl) csEl.textContent = cs || '—';
+    if (acEl) acEl.textContent = acName || '—';
     if (posEl && lat != null) {
         const latStr = Math.abs(lat).toFixed(3) + (lat >= 0 ? '°N' : '°S');
         const lonStr = Math.abs(lon).toFixed(3) + (lon >= 0 ? '°E' : '°W');
@@ -745,25 +1181,47 @@ function updateMenuInfoCallsign(cs, lat, lon) {
     }
 }
 
-// FIX #6 — Update the API status string in the menu
 function updateApiStatus(msg, ok) {
     const el = document.getElementById('radarInfo_apistatus');
     if (!el) return;
-    el.textContent = msg;
-    el.style.color = ok ? 'rgba(0,220,0,0.9)' : 'rgba(255,120,60,0.95)';
+    el.textContent       = msg;
+    el.dataset.statusOk  = ok ? 'true' : 'false';
+    el.style.color = ok ? T().menuStatus : 'rgba(255,120,60,0.95)';
 }
 
 function toggleMenu() { menuOpen ? closeMenu() : openMenu(); }
+
 function openMenu() {
     menuOpen = true;
     const p = document.getElementById('radarMenuPanel');
-    if (p) { p.style.display = 'block'; repositionUI(); }
+    if (p) {
+        p.style.display = 'block';
+        repositionMenu(); // Ensure correct position when opening
+    }
 }
+
 function closeMenu() {
     menuOpen = false;
     const p = document.getElementById('radarMenuPanel');
     if (p) p.style.display = 'none';
 }
+
+// Update repositionNearestHUD to also reposition menu
+function repositionNearestHUD() {
+    const rl = parseInt(radarCanvas.style.left) || 5;
+    const rt = parseInt(radarCanvas.style.top)  || 0;
+    nearestHUD.style.left = (rl + radarSize + 12) + 'px';
+    nearestHUD.style.top  = rt + 'px';
+
+    // Also reposition menu when radar moves
+    repositionMenu();
+}
+
+// Add window resize handler
+window.addEventListener('resize', () => {
+    repositionMenu();
+    repositionNearestHUD();
+});
 
 // ═══════════════════════════════════════════════════
 // SECTION 6 — BLIP POPUP
@@ -872,16 +1330,26 @@ radarCanvas.addEventListener('click', (e) => {
     });
 
     if (closest) {
-        if (activePopupCs === closest.ac.cs) {
+        // Use session id (unique per player) not callsign (multiple players can share "Foo")
+        const isSameBlip = _trackedId && _trackedId === closest.ac.id;
+        if (isSameBlip) {
+            // Second click on same aircraft → deselect
             hidePopup();
-            activePopupCs = null;
+            stopTracking();
         } else {
-            activePopupCs = closest.ac.cs;
-            showPopup(closest.ac, closest.distance, closest.x, closest.y, closest.myData);
+            // New aircraft clicked → lock tracking onto it by session id
+            activePopupCs   = closest.ac.cs;
+            _trackedAc      = closest.ac;
+            _trackedId      = closest.ac.id;
+            _lastHudUpdate  = 0;
+            _lastNearestCs  = null;
+            updateNearestHUD(closest.ac, closest.myData);
+            hidePopup();
         }
     } else {
+        // Clicked empty space → clear
         hidePopup();
-        activePopupCs = null;
+        stopTracking();
     }
 });
 
@@ -960,17 +1428,166 @@ setInterval(() => {
             ? '0 0 10px rgba(255,220,0,0.4)'
             : t.canvasGlow;
     } catch(e) {}
-}, 500);
-
-// ═══════════════════════════════════════════════════
-// SECTION 11 — AIRCRAFT CACHE
+}, PAUSE_POLL_INTERVAL);
 // ═══════════════════════════════════════════════════
 
 let aircraftListCache = [];
 const prevAcData = new Map();
 
+// ═══════════════════════════════════════════════════
+// SECTION 10b — AIRCRAFT NAME LOOKUP
+// Maps GeoFS aircraft type IDs (the "ac" field in the multiplayer API) to short
+// display names.  Boeing → B prefix, Airbus → A prefix, others as recognised.
+// Unknown IDs fall back to "#ID" so something always shows.
+// ═══════════════════════════════════════════════════
+
+const AIRCRAFT_NAMES = {
+    1:   'C172',      // Cessna 172 Skyhawk
+    2:   'B737',      // Boeing 737-800
+    3:   'A380',      // Airbus A380
+    4:   'F/A-18',    // F/A-18 Hornet
+    5:   'B747',      // Boeing 747-400
+    6:   'DC-3',      // Douglas DC-3
+    7:   'SR22',      // Cirrus SR-22
+    8:   'PA-28',     // Piper PA-28 Cherokee
+    9:   'Concorde',  // Concorde
+    10:  'B-17',      // Boeing B-17 Flying Fortress
+    11:  'B787',      // Boeing 787 Dreamliner
+    12:  'DHC-2',     // de Havilland Canada DHC-2 Beaver
+    13:  'Extra330',  // Extra 330
+    14:  'CitX',      // Cessna Citation X
+    15:  'Shuttle',   // Space Shuttle
+    16:  'J-3',       // Piper J-3 Cub
+    17:  'B777',      // Boeing 777
+    18:  'A320',      // Airbus A320
+    19:  'CRJ200',    // Bombardier CRJ-200
+    20:  'Q400',      // Bombardier Dash 8 Q400
+    21:  'R44',       // Robinson R44 helicopter
+    22:  'A330',      // Airbus A330
+    23:  'E175',      // Embraer 175
+    24:  'B737M',     // Boeing 737 MAX 8
+    25:  'B757',      // Boeing 757
+    26:  'B767',      // Boeing 767
+    27:  'A319',      // Airbus A319
+    28:  'A321',      // Airbus A321
+    29:  'A350',      // Airbus A350
+    30:  'B747SP',    // Boeing 747SP
+    31:  'C208',      // Cessna 208 Caravan
+    32:  'TBM930',    // Daher TBM 930
+    33:  'A220',      // Airbus A220
+    34:  'E190',      // Embraer 190
+    35:  'B737NG',    // Boeing 737 Next Gen
+    36:  'B777X',     // Boeing 777X
+    37:  'A340',      // Airbus A340
+    38:  'ATR72',     // ATR 72
+    39:  'E145',      // Embraer ERJ-145
+    40:  'Dash8',     // Bombardier Dash 8 Q200
+    41:  'PC-12',     // Pilatus PC-12
+    42:  'CRJ900',    // Bombardier CRJ-900
+    43:  'B737CL',    // Boeing 737 Classic
+    44:  'MD-11',     // McDonnell Douglas MD-11
+    45:  'DC-10',     // McDonnell Douglas DC-10
+    46:  'L-1011',    // Lockheed L-1011
+    47:  'B707',      // Boeing 707
+    48:  'B727',      // Boeing 727
+    49:  'B717',      // Boeing 717
+    50:  'B720',      // Boeing 720
+    51:  'Spitfire',  // Supermarine Spitfire
+    52:  'P-51',      // North American P-51 Mustang
+    53:  'F-16',      // General Dynamics F-16
+    54:  'F-14',      // Grumman F-14 Tomcat
+    55:  'F-22',      // Lockheed F-22 Raptor
+    56:  'F-35',      // Lockheed F-35 Lightning II
+    57:  'MiG-29',    // Mikoyan MiG-29
+    58:  'Su-27',     // Sukhoi Su-27
+    59:  'Gripen',    // Saab JAS 39 Gripen
+    60:  'Eurofighter',// Eurofighter Typhoon
+    61:  'C-130',     // Lockheed C-130 Hercules
+    62:  'C-17',      // Boeing C-17 Globemaster
+    63:  'B-52',      // Boeing B-52 Stratofortress
+    64:  'B-2',       // Northrop B-2 Spirit
+    65:  'U-2',       // Lockheed U-2
+    66:  'SR-71',     // Lockheed SR-71 Blackbird
+    67:  'X-15',      // North American X-15
+    68:  'MV-22',     // Bell-Boeing V-22 Osprey
+    69:  'UH-60',     // Sikorsky UH-60 Black Hawk
+    70:  'Mi-8',      // Mil Mi-8
+    71:  'CH-47',     // Boeing CH-47 Chinook
+};
+
+// Attempt to derive a short name from a full aircraft name string.
+// Boeing → B prefix, Airbus → A prefix, Cessna → C prefix, common patterns.
+function formatAircraftName(fullName) {
+    if (!fullName || typeof fullName !== 'string') return null;
+    const n = fullName.trim();
+    if (n.length === 0) return null;
+
+    // Direct regex matches for major manufacturers
+    const boeingM  = n.match(/boeing\s*(\d{3}[-\w]*)/i);
+    if (boeingM) return 'B' + boeingM[1].replace(/\s+/g, '');
+
+    const airbusM  = n.match(/airbus\s*[Aa]?(\d{3}[-\w]*)/i);
+    if (airbusM) return 'A' + airbusM[1].replace(/\s+/g, '');
+
+    // Airbus written as "A320", "A380", etc. already
+    const airbusShort = n.match(/^[Aa](\d{3}[-\w]*)$/);
+    if (airbusShort) return 'A' + airbusShort[1];
+
+    const cessnaM  = n.match(/cessna\s*(\w+)/i);
+    if (cessnaM) return 'C' + cessnaM[1];
+
+    const embraerM = n.match(/embraer\s*([\w-]+)/i);
+    if (embraerM) return 'E' + embraerM[1];
+
+    // Already short — return as-is or truncate
+    return n.length <= 9 ? n : n.slice(0, 9);
+}
+
+// Get a short aircraft type name from a GeoFS aircraft type ID.
+// First tries the static table, then tries GeoFS's own definitions, then falls back.
+function getAircraftShortName(acId) {
+    if (acId == null) return null;
+    const id = parseInt(acId);
+
+    // Static table (covers built-in GeoFS aircraft)
+    if (AIRCRAFT_NAMES[id]) return AIRCRAFT_NAMES[id];
+
+    // Try GeoFS's live aircraft definitions for custom/community aircraft
+    try {
+        const def = window.geofs?.aircraft?.aircraftList?.[id]
+                 || window.geofs?.aircraft?.definitions?.[id];
+        if (def?.name) return formatAircraftName(def.name) || def.name.slice(0, 9);
+    } catch(e) {}
+
+    // Final fallback: show the numeric ID so it's at least informative
+    return id > 0 ? `#${id}` : null;
+}
+
+// Get the short type name for the local player's own aircraft.
+let _cachedPlayerAcName  = null; // cached so we don't re-derive every frame
+let _cachedPlayerAcId    = null;
+
+function getPlayerAircraftName() {
+    try {
+        const inst = window.geofs?.aircraft?.instance;
+        if (!inst) return _cachedPlayerAcName;
+
+        // The instance aircraft ID (type, not the player session id)
+        const acId = inst.aircraftRecord?.id ?? inst.id ?? inst.ac;
+
+        // Only re-derive when the aircraft type changes (e.g. after switching aircraft)
+        if (acId != null && acId !== _cachedPlayerAcId) {
+            _cachedPlayerAcId   = acId;
+            // Try the full name from the record first, then fall back to ID table
+            const fullName = inst.aircraftRecord?.name || inst.name || inst.model?.name;
+            _cachedPlayerAcName = (fullName ? formatAircraftName(fullName) : null)
+                               || getAircraftShortName(acId);
+        }
+    } catch(e) {}
+    return _cachedPlayerAcName;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// FIX — Normalise raw API aircraft objects to the field names the rest of the
 // code uses.  The GeoFS multiplayer API does NOT have ac.al / ac.h / ac.s.
 // The actual layout of the co[] array is:
 //   co[0] lat   co[1] lon   co[2] altitude (metres)
@@ -1002,6 +1619,11 @@ function normalizeAc(raw) {
         if (isFinite(v)) ac.s = v;
     }
 
+    // short aircraft type name from the "ac" field (integer type ID)
+    if (ac._shortName == null && ac.ac != null) {
+        ac._shortName = getAircraftShortName(ac.ac);
+    }
+
     return ac;
 }
 
@@ -1012,9 +1634,9 @@ function normalizeAc(raw) {
 // recover back toward 5 s on success.
 // ─────────────────────────────────────────────────────────────────────────────
 let _fetchConsecutiveErrors = 0;
-let _fetchDelay = 5000;   // current interval in ms (starts at 5 s)
-const FETCH_MIN =  5000;  // never faster than 5 s
-const FETCH_MAX = 60000;  // cap backoff at 60 s
+let _fetchDelay = FETCH_DELAY_BASE; // current interval — grows on 429, shrinks on success
+const FETCH_MIN = FETCH_DELAY_BASE;
+const FETCH_MAX = FETCH_DELAY_MAX;
 let _fetchTimer = null;
 
 function scheduleFetch(delay) {
@@ -1050,7 +1672,7 @@ async function doFetch() {
                 const prev = prevAcData.get(id);
                 if (prev) {
                     const dt = (now - prev.time) / 1000;
-                    if (dt > 0.5 && dt <= 30) {
+                    if (dt > FETCH_SPEED_DT_MIN && dt <= FETCH_SPEED_DT_MAX) {
                         const dLat = (ac.co[0] - prev.lat) * Math.PI / 180;
                         const dLon = (ac.co[1] - prev.lon) * Math.PI / 180;
                         const R    = 6371000;
@@ -1092,7 +1714,7 @@ async function doFetch() {
 }
 
 // Kick off the first fetch
-scheduleFetch(500);
+scheduleFetch(FETCH_DELAY_INITIAL);
 
 // ═══════════════════════════════════════════════════
 // SECTION 12 — AIRPORT / RUNWAY DATA
@@ -1199,8 +1821,8 @@ async function fetchAirportData() {
     } catch(e) { console.error('Airport fetch error:', e); }
 }
 
-setTimeout(fetchAirportData, 2000);
-setInterval(fetchAirportData, 300000);
+setTimeout(fetchAirportData, AIRPORT_FETCH_INITIAL);
+setInterval(fetchAirportData, AIRPORT_REFETCH);
 
 // ═══════════════════════════════════════════════════
 // SECTION 13 — COORDINATE HELPERS
@@ -1230,7 +1852,6 @@ function worldToCanvas(dx, dy, cx, cy, rotRad) {
 // ═══════════════════════════════════════════════════
 
 let spinAngle = 0;
-const SPIN_SPEED = 0.05;
 
 function drawSpinLine() {
     if (isGamePaused) return;
@@ -1472,19 +2093,21 @@ function drawRadar() {
     }
 
     // FIX #3 — Always read live callsign; never freeze it from a one-time set.
-    // Original used `if (!window.playerCallsign)` so it never updated mid-session.
-    // Now we refresh it every frame from detectCallsign() which reads the live
+    // Now we refresh it every second from detectCallsign() which reads the live
     // geofs fields each time, falling back to cached value only if geofs is unavailable.
     const _now = Date.now();
-    if (_now - _lastMenuInfoUpdate > 1000) {
+    if (_now - _lastMenuInfoUpdate > MENU_INFO_UPDATE_INTERVAL) {
         _lastMenuInfoUpdate = _now;
         _cachedCallsign = detectCallsign();
-        // Update window.playerCallsign every second (not just once on first load)
         if (_cachedCallsign) window.playerCallsign = _cachedCallsign;
     }
     const displayCallsign = _cachedCallsign || playerCallsign;
 
-    updateMenuInfoCallsign(displayCallsign, hasPos ? playerLat : null, hasPos ? playerLon : null);
+    // Update menu info rows (once/sec, same throttle as callsign refresh above)
+    {
+        const _playerAcName = getPlayerAircraftName();
+        updateMenuInfoCallsign(displayCallsign, hasPos ? playerLat : null, hasPos ? playerLon : null, _playerAcName);
+    }
 
     const myData = hasPos ? {
         lat:   playerLat,
@@ -1572,18 +2195,8 @@ function drawRadar() {
     // ── Other aircraft blips ─────────────────────
     lastBlipPositions = [];
     let nearestAc = null, nearestMeters = Infinity;
-    let nearestDistForLabel = null;
 
-    // ─────────────────────────────────────────────────────────────────────
-    // FIX #2 (continued) — Use `hasPos` instead of `player` as the gate.
-    // Original: if (settings.showTraffic && !isGamePaused && aircraftListCache.length > 0 && player)
-    // Fixed:    if (settings.showTraffic && !isGamePaused && aircraftListCache.length > 0 && hasPos)
-    //
-    // This allows blips to render even when geofs.aircraft.instance is temporarily
-    // null, as long as we have a last-known player position to compute distances from.
-    // ─────────────────────────────────────────────────────────────────────
     if (settings.showTraffic && !isGamePaused && aircraftListCache.length > 0 && hasPos) {
-        // FIX #3 — Use live _cachedCallsign (refreshed every second) not frozen window.playerCallsign
         const myCs = _cachedCallsign || playerCallsign;
 
         aircraftListCache.forEach(ac => {
@@ -1591,7 +2204,11 @@ function drawRadar() {
             try {
                 if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
 
+                // Self-filter: skip own aircraft (callsign match)
                 if (ac.cs && myCs && myCs !== 'YOU' && ac.cs.toLowerCase() === myCs.toLowerCase()) return;
+
+                // Isolate mode: when tracking, only draw the tracked aircraft
+                if (_trackedId && settings.isolateTracked && ac.id !== _trackedId) return;
 
                 const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
                 const distM    = Math.hypot(dx, dy);
@@ -1602,13 +2219,13 @@ function drawRadar() {
 
                 if (distM < nearestMeters) {
                     nearestMeters = distM;
-                    nearestDistForLabel = distM;
                     nearestAc = ac;
                 }
 
                 lastBlipPositions.push({ x:rx, y:ry, ac, distance:distM, myData });
 
-                const isActive = (activePopupCs === ac.cs);
+                const isTrackedBlip = !!_trackedId && ac.id === _trackedId;
+                const isActive      = isTrackedBlip;
 
                 ctx.shadowColor = 'transparent';
                 ctx.shadowBlur  = 0;
@@ -1632,15 +2249,23 @@ function drawRadar() {
                 }
 
                 // ── Blip shape ───────────────────────────────
-                const blipColor  = isActive ? '#fff' : T().blipFill;
-                const blipStroke = 'rgba(255,255,255,0.7)';
+                const blipColor  = isTrackedBlip ? 'rgba(255,220,60,1)' : T().blipFill;
+                const blipStroke = isTrackedBlip ? 'rgba(255,240,120,0.9)' : 'rgba(255,255,255,0.7)';
+
+                // Selection ring for tracked aircraft
+                if (isTrackedBlip) {
+                    ctx.beginPath();
+                    ctx.arc(rx, ry, (settings.showBlipTriangle && isFinite(acH) ? UI.blipTriTip : UI.blipDotR) + 7, 0, Math.PI*2);
+                    ctx.strokeStyle = 'rgba(255,220,60,0.4)';
+                    ctx.lineWidth   = 2.5;
+                    ctx.stroke();
+                }
 
                 if (settings.showBlipTriangle && isFinite(acH)) {
                     const angle = (acH * Math.PI / 180) - rotRad;
                     const tip   = UI.blipTriTip, base = UI.blipTriBase;
                     ctx.save();
-                    ctx.translate(rx, ry);
-                    ctx.rotate(angle);
+                    ctx.translate(rx, ry); ctx.rotate(angle);
                     ctx.beginPath();
                     ctx.moveTo(0, -tip);
                     ctx.lineTo( base,  tip * 0.55);
@@ -1656,7 +2281,7 @@ function drawRadar() {
                     const blipR = isActive ? UI.blipDotRActive : UI.blipDotR;
                     ctx.fillStyle = blipColor;
                     ctx.beginPath(); ctx.arc(rx, ry, blipR, 0, Math.PI*2); ctx.fill();
-                    ctx.strokeStyle = blipStroke; ctx.lineWidth = 1; ctx.stroke();
+                    ctx.strokeStyle = blipStroke; ctx.lineWidth = isActive ? 2 : 1; ctx.stroke();
                 }
 
                 // ── Labels ───────────────────────────────────
@@ -1679,8 +2304,14 @@ function drawRadar() {
                     return yOff + rowH;
                 }
 
+                // showCallsign = OTHER players' callsigns only
                 if (settings.showCallsign && ac.cs) {
                     labelY = drawTag(ac.cs.substring(0, 12), T().blipLabel, labelY);
+                }
+
+                // showAircraftName = OTHER players' aircraft types only
+                if (settings.showAircraftName && ac._shortName) {
+                    labelY = drawTag(ac._shortName, T().blipAlt, labelY);
                 }
 
                 const rawAlt = isFinite(parseFloat(ac.al))
@@ -1712,12 +2343,13 @@ function drawRadar() {
 
     ctx.restore(); // end circle clip
 
-    // ── Player callsign + distance tag ───────────
-    if (settings.showCallsign && displayCallsign) {
+    // ── Player callsign tag (showMyCallsign) ──────
+    let _playerTagBottomY = cy + UI.playerTriBaseOff + UI.playerTriTip + 13;
+    if (settings.showMyCallsign && displayCallsign) {
         const lbl = displayCallsign.substring(0, 12);
         ctx.font = `bold ${UI.playerCsFont}px Arial`;
         const tw = ctx.measureText(lbl).width;
-        const ty = cy + UI.playerTriBaseOff + UI.playerTriTip + 13;
+        const ty = _playerTagBottomY;
         ctx.fillStyle   = isGamePaused ? 'rgba(80,80,80,0.85)' : 'rgba(0,80,0,0.85)';
         ctx.strokeStyle = T().playerLabel; ctx.lineWidth = 1;
         ctx.fillRect(cx - tw/2 - 7, ty - 11, tw + 14, 22);
@@ -1725,19 +2357,22 @@ function drawRadar() {
         ctx.fillStyle   = T().playerLabel;
         ctx.textAlign   = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(lbl, cx, ty);
+        _playerTagBottomY = ty + 14;
     }
 
-    // ── Nearest distance label below player ──────
-    if (settings.showDistLabel && nearestDistForLabel !== null && !isGamePaused) {
-        const distLbl = fmtDistMetric(nearestDistForLabel);
-        ctx.font = `bold ${UI.playerDistFont}px Arial`;
-        const tw2 = ctx.measureText(distLbl).width;
-        const ty2  = cy + UI.playerTriBaseOff + UI.playerTriTip + 40;
-        ctx.fillStyle = 'rgba(0,0,0,0.72)';
-        ctx.fillRect(cx - tw2/2 - 6, ty2 - 11, tw2 + 12, 20);
-        ctx.fillStyle   = T().hudDist;
-        ctx.textAlign   = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(distLbl, cx, ty2);
+    // ── Player aircraft type tag (showMyAircraftType) ─
+    if (settings.showMyAircraftType) {
+        const acName = getPlayerAircraftName();
+        if (acName) {
+            ctx.font = `bold ${UI.playerDistFont}px Arial`;
+            const tw3 = ctx.measureText(acName).width;
+            const ty3 = _playerTagBottomY + 3;
+            ctx.fillStyle = 'rgba(0,0,0,0.65)';
+            ctx.fillRect(cx - tw3/2 - 6, ty3 - 10, tw3 + 12, 18);
+            ctx.fillStyle   = T().blipAlt;
+            ctx.textAlign   = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(acName, cx, ty3);
+        }
     }
 
     // ── Paused overlay ───────────────────────────
@@ -1750,15 +2385,32 @@ function drawRadar() {
     // ── Player triangle — always on top ──────────
     drawPlayerTriangle(cx, cy, playerHeading, isGamePaused);
 
-    // ── Update nearest player HUD ─────────────────
-    if (!isGamePaused && nearestAc) {
+    // ── Update Tracking / Nearby Traffic HUD ─────
+    if (!isGamePaused) {
         const _hudNow = Date.now();
-        if (nearestAc.cs !== _lastNearestCs || _hudNow - _lastHudUpdate > 500) {
-            _lastNearestCs  = nearestAc.cs;
-            _lastHudUpdate  = _hudNow;
-            updateNearestHUD(nearestAc, myData);
+
+        if (_trackedId) {
+            // Refresh the tracked aircraft from the live cache by session ID
+            const freshTracked = refreshTracked();
+            const trackKey = freshTracked ? freshTracked.id : _trackedId;
+            if (trackKey !== _lastNearestCs || _hudNow - _lastHudUpdate > HUD_UPDATE_INTERVAL) {
+                _lastNearestCs = trackKey;
+                _lastHudUpdate = _hudNow;
+                updateNearestHUD(nearestAc, myData);
+            }
+        } else if (nearestAc) {
+            if (nearestAc.id !== _lastNearestCs || _hudNow - _lastHudUpdate > HUD_UPDATE_INTERVAL) {
+                _lastNearestCs = nearestAc.id;
+                _lastHudUpdate = _hudNow;
+                updateNearestHUD(nearestAc, myData);
+            }
+        } else {
+            if (_lastNearestCs !== null) {
+                _lastNearestCs = null;
+                updateNearestHUD(null, null);
+            }
         }
-    } else if (!nearestAc) {
+    } else if (isGamePaused) {
         if (_lastNearestCs !== null) {
             _lastNearestCs = null;
             updateNearestHUD(null, null);
@@ -1770,8 +2422,8 @@ function drawRadar() {
 // SECTION 18 — DRAW LOOP
 // ═══════════════════════════════════════════════════
 
-setInterval(() => { if (!isDragging) drawRadar(); }, 120);
-setInterval(repositionUI, 1000);
+setInterval(() => { if (!isDragging) drawRadar(); }, DRAW_INTERVAL);
+setInterval(repositionUI, REPOSITION_INTERVAL);
 
 // ═══════════════════════════════════════════════════
 // SECTION 19 — INIT
@@ -1782,4 +2434,4 @@ setTimeout(() => {
     loadPosition();
     applyTheme();
     repositionNearestHUD();
-}, 300);
+}, INIT_DELAY);
