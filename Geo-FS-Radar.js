@@ -2,7 +2,7 @@
 // @name         GeoFS Radar
 // @namespace    http://tampermonkey.net/
 // @version      8.04
-// @description  Radar for GeoFS
+// @description  
 // @author       YK3D
 // @match        https://www.geo-fs.com/geofs.php?v=3.9
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=geo-fs.com
@@ -28,8 +28,8 @@ const SCROLL_INC = 500;   // m  — range change per scroll wheel tick
 // Fetching too fast triggers HTTP 429 (Too Many Requests).
 // The scheduler uses exponential backoff: on each 429 the delay is doubled
 // up to FETCH_DELAY_MAX, then recovers toward FETCH_DELAY_BASE on success.
-const FETCH_DELAY_BASE    =  200; // ms — normal poll interval
-const FETCH_DELAY_MAX     =  1000; // ms — longest back-off delay after repeated 429s
+const FETCH_DELAY_BASE    =  250; // ms — normal poll interval
+const FETCH_DELAY_MAX     =  2000; // ms — longest back-off delay after repeated 429s
 const FETCH_DELAY_INITIAL =   500; // ms — delay before the very first fetch after page load
 // Speed-delta window: position snapshots outside this range are discarded when
 // computing ground speed from successive positions (avoids bad readings on
@@ -877,7 +877,10 @@ function createMenu() {
     `;
     btn.onmouseover = () => btn.style.background = T().menuBtnBgHov;
     btn.onmouseout  = () => btn.style.background = T().menuBtnBg;
-    btn.onclick = (e) => { e.stopPropagation(); toggleMenu(); };
+    btn.onclick = (e) => {
+        e.stopPropagation();
+        toggleMenu();
+    };
     document.body.appendChild(btn);
 
     const panel = document.createElement('div');
@@ -1100,11 +1103,8 @@ function createMenu() {
 
     document.body.appendChild(panel);
 
-    document.addEventListener('click', (e) => {
-        if (menuOpen && !panel.contains(e.target) && e.target !== btn) {
-            closeMenu();
-        }
-    });
+    // Remove the document click handler that auto-closes the menu
+    // Only the menu button can close it now
 
     // Initial positioning
     repositionMenu();
@@ -1118,52 +1118,41 @@ function repositionMenu() {
     // Get radar position and dimensions
     const rl = parseInt(radarCanvas.style.left) || 5;
     const rt = parseInt(radarCanvas.style.top) || 0;
-    const menuHeight = 600; // Fixed menu height
+    const menuFullHeight = 600; // Full menu height
     const buttonSize = 40;
     const spacing = 5;
+    const bottomMargin = 60; // 60px margin from bottom of screen
 
-    // Calculate available space below radar
+    // Calculate window dimensions
     const windowHeight = window.innerHeight;
-    const spaceBelowRadar = windowHeight - (rt + radarSize);
-    const spaceAboveRadar = rt;
 
     // Position button to the right of radar (aligned with top)
     btn.style.left = (rl + radarSize + spacing) + 'px';
     btn.style.top = rt + 'px';
 
-    // Determine best panel position (below button by default)
-    let panelTop = rt + buttonSize + spacing;
+    // Position panel with top fixed to button bottom
+    const panelTop = rt + buttonSize + spacing;
+    panel.style.top = panelTop + 'px';
 
-    // Check if panel would go off screen
-    if (panelTop + menuHeight > windowHeight) {
-        // Not enough space below, try placing above
-        const panelTopAbove = rt - menuHeight - spacing;
+    // Calculate maximum allowed height (stop 40px from bottom of screen)
+    const maxAllowedHeight = windowHeight - panelTop - bottomMargin;
 
-        if (panelTopAbove >= 0) {
-            // Enough space above radar
-            panelTop = panelTopAbove;
-        } else {
-            // Not enough space above either, place at bottom of screen with adjusted height
-            panelTop = Math.max(spacing, windowHeight - menuHeight - spacing);
-
-            // Adjust panel height to fit
-            const maxHeight = windowHeight - panelTop - spacing;
-            panel.style.height = Math.min(menuHeight, maxHeight) + 'px';
-        }
-    } else {
-        // Reset to full height if there's enough space
-        panel.style.height = menuHeight + 'px';
-    }
+    // Set panel height - use full height if within limits, otherwise cap at maxAllowedHeight
+    const panelHeight = Math.min(menuFullHeight, maxAllowedHeight);
+    panel.style.height = panelHeight + 'px';
 
     // Position panel horizontally (aligned with button)
     panel.style.left = (rl + radarSize + spacing) + 'px';
-    panel.style.top = panelTop + 'px';
 
     // Ensure panel doesn't go off screen horizontally
     const panelRight = parseInt(panel.style.left) + UI.menuW;
     if (panelRight > window.innerWidth) {
         panel.style.left = (window.innerWidth - UI.menuW - spacing) + 'px';
     }
+
+    // Add a small visual indicator if menu is truncated
+    const isTruncated = panelHeight < menuFullHeight;
+    panel.style.borderBottom = isTruncated ? '2px solid rgba(255,200,0,0.5)' : '1.5px solid rgba(0,255,0,0.35)';
 }
 
 function updateMenuInfoCallsign(cs, lat, lon, acName) {
@@ -1222,7 +1211,6 @@ window.addEventListener('resize', () => {
     repositionMenu();
     repositionNearestHUD();
 });
-
 // ═══════════════════════════════════════════════════
 // SECTION 6 — BLIP POPUP
 // ═══════════════════════════════════════════════════
