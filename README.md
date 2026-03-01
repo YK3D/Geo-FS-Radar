@@ -3,7 +3,7 @@
 A Tampermonkey userscript that adds an ATC-style radar overlay to [GeoFS](https://www.geo-fs.com/geofs.php?v=3.9). Displays all nearby multiplayer aircraft in real time with callsigns, altitudes, speeds, headings, velocity vectors, range rings, and airport/runway data — all on a draggable circular canvas directly in-game.
 
 ---
- 
+
 ## Installation
 
 1. Install the [Tampermonkey](https://www.tampermonkey.net/) browser extension.
@@ -53,156 +53,146 @@ The radar canvas is a circle. Your aircraft is always in the centre. Other aircr
 ## Features
 
 ### Real-time Traffic
-Other players are shown as blips on the radar. Each blip can display:
-- **Callsign** — the pilot's identifier
-- **Altitude** — in feet (below FL100) or flight level (FL100+)
-- **Speed** — in knots
-- **Distance** — from your aircraft in metres or kilometres
-- **Heading vector** — a dashed line projecting ~30 seconds ahead at current speed
-- **Directional triangle** — when heading data is available, blips point in the aircraft's direction
-
-All of these labels are individually toggleable in the settings menu.
+Other players are shown as blips on the radar. Each blip can display callsign, altitude (feet / FL), speed (knots), distance, heading vector, and a directional triangle. All labels are individually toggleable in the settings menu.
 
 ### Nearest Traffic HUD
-A panel to the right of the radar shows live data for the closest aircraft (or a tracked one). It displays callsign, distance, bearing, altitude (with a delta from your altitude), speed, and heading.
+A panel to the right of the radar shows live data for the **closest aircraft in the entire multiplayer session** — not just those within the current radar range. Even if no blips are visible on screen (because you've zoomed in tight or the nearest player is far away), the HUD continues to show their callsign, distance, bearing, altitude delta, speed, and heading.
 
 ### Click-to-Track
-Clicking any blip locks the HUD onto that specific aircraft by session ID — not just callsign — so it works correctly even when multiple players share the default "Foo" name. While tracking:
-- The blip turns gold and gets a selection ring
-- An **Isolate** toggle hides all other blips so only your target is visible
-- A **Stop Tracking** button returns you to nearest-aircraft mode
+Clicking any blip locks the HUD onto that specific aircraft by session ID. While tracking an **Isolate** toggle hides all other blips, and a **Stop Tracking** button returns to nearest-aircraft mode.
 
 ### Airports & Runways
-Airport data is loaded from [OurAirports](https://ourairports.com/) on startup. Runways are drawn as white lines with a blue circle around each airport. ICAO codes label each airport; full names appear when zoomed in close. Data refreshes every 5 minutes.
+Airport data is loaded from [OurAirports](https://ourairports.com/) on startup. Runways are drawn as white lines with a blue circle at each airport. ICAO codes label each airport. Data refreshes every 5 minutes.
 
 ### Dual Data Source (Internal → REST fallback)
-The radar first tries to read player data directly from GeoFS's internal multiplayer cache (`geofs.multiplayer`) — this is real-time, costs zero HTTP requests, and has no rate-limit risk. If the internal cache is unavailable, it falls back to polling `mps.geo-fs.com/map` with automatic exponential backoff.
+The radar first tries to read player data directly from GeoFS's internal multiplayer cache (`geofs.multiplayer`) — real-time, zero HTTP requests, zero rate-limit risk. If unavailable, it falls back to polling `mps.geo-fs.com/map` with exponential backoff.
 
-The API Status row in the settings panel shows which source is active:
+The API Status row shows which source is active:
 - `Internal — N aircraft (real-time)` — reading from GeoFS directly ✓
 - `REST — N aircraft` — using the HTTP fallback
-- `429 Rate limited — retrying in Xs` — being throttled, will auto-recover
+- `429 Rate limited — retrying in Xs` — throttled, auto-recovering
 
-### Themes
-- **Normal mode** — green-on-black phosphor radar aesthetic
-- **Night mode** — deep red tones for dark environments
+### Smooth Sweep Line
+The rotating sweep line uses `requestAnimationFrame` and advances by real elapsed time, so it moves at a constant speed regardless of the data update rate or system load. A faint trailing shadow/glow sits behind the bright line and can be toggled separately.
 
-Themes apply to the canvas, HUD, range box, menu, and all UI elements simultaneously.
+### Themes & Pause Dimming
+Normal mode is green-on-black; Night mode is red-on-black. When the game is paused, the canvas, range box, menu button, settings panel, and HUD all fade to 45% opacity together.
 
 ### Orientation Modes
-- **N↑ (North-up)** — north is always at the top; your triangle rotates
-- **TRK↑ (Track-up)** — your heading is always up; the map rotates around you
-
-### Visibility Toggle
-**Alt + Z** hides and shows the entire radar UI (canvas, range box, menu button, HUD). State is remembered across sessions.
+- **N↑ (North-up)** — north is always at the top
+- **TRK↑ (Track-up)** — your heading is always up; the map rotates
 
 ---
 
 ## Settings Menu
 
-Open with the **☰** button. Settings are saved automatically to `localStorage`.
+Open with the **☰** button. All settings save automatically to `localStorage`.
 
 ### Display
 | Setting | Description |
 |---|---|
-| Night Mode | Switch to red-on-black colour theme |
-| Orientation | N↑ (north up) or TRK↑ (track up / heading up) |
-| Player Triangle | Show/hide the green triangle at the canvas centre |
-| Range Rings | Show/hide the three concentric distance rings |
-| Ring Labels | Show/hide the distance label on each ring |
+| Night Mode | Red-on-black colour theme |
+| Orientation | N↑ or TRK↑ |
+| Player Triangle | Your green centre triangle |
+| Range Rings | Concentric distance rings |
+| Ring Labels | Distance label on each ring |
 
 ### Traffic
 | Setting | Description |
 |---|---|
-| Show Traffic | Master toggle for all other-aircraft blips |
-| Traffic Triangles | Directional triangles when heading is known; falls back to dots |
-| Callsign | Show other pilots' callsigns on their blip |
-| Altitude | Show altitude tag on each blip |
-| Speed | Show speed tag on each blip |
-| Distance | Show distance-from-you tag on each blip |
-| Heading Vectors | Dashed velocity vector lines projecting from each blip |
-| Tracking / Nearby Traffic | Show or hide the HUD panel |
+| Show Traffic | Master blip toggle |
+| Traffic Triangles | Directional triangles (falls back to dots) |
+| Callsign | Callsign tag on each blip |
+| Altitude | Altitude tag on each blip |
+| Speed | Speed tag on each blip |
+| Distance | Distance tag on each blip |
+| Heading Vectors | Velocity vector lines |
+| Tracking / Nearby Traffic | HUD panel visibility |
 
 ### Map
 | Setting | Description |
 |---|---|
-| Airports & Runways | Show/hide airport circles and runway lines |
+| Airports & Runways | Airport circles and runway lines |
 
 ### My Aircraft
-Displays your current callsign and position (read-only). Also contains:
+Shows your callsign and position (read-only).
+
 | Setting | Description |
 |---|---|
-| Show My Callsign | Draws your callsign tag below your triangle on the canvas |
+| Show My Callsign | Draws your callsign tag below your triangle |
+
+### Radar Preferences
+All values persist to `localStorage`. Every row supports **−/+ buttons** and **click-to-type** keyboard input.
+
+| Setting | Unit | Range | Step | Description |
+|---|---|---|---|---|
+| Radar Size | px **or** % | 150–900 px / 1–100% | 10 px / 5% | Canvas diameter. In **%** mode, 100% fills the shortest screen dimension. |
+| Min Range | km | 0.5–10 km | 0.5 km | Minimum radar zoom level |
+| Max Range | km | 1–100 km | 1 km | Maximum radar zoom level |
+| Scroll Step | km | 0.5–10 km | 0.5 km | Range change per scroll tick |
+| Update Delay | ms | 50–1000 ms | 50 ms | Data refresh rate (REST fallback only) |
+| Sweep Line | toggle | — | — | Enable/disable the rotating sweep line |
+| Spin Speed | rad/frame | 0.01–0.5 | 0.01 | Sweep rotation speed (time-based, frame-rate independent) |
+
+#### Radar Size — % mode
+When the unit is **%**, the value is a percentage of `min(screen width, screen height)`. So 50% on a 1920×1080 display = 540 px. 100% fills the shortest screen dimension completely. Steps are always 5%.
+
+#### Click-to-type
+Click the green value display in any preference row to open a text input. Enter your value in the **displayed unit** (km for ranges, % for percent size, etc.), then press **Enter** or click away to commit. Press **Escape** to cancel. Values are automatically clamped to the allowed range and rounded to the nearest step.
 
 ---
 
-## Editing Parameters
+## Editing Parameters in the Script
 
-All tuneable constants are grouped at the top of the script in clearly labelled sections. You do not need to touch any drawing code to change behaviour or appearance.
-
-### Section 1 — Radar Constants
+### Section 1 — Preference Defaults
+Factory defaults used only on first load (menu overrides these thereafter):
 ```js
-const radarSize  = 450;    // px  — canvas diameter
-const MIN_RANGE  = 500;    // m   — minimum zoom range
-const MAX_RANGE  = 50000;  // m   — maximum zoom range
-const SCROLL_INC = 500;    // m   — range step per scroll tick
-```
-
-### Section 1b — Timing & Intervals
-```js
-const FETCH_DELAY_BASE     = 250;    // ms — normal REST poll interval
-const FETCH_DELAY_MAX      = 2000;   // ms — maximum backoff after 429s
-const FETCH_DELAY_INITIAL  = 500;    // ms — delay before very first REST fetch
-const AIRPORT_FETCH_INITIAL = 2000;  // ms — delay before first airport fetch
-const AIRPORT_REFETCH       = 300000;// ms — how often to refresh airport data (5 min)
-const DRAW_INTERVAL         = 120;   // ms — canvas redraw rate (~8 fps)
-const SPIN_SPEED            = 0.1;   // rad/frame — sweep line rotation speed
-```
-Increase `DRAW_INTERVAL` to reduce CPU usage. Decrease `SPIN_SPEED` for a slower sweep.
-
-### Section 1c — Font Families
-```js
-const FONT_SANS   = 'Arial, sans-serif';              // menus, labels, buttons
-const FONT_MONO   = '"Courier New", Courier, monospace'; // HUD and popup data rows
-const FONT_CANVAS = 'Arial';                           // canvas 2D drawing
-```
-Change any of these strings to globally swap the typeface across that category.
-
-### Section 1d — UI Object (sizes in pixels)
-Every size used in the UI — blip radius, label font sizes, ring stroke width, range box dimensions, menu widths, HUD font sizes, etc. — is an entry in the `UI` object. Examples:
-
-```js
-const UI = {
-    blipDotR:            5,   // radius of a plain dot blip
-    blipTriTip:          11,  // nose-to-centre distance of a triangle blip
-    ringLineW:           6,   // stroke width of range rings
-    compassFont:         22,  // N/E/S/W letter size
-    playerTriTip:        15,  // size of your own triangle
-    rangeBoxW:           130, // range pill width
-    menuW:               280, // settings panel width
-    hudCallsignFont:     18,  // callsign value in HUD
-    hudDataFont:         15,  // distance/bearing/alt/speed values in HUD
-    // ...
+const _PREF_DEFAULTS = {
+    radarSizePx:   450,   // initial canvas size in px
+    radarSizePct:  40,    // initial canvas size in %
+    radarSizeUnit: 'px',  // 'px' or '%'
+    minRangeKm:    0.5,   // km
+    maxRangeKm:    50,    // km
+    scrollIncKm:   0.5,   // km
+    fetchDelay:    250,   // ms
+    spinSpeed:     0.1,   // rad/frame at 60 fps
+    spinEnabled:   true,
+    spinShadow:    true,
 };
 ```
 
+### Section 1b — Fixed Timing Constants
+```js
+const DRAW_INTERVAL   = 120;    // ms — full radar redraw rate (~8 fps base)
+const AIRPORT_REFETCH = 300000; // ms — airport data refresh (5 min)
+```
+The sweep line itself runs at native frame rate via `requestAnimationFrame` and is unaffected by `DRAW_INTERVAL`.
+
+### Section 1c — Font Families
+```js
+const FONT_SANS   = 'Arial, sans-serif';
+const FONT_MONO   = '"Courier New", Courier, monospace';
+const FONT_CANVAS = 'Arial';
+```
+
+### Section 1d — UI Object
+Every pixel size in the UI is a property of the `UI` object — blip radius, font sizes, ring line width, HUD dimensions, etc. Edit here to resize individual elements without touching drawing code.
+
 ### Colour Themes
-Two full colour palettes live in the `THEMES` object (`normal` and `night`). Every colour used anywhere in the UI — canvas background, ring colours, blip colours, HUD panel colours, menu chrome — is a named property you can edit. Switch between them with the Night Mode toggle in the settings menu, or edit the palettes directly to make your own theme.
+Two palettes in the `THEMES` object (`normal` and `night`). Every colour for every element is a named property — edit or extend to create your own theme.
 
 ---
 
 ## Troubleshooting
 
-**No blips appearing**
-- Check the API Status row in the settings menu. If it shows an error, the REST fallback may be blocked. The internal source will activate automatically once GeoFS finishes loading.
-- Make sure "Show Traffic" is enabled.
-- Try increasing the range with the scroll wheel.
+**No blips** — check API Status in the menu. Ensure Show Traffic is on. Try zooming out.
 
-**Radar appears but immediately hides**
-- You may have previously pressed Alt+Z to hide it. Press Alt+Z again to show it.
+**Radar hidden** — press Alt+Z to show it (may have been toggled off).
 
-**429 Rate Limited message**
-- The script is using the REST fallback and is being throttled. It will recover automatically with exponential backoff. If the internal source is active, this message will not appear.
+**429 Rate Limited** — REST fallback is throttled. It self-recovers. If the internal source is active this never appears.
 
-**Airports not loading**
-- OurAirports data is fetched from an external CDN on startup. If it fails, open the browser console to see the error. The data retries every 5 minutes.
+**HUD shows a player not visible on radar** — expected. The HUD tracks the globally nearest player regardless of radar range. Zoom out to see them on canvas.
+
+**Airports not loading** — OurAirports CDN fetch failed. Check the browser console. Retries every 5 minutes.
+
+**Sweep line looks jerky** — still working on this, let me know if you nkow how to fix it
