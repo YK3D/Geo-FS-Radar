@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS Radar
 // @namespace    http://tampermonkey.net/
-// @version      8.07
+// @version      8.06
 // @description
 // @author       YK3D
 // @match        https://www.geo-fs.com/geofs.php?v=3.9
@@ -140,7 +140,7 @@ const UI = {
     ringLabelFont:       15,
 
     // ── Compass cardinal letters ──────────────────────────────────────────
-    compassFont:         30,
+    compassFont:         22,
     compassHdgFont:      14,
 
     // ── Own-aircraft triangle ─────────────────────────────────────────────
