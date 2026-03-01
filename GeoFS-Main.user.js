@@ -7,7 +7,7 @@
 // @match        https://www.geo-fs.com/geofs.php?v=3.9
 // @grant        none
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=geo-fs.com
-// @require      https://cdn.jsdelivr.net/gh/YK3D/Geo-FS-Radar@main/Geo-FS-Radar.user.js
+// @require      https://raw.githubusercontent.com/YK3D/Geo-FS-Radar/main/Geo-FS-Radar.user.js?t=${Date.now()}
 // ==/UserScript==
 
 /* This space intentionally left blank — all code is loaded via @require
