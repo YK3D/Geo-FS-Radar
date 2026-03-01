@@ -1278,7 +1278,7 @@ function createMenu() {
         
         const isPct = prefs.radarSizeUnit === '%';
         const newRow = addPrefRow({
-            label: '',
+            label: ' ',  // Changed from '' to ' ' (space) to ensure a label exists
             get:  () => isPct ? prefs.radarSizePct : prefs.radarSizePx,
             set:  v  => { 
                 if (isPct) {
@@ -1301,9 +1301,9 @@ function createMenu() {
         
         // Hide the label (since we already have "Radar Size" above)
         if (newRow && newRow.row) {
-            const firstChild = newRow.row.firstChild;
-            if (firstChild) {
-                firstChild.style.display = 'none';
+            const labelElement = newRow.row.querySelector('[data-menu-rowlbl]');
+            if (labelElement) {
+                labelElement.style.display = 'none';
             }
         }
     }
