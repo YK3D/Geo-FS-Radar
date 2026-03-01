@@ -1277,35 +1277,101 @@ function createMenu() {
         }
         
         const isPct = prefs.radarSizeUnit === '%';
-        const newRow = addPrefRow({
-            label: ' ',  // Changed from '' to ' ' (space) to ensure a label exists
-            get:  () => isPct ? prefs.radarSizePct : prefs.radarSizePx,
-            set:  v  => { 
-                if (isPct) {
-                    prefs.radarSizePct = v;
-                } else {
-                    prefs.radarSizePx = v;
-                }
-                // Immediately apply the change
-                if (typeof applyPrefs === 'function') {
-                    applyPrefs();
-                }
-            },
-            fmt:  v  => _fmtRadarSize(),
-            min:  isPct ? 1   : 150,
-            max:  isPct ? 100 : 900,
-            step: isPct ? 5   : 10,
-            onCommit: applyPrefs,
-            placeholder: sizePlaceholder,
-        });
         
-        // Hide the label (since we already have "Radar Size" above)
-        if (newRow && newRow.row) {
-            const labelElement = newRow.row.querySelector('[data-menu-rowlbl]');
-            if (labelElement) {
-                labelElement.style.display = 'none';
-            }
+        // Create the row directly instead of using addPrefRow to have more control
+        const row = document.createElement('div');
+        row.style.cssText = `
+            display:flex; align-items:center; justify-content:space-between;
+            padding:${UI.menuRowPadY - 1}px 16px; gap:6px;
+        `;
+
+        // Empty label (hidden)
+        const lbl = document.createElement('span');
+        lbl.dataset.menuRowlbl = '1';
+        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1; min-width:0; display:none;`;
+        lbl.textContent = '';
+
+        // Value display
+        const valSpan = document.createElement('span');
+        valSpan.style.cssText = `
+            display:inline-block; min-width:64px; text-align:center;
+            color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
+            background:rgba(0,40,0,0.6); border:1px solid rgba(0,255,0,0.3);
+            border-radius:5px; padding:2px 6px;
+        `;
+        
+        function updateDisplay() {
+            valSpan.textContent = _fmtRadarSize();
         }
+        updateDisplay();
+
+        // Buttons
+        function makeBtn(label) {
+            const b = document.createElement('button');
+            b.textContent = label;
+            b.style.cssText = `
+                width:26px; height:26px; border-radius:5px; flex-shrink:0;
+                background:rgba(0,60,0,0.7); color:rgba(0,255,0,0.9);
+                border:1px solid rgba(0,255,0,0.3); font:bold 15px ${FONT_SANS};
+                cursor:pointer; display:flex; align-items:center; justify-content:center;
+                transition:background .12s; line-height:1;
+            `;
+            b.onmouseover = () => b.style.background = 'rgba(0,100,0,0.8)';
+            b.onmouseout  = () => b.style.background = 'rgba(0,60,0,0.7)';
+            return b;
+        }
+
+        const btnMinus = makeBtn('−');
+        const btnPlus  = makeBtn('+');
+
+        const min = isPct ? 1 : 150;
+        const max = isPct ? 100 : 900;
+        const step = isPct ? 5 : 10;
+
+        btnMinus.onclick = () => {
+            if (isPct) {
+                let v = prefs.radarSizePct - step;
+                v = Math.max(min, Math.min(max, v));
+                v = Math.round(v / step) * step;
+                v = Math.max(min, Math.min(max, v));
+                prefs.radarSizePct = v;
+            } else {
+                let v = prefs.radarSizePx - step;
+                v = Math.max(min, Math.min(max, v));
+                v = Math.round(v / step) * step;
+                v = Math.max(min, Math.min(max, v));
+                prefs.radarSizePx = v;
+            }
+            updateDisplay();
+            applyPrefs();
+            savePrefs();
+        };
+
+        btnPlus.onclick = () => {
+            if (isPct) {
+                let v = prefs.radarSizePct + step;
+                v = Math.max(min, Math.min(max, v));
+                v = Math.round(v / step) * step;
+                v = Math.max(min, Math.min(max, v));
+                prefs.radarSizePct = v;
+            } else {
+                let v = prefs.radarSizePx + step;
+                v = Math.max(min, Math.min(max, v));
+                v = Math.round(v / step) * step;
+                v = Math.max(min, Math.min(max, v));
+                prefs.radarSizePx = v;
+            }
+            updateDisplay();
+            applyPrefs();
+            savePrefs();
+        };
+
+        row.appendChild(lbl);
+        row.appendChild(btnMinus);
+        row.appendChild(valSpan);
+        row.appendChild(btnPlus);
+        
+        sizePlaceholder.appendChild(row);
     }
     rebuildSizeRow();
 }
