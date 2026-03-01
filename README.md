@@ -1,6 +1,6 @@
 # GeoFS Radar
 
-A Tampermonkey userscript that adds an ATC-style radar overlay to [GeoFS](https://www.geo-fs.com/geofs.php?v=3.9). Displays all nearby multiplayer aircraft in real time with callsigns, altitudes, speeds, headings, velocity vectors, range rings, and airport/runway data — all on a draggable circular canvas directly in-game.
+A Tampermonkey userscript that adds an ATC-style radar overlay to [GeoFS](https://www.geo-fs.com/geofs.php?v=3.9). Displays all nearby multiplayer aircraft in real time with callsigns, altitudes, speeds, headings, velocity vectors, range rings, and airport/runway data — all on a draggable circular canvas directly in-game. *Updates Automatically*
 
 ---
 
@@ -8,8 +8,8 @@ A Tampermonkey userscript that adds an ATC-style radar overlay to [GeoFS](https:
 
 1. Install the [Tampermonkey](https://www.tampermonkey.net/) browser extension.
 2. Open the Tampermonkey dashboard and create a new script.
-3. Paste the full contents of `GeoFS_Radar.user.js` and save.
-4. Navigate to `https://www.geo-fs.com/geofs.php?v=3.9` — the radar appears automatically.
+3. Paste the full contents of `GeoFS-Main.user.js` into a new script and save OR click [Install](https://github.com/YK3D/Geo-FS-Radar/raw/main/GeoFS-Main.user.js) 
+4. Open [GeoFS](https://www.geo-fs.com/geofs.php?v=3.9) — the radar appears automatically.
 
 ---
 
@@ -17,18 +17,18 @@ A Tampermonkey userscript that adds an ATC-style radar overlay to [GeoFS](https:
 
 ```
 ┌──────────────────────────────────────┐
-│  [ 5.0 km ]  ← range box            │
-│  ☰  ← settings button               │
+│       [ 5.0 km ]  ← range box        │
+│                                 ☰   |  ← settings button 
 │                                      │
 │         ╔══════════╗                 │
-│         ║  N       ║                 │
-│         ║    △     ║  ← you         │
-│         ║  ○ ○     ║  ← other ac    │
-│         ║      W E ║                 │
+│         ║    N     ║                 │[ NEARBY TRAFFIC panel / TRACKER ]
+│         ║    △     ║  ← you          │
+│         ║W  ○ ○   E║  ← other ac     │
+│         ║          ║                 │
 │         ║    S     ║                 │
 │         ╚══════════╝                 │
 │                                      │
-│  [ NEARBY TRAFFIC panel ]            │
+│              │
 └──────────────────────────────────────┘
 ```
 
