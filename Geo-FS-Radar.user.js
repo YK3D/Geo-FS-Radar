@@ -1242,7 +1242,32 @@ function createMenu() {
             color:${prefs.radarSizeUnit === u ? '#0f0' : 'rgba(150,200,150,0.7)'};
         `;
         b.onclick = () => {
-            prefs.radarSizeUnit = u;
+            const oldUnit = prefs.radarSizeUnit;
+            const newUnit = u;
+            
+            // Convert value when switching units
+            if (oldUnit !== newUnit) {
+                const screenSize = Math.min(window.innerWidth, window.innerHeight);
+                
+                if (newUnit === 'px') {
+                    // Convert from % to px
+                    prefs.radarSizePx = Math.max(150, Math.min(900,
+                        Math.round(prefs.radarSizePct / 100 * screenSize)
+                    ));
+                    // Round to nearest 10px
+                    prefs.radarSizePx = Math.round(prefs.radarSizePx / 10) * 10;
+                } else {
+                    // Convert from px to %
+                    prefs.radarSizePct = Math.max(1, Math.min(100,
+                        Math.round((prefs.radarSizePx / screenSize) * 100)
+                    ));
+                    // Round to nearest 5%
+                    prefs.radarSizePct = Math.round(prefs.radarSizePct / 5) * 5;
+                }
+            }
+            
+            prefs.radarSizeUnit = newUnit;
+            
             ['px','%'].forEach(o => {
                 const el = document.getElementById(`radarSizeUnit_${o}`);
                 if (!el) return;
@@ -1250,6 +1275,7 @@ function createMenu() {
                 el.style.background = on ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)';
                 el.style.color      = on ? '#0f0' : 'rgba(150,200,150,0.7)';
             });
+            
             // Rebuild the stepper row to reflect the new unit's range/step
             rebuildSizeRow();
             
@@ -1278,7 +1304,7 @@ function createMenu() {
         
         const isPct = prefs.radarSizeUnit === '%';
         
-        // Create the row directly instead of using addPrefRow to have more control
+        // Create the row directly
         const row = document.createElement('div');
         row.style.cssText = `
             display:flex; align-items:center; justify-content:space-between;
@@ -1375,7 +1401,6 @@ function createMenu() {
     }
     rebuildSizeRow();
 }
-
     // ── Min Range (stored/displayed/input in km) ──────────────────────────
     addPrefRow({
         label: 'Min Range',
