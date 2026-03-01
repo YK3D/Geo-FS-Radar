@@ -6,31 +6,28 @@
 // menu; editing these defaults only affects the first-ever load.
 // ═══════════════════════════════════════════════════
 
-// ── Default values (used only when no saved prefs exist) ─────────────────
-const _PREF_DEFAULTS = {
-    radarSizePx:   450,    // canvas diameter in px (used when unit='px')
-    radarSizeUnit: 'px',   // 'px' or '%'
-    minRangeKm:    0.5,    // km — minimum radar range   (0.5 – 10)
-    maxRangeKm:    50,     // km — maximum radar range   (1 – 100)
-    scrollIncKm:   0.5,    // km — range step per scroll (0.5 – 10)
-    fetchDelay:    250,    // ms — data poll interval    (50 – 1000)
-    spinSpeed:     0.1,    // rad/frame at 60 fps        (0.01 – 0.5)
-    spinEnabled:   true,   // show sweep line
-    spinShadow:    true,   // faint trailing glow behind sweep line
-};
+    const _PREF_DEFAULTS = {
+        radarSizePx:   450,
+        radarSizeUnit: 'px',
+        minRangeKm:    0.5,
+        maxRangeKm:    50,
+        scrollIncKm:   0.5,
+        fetchDelay:    250,
+        spinSpeed:     0.03,   // Speed of rotation (rad/frame)
+        spinEnabled:   true,
+        spinShadow:    true,   // Shadow toggle
+    };
 
-// ── Live prefs object — loaded from localStorage, mutated by menu ─────────
-let prefs;
-try {
-    prefs = Object.assign({}, _PREF_DEFAULTS,
-        JSON.parse(localStorage.getItem('radarPrefs') || '{}'));
-} catch(e) {
-    prefs = Object.assign({}, _PREF_DEFAULTS);
-}
+    let prefs;
+    try {
+        prefs = Object.assign({}, _PREF_DEFAULTS, JSON.parse(localStorage.getItem('radarPrefs') || '{}'));
+    } catch(e) {
+        prefs = Object.assign({}, _PREF_DEFAULTS);
+    }
 
-function savePrefs() {
-    localStorage.setItem('radarPrefs', JSON.stringify(prefs));
-}
+    function savePrefs() {
+        localStorage.setItem('radarPrefs', JSON.stringify(prefs));
+    }
 
 // ── Helper: compute canvas px from current prefs ─────────────────────────
 function _pxFromPrefs() {
