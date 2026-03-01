@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS Radar
 // @namespace    http://tampermonkey.net/
-// @version      8.06
+// @version      8.07
 // @description
 // @author       YK3D
 // @match        https://www.geo-fs.com/geofs.php?v=3.9
