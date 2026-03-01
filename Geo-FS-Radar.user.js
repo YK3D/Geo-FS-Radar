@@ -1218,188 +1218,126 @@ function createMenu() {
 
 // ── Radar Size ───────────────────────────────────────────────────────
 {
-    // Unit toggle (px / %)
-    const unitRow = document.createElement('div');
-    unitRow.style.cssText = `
+    const row = document.createElement('div');
+    row.style.cssText = `
         display:flex; align-items:center; justify-content:space-between;
         padding:${UI.menuRowPadY - 1}px 16px; gap:6px;
     `;
-    const unitLbl = document.createElement('span');
-    unitLbl.dataset.menuRowlbl = '1';
-    unitLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
-    unitLbl.textContent = 'Radar Size';
-    const unitWrap = document.createElement('div');
-    unitWrap.style.cssText = 'display:flex; gap:5px;';
-    ['px', '%'].forEach(u => {
-        const b = document.createElement('button');
-        b.id = `radarSizeUnit_${u}`;
-        b.textContent = u;
-        b.style.cssText = `
-            padding:3px 10px; font:bold ${UI.menuRadioFont}px ${FONT_SANS};
-            border-radius:5px; cursor:pointer;
-            border:1px solid rgba(0,255,0,0.3); transition:all .15s;
-            background:${prefs.radarSizeUnit === u ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)'};
-            color:${prefs.radarSizeUnit === u ? '#0f0' : 'rgba(150,200,150,0.7)'};
-        `;
-        b.onclick = () => {
-            const oldUnit = prefs.radarSizeUnit;
-            const newUnit = u;
-            
-            // Convert value when switching units
-            if (oldUnit !== newUnit) {
-                const screenSize = Math.min(window.innerWidth, window.innerHeight);
-                
-                if (newUnit === 'px') {
-                    // Convert from % to px
-                    prefs.radarSizePx = Math.max(150, Math.min(900,
-                        Math.round(prefs.radarSizePct / 100 * screenSize)
-                    ));
-                    // Round to nearest 10px
-                    prefs.radarSizePx = Math.round(prefs.radarSizePx / 10) * 10;
-                } else {
-                    // Convert from px to %
-                    prefs.radarSizePct = Math.max(1, Math.min(100,
-                        Math.round((prefs.radarSizePx / screenSize) * 100)
-                    ));
-                    // Round to nearest 5%
-                    prefs.radarSizePct = Math.round(prefs.radarSizePct / 5) * 5;
-                }
-            }
-            
-            prefs.radarSizeUnit = newUnit;
-            
-            ['px','%'].forEach(o => {
-                const el = document.getElementById(`radarSizeUnit_${o}`);
-                if (!el) return;
-                const on = prefs.radarSizeUnit === o;
-                el.style.background = on ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)';
-                el.style.color      = on ? '#0f0' : 'rgba(150,200,150,0.7)';
-            });
-            
-            // Rebuild the stepper row to reflect the new unit's range/step
-            rebuildSizeRow();
-            
-            // Force an update of the radar display
-            if (typeof applyPrefs === 'function') {
-                applyPrefs();
-            }
-            
-            savePrefs();
-        };
-        unitWrap.appendChild(b);
-    });
-    unitRow.appendChild(unitLbl);
-    unitRow.appendChild(unitWrap);
-    panel.appendChild(unitRow);
 
-    // Placeholder for the dynamic stepper
-    const sizePlaceholder = document.createElement('div');
-    panel.appendChild(sizePlaceholder);
+    // Label
+    const lbl = document.createElement('span');
+    lbl.dataset.menuRowlbl = '1';
+    lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
+    lbl.textContent = 'Radar Size';
 
-    function rebuildSizeRow() {
-        // Clear the placeholder first
-        while (sizePlaceholder.firstChild) {
-            sizePlaceholder.removeChild(sizePlaceholder.firstChild);
-        }
-        
-        const isPct = prefs.radarSizeUnit === '%';
-        
-        // Create the row directly
-        const row = document.createElement('div');
-        row.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding:${UI.menuRowPadY - 1}px 16px; gap:6px;
-        `;
+    // Minus button
+    const btnMinus = document.createElement('button');
+    btnMinus.textContent = '−';
+    btnMinus.style.cssText = `
+        width:26px; height:26px; border-radius:5px; flex-shrink:0;
+        background:rgba(0,60,0,0.7); color:rgba(0,255,0,0.9);
+        border:1px solid rgba(0,255,0,0.3); font:bold 15px ${FONT_SANS};
+        cursor:pointer; display:flex; align-items:center; justify-content:center;
+        transition:background .12s; line-height:1;
+    `;
+    btnMinus.onmouseover = () => btnMinus.style.background = 'rgba(0,100,0,0.8)';
+    btnMinus.onmouseout  = () => btnMinus.style.background = 'rgba(0,60,0,0.7)';
 
-        // Empty label (hidden)
-        const lbl = document.createElement('span');
-        lbl.dataset.menuRowlbl = '1';
-        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1; min-width:0; display:none;`;
-        lbl.textContent = '';
-
-        // Value display
-        const valSpan = document.createElement('span');
-        valSpan.style.cssText = `
-            display:inline-block; min-width:64px; text-align:center;
-            color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
-            background:rgba(0,40,0,0.6); border:1px solid rgba(0,255,0,0.3);
-            border-radius:5px; padding:2px 6px;
-        `;
-        
-        function updateDisplay() {
-            valSpan.textContent = _fmtRadarSize();
-        }
-        updateDisplay();
-
-        // Buttons
-        function makeBtn(label) {
-            const b = document.createElement('button');
-            b.textContent = label;
-            b.style.cssText = `
-                width:26px; height:26px; border-radius:5px; flex-shrink:0;
-                background:rgba(0,60,0,0.7); color:rgba(0,255,0,0.9);
-                border:1px solid rgba(0,255,0,0.3); font:bold 15px ${FONT_SANS};
-                cursor:pointer; display:flex; align-items:center; justify-content:center;
-                transition:background .12s; line-height:1;
-            `;
-            b.onmouseover = () => b.style.background = 'rgba(0,100,0,0.8)';
-            b.onmouseout  = () => b.style.background = 'rgba(0,60,0,0.7)';
-            return b;
-        }
-
-        const btnMinus = makeBtn('−');
-        const btnPlus  = makeBtn('+');
-
-        const min = isPct ? 1 : 150;
-        const max = isPct ? 100 : 900;
-        const step = isPct ? 5 : 10;
-
-        btnMinus.onclick = () => {
-            if (isPct) {
-                let v = prefs.radarSizePct - step;
-                v = Math.max(min, Math.min(max, v));
-                v = Math.round(v / step) * step;
-                v = Math.max(min, Math.min(max, v));
-                prefs.radarSizePct = v;
-            } else {
-                let v = prefs.radarSizePx - step;
-                v = Math.max(min, Math.min(max, v));
-                v = Math.round(v / step) * step;
-                v = Math.max(min, Math.min(max, v));
-                prefs.radarSizePx = v;
-            }
-            updateDisplay();
-            applyPrefs();
-            savePrefs();
-        };
-
-        btnPlus.onclick = () => {
-            if (isPct) {
-                let v = prefs.radarSizePct + step;
-                v = Math.max(min, Math.min(max, v));
-                v = Math.round(v / step) * step;
-                v = Math.max(min, Math.min(max, v));
-                prefs.radarSizePct = v;
-            } else {
-                let v = prefs.radarSizePx + step;
-                v = Math.max(min, Math.min(max, v));
-                v = Math.round(v / step) * step;
-                v = Math.max(min, Math.min(max, v));
-                prefs.radarSizePx = v;
-            }
-            updateDisplay();
-            applyPrefs();
-            savePrefs();
-        };
-
-        row.appendChild(lbl);
-        row.appendChild(btnMinus);
-        row.appendChild(valSpan);
-        row.appendChild(btnPlus);
-        
-        sizePlaceholder.appendChild(row);
+    // Value display
+    const valSpan = document.createElement('span');
+    valSpan.style.cssText = `
+        display:inline-block; min-width:64px; text-align:center;
+        color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
+        background:rgba(0,40,0,0.6); border:1px solid rgba(0,255,0,0.3);
+        border-radius:5px; padding:2px 6px; cursor:pointer;
+    `;
+    
+    function updateDisplay() {
+        valSpan.textContent = prefs.radarSizePx + ' px';
     }
-    rebuildSizeRow();
+    updateDisplay();
+
+    // Plus button
+    const btnPlus = document.createElement('button');
+    btnPlus.textContent = '+';
+    btnPlus.style.cssText = btnMinus.style.cssText; // Same style as minus
+
+    // Button click handlers
+    btnMinus.onclick = () => {
+        let v = prefs.radarSizePx - 10;
+        v = Math.max(150, Math.min(900, v));
+        v = Math.round(v / 10) * 10;
+        prefs.radarSizePx = v;
+        updateDisplay();
+        applyPrefs();
+        savePrefs();
+    };
+
+    btnPlus.onclick = () => {
+        let v = prefs.radarSizePx + 10;
+        v = Math.max(150, Math.min(900, v));
+        v = Math.round(v / 10) * 10;
+        prefs.radarSizePx = v;
+        updateDisplay();
+        applyPrefs();
+        savePrefs();
+    };
+
+    // Click on value to edit
+    valSpan.addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.value = prefs.radarSizePx;
+        input.min = 150;
+        input.max = 900;
+        input.step = 10;
+        input.style.cssText = `
+            width:64px; text-align:center;
+            color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
+            background:rgba(0,40,0,0.85); border:1px solid rgba(0,255,0,0.7);
+            border-radius:5px; padding:2px 4px; outline:none;
+            -moz-appearance:textfield;
+        `;
+
+        valSpan.style.display = 'none';
+        valSpan.parentNode.insertBefore(input, valSpan.nextSibling);
+
+        function commitInput() {
+            let v = parseInt(input.value);
+            if (!isFinite(v)) v = prefs.radarSizePx;
+            v = Math.max(150, Math.min(900, v));
+            v = Math.round(v / 10) * 10;
+            v = Math.max(150, Math.min(900, v));
+            prefs.radarSizePx = v;
+            updateDisplay();
+            applyPrefs();
+            savePrefs();
+            input.remove();
+            valSpan.style.display = 'inline-block';
+        }
+
+        input.addEventListener('blur', commitInput);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                commitInput();
+            }
+            if (e.key === 'Escape') {
+                input.remove();
+                valSpan.style.display = 'inline-block';
+            }
+        });
+        input.focus();
+        input.select();
+    });
+
+    // Assemble row
+    row.appendChild(lbl);
+    row.appendChild(btnMinus);
+    row.appendChild(valSpan);
+    row.appendChild(btnPlus);
+    
+    panel.appendChild(row);
 }
     // ── Min Range (stored/displayed/input in km) ──────────────────────────
     addPrefRow({
