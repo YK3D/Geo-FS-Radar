@@ -1482,60 +1482,7 @@ function createMenu() {
     });
 }
 
-// Spin animation variables
-let spinAnimationFrame = null;
-let spinAngle = 0;
-let lastDrawTime = 0;
-const TARGET_FPS = 10;
-const FRAME_TIME = 1000 / TARGET_FPS;
 
-function startSpinAnimation() {
-    if (spinAnimationFrame) cancelAnimationFrame(spinAnimationFrame);
-    spinAnimationFrame = requestAnimationFrame(animateSpin);
-}
-
-function stopSpinAnimation() {
-    if (spinAnimationFrame) {
-        cancelAnimationFrame(spinAnimationFrame);
-        spinAnimationFrame = null;
-    }
-    // Redraw without the spin line
-    redrawBaseGraphics();
-}
-
-function animateSpin(currentTime) {
-    if (!prefs.spinEnabled || isGamePaused) {
-        spinAnimationFrame = requestAnimationFrame(animateSpin);
-        return;
-    }
-
-    // Control frame rate for consistent animation
-    if (currentTime - lastDrawTime >= FRAME_TIME) {
-        // Update angle using prefs.spinSpeed directly
-        spinAngle += prefs.spinSpeed;
-        if (spinAngle > Math.PI * 2) spinAngle -= Math.PI * 2;
-        
-        // Draw the frame
-        drawFullFrame();
-        lastDrawTime = currentTime;
-    }
-    
-    spinAnimationFrame = requestAnimationFrame(animateSpin);
-}
-
-function drawFullFrame() {
-    // Clear the radar area only (not the entire canvas if there's UI)
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(radarSize/2, radarSize/2, radarSize/2, 0, Math.PI*2);
-    ctx.clip();
-    ctx.clearRect(0, 0, radarSize, radarSize);
-    ctx.restore();
-    
-    // Draw base radar graphics first
-    if (typeof drawRadarBase === 'function') {
-        drawRadarBase();
-    }
     
     // Draw the spin line with current angle
     drawSpinLine();
