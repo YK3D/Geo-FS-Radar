@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS Radar
 // @namespace    http://tampermonkey.net/
-// @version      57.9
+// @version      8.06
 // @description
 // @author       YK3D
 // @match        https://www.geo-fs.com/geofs.php?v=3.9
@@ -10,19 +10,88 @@
 // ==/UserScript==
 
 // ═══════════════════════════════════════════════════
-// SECTION 1 — RADAR CONSTANTS
+// SECTION 1 — RADAR PREFERENCES
+// These values are editable via the in-game Radar Preferences menu and are
+// persisted to localStorage automatically. Hard limits are enforced in the
+// menu; editing these defaults only affects the first-ever load.
 // ═══════════════════════════════════════════════════
 
-const radarSize  = 450;   // px — canvas width and height (circle diameter)
-const MIN_RANGE  = 500;   // m  — minimum radar range (innermost zoom)
-const MAX_RANGE  = 50000; // m  — maximum radar range (outermost zoom)
-const SCROLL_INC = 500;   // m  — range change per scroll wheel tick
+// ── Default values (used only when no saved prefs exist) ─────────────────
+const _PREF_DEFAULTS = {
+    radarSizePx:   450,    // canvas diameter in px (used when unit='px')
+    radarSizePct:  40,     // canvas diameter as % of min(screen w, h) (1–100, used when unit='%')
+    radarSizeUnit: 'px',   // 'px' or '%'
+    minRangeKm:    0.5,    // km — minimum radar range   (0.5 – 10)
+    maxRangeKm:    50,     // km — maximum radar range   (1 – 100)
+    scrollIncKm:   0.5,    // km — range step per scroll (0.5 – 10)
+    fetchDelay:    250,    // ms — data poll interval    (50 – 1000)
+    spinSpeed:     0.1,    // rad/frame at 60 fps        (0.01 – 0.5)
+    spinEnabled:   true,   // show sweep line
+    spinShadow:    true,   // faint trailing glow behind sweep line
+};
+
+// ── Live prefs object — loaded from localStorage, mutated by menu ─────────
+let prefs;
+try {
+    prefs = Object.assign({}, _PREF_DEFAULTS,
+        JSON.parse(localStorage.getItem('radarPrefs') || '{}'));
+} catch(e) {
+    prefs = Object.assign({}, _PREF_DEFAULTS);
+}
+
+function savePrefs() {
+    localStorage.setItem('radarPrefs', JSON.stringify(prefs));
+}
+
+// ── Helper: compute canvas px from current prefs ─────────────────────────
+function _pxFromPrefs() {
+    if (prefs.radarSizeUnit === '%') {
+        return Math.max(150, Math.min(900,
+            Math.round(prefs.radarSizePct / 100 * Math.min(window.innerWidth, window.innerHeight))
+        ));
+    }
+    return prefs.radarSizePx;
+}
+
+// ── Runtime aliases — the rest of the code reads these ───────────────────
+let radarSize    = _pxFromPrefs();
+let MIN_RANGE    = prefs.minRangeKm  * 1000;  // converted to metres
+let MAX_RANGE    = prefs.maxRangeKm  * 1000;
+let SCROLL_INC   = prefs.scrollIncKm * 1000;
+let FETCH_DELAY_BASE = prefs.fetchDelay;
+let SPIN_SPEED   = prefs.spinSpeed;
+
+// ── applyPrefs — call after any prefs mutation ────────────────────────────
+function applyPrefs() {
+    savePrefs();
+    radarSize        = _pxFromPrefs();
+    MIN_RANGE        = prefs.minRangeKm  * 1000;
+    MAX_RANGE        = prefs.maxRangeKm  * 1000;
+    SCROLL_INC       = prefs.scrollIncKm * 1000;
+    FETCH_DELAY_BASE = prefs.fetchDelay;
+    SPIN_SPEED       = prefs.spinSpeed;
+
+    radarCanvas.width  = radarSize;
+    radarCanvas.height = radarSize;
+    radarCanvas.style.width  = radarSize + 'px';
+    radarCanvas.style.height = radarSize + 'px';
+
+    radarRange = Math.max(MIN_RANGE, Math.min(MAX_RANGE, radarRange));
+    updateRangeBox();
+    repositionUI();
+    applyTheme();
+}
+
+// ── Helper: format radar size for display ────────────────────────────────
+function _fmtRadarSize() {
+    if (prefs.radarSizeUnit === '%') return prefs.radarSizePct + '%';
+    return prefs.radarSizePx + ' px';
+}
 
 // ═══════════════════════════════════════════════════
-// SECTION 1b — TIMING & INTERVALS
+// SECTION 1b — TIMING & INTERVALS (fixed, not user-editable)
 // ═══════════════════════════════════════════════════
 
-const FETCH_DELAY_BASE    =  250;
 const FETCH_DELAY_MAX     =  2000;
 const FETCH_DELAY_INITIAL =   500;
 const FETCH_SPEED_DT_MIN  =   0.5;
@@ -36,7 +105,6 @@ const MENU_INFO_UPDATE_INTERVAL =  1000;
 const HUD_UPDATE_INTERVAL       =   500;
 const INIT_DELAY             =   300;
 const DRAG_REPOSITION_DELAY  =   120;
-const SPIN_SPEED             =  0.1;
 
 // ═══════════════════════════════════════════════════
 // SECTION 1c — FONT FAMILIES
@@ -126,7 +194,8 @@ const UI = {
     gridLineW:           2,
 };
 
-let radarRange   = parseInt(localStorage.getItem('radarRange') || '5000');
+let radarRange = Math.max(MIN_RANGE, Math.min(MAX_RANGE,
+    parseInt(localStorage.getItem('radarRange') || '5000')));
 let isGamePaused = false;
 
 let _lastValidLat   = null;
@@ -407,6 +476,7 @@ radarCanvas.width  = radarSize;
 radarCanvas.height = radarSize;
 radarCanvas.style.cssText = `
     position:fixed; top:66%; left:5px;
+    width:${radarSize}px; height:${radarSize}px;
     border-radius:50%;
     z-index:2147483647; cursor:move;
     border:2px solid rgba(255,255,255,0.3);
@@ -1028,7 +1098,295 @@ function createMenu() {
 
     addSep();
 
+    // ── Preference stepper row ────────────────────────────────────────────
+    // Renders a label + value display with −/+ buttons.
+    // opts: { label, get, set, fmt, min, max, step, onCommit }
+    // Manual keyboard input is activated by clicking the value display.
+    function addPrefRow(opts) {
+        const { label, get, set, fmt, min, max, step, onCommit, placeholder } = opts;
+        const t = T();
+
+        const row = document.createElement('div');
+        row.style.cssText = `
+            display:flex; align-items:center; justify-content:space-between;
+            padding:${UI.menuRowPadY - 1}px 16px; gap:6px;
+        `;
+
+        const lbl = document.createElement('span');
+        lbl.dataset.menuRowlbl = '1';
+        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1; min-width:0;`;
+        lbl.textContent = label;
+
+        // Value display / inline input wrapper
+        const valWrap = document.createElement('div');
+        valWrap.style.cssText = `position:relative; flex-shrink:0;`;
+
+        const valSpan = document.createElement('span');
+        valSpan.style.cssText = `
+            display:inline-block; min-width:64px; text-align:center;
+            color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
+            background:rgba(0,40,0,0.6); border:1px solid rgba(0,255,0,0.3);
+            border-radius:5px; padding:2px 6px; cursor:text;
+            transition:border-color .15s;
+        `;
+        valSpan.textContent = fmt(get());
+        valSpan.title = 'Click to type a value';
+
+        // Inline input (hidden by default)
+        const valInput = document.createElement('input');
+        valInput.type = 'number';
+        valInput.style.cssText = `
+            display:none; width:64px; text-align:center;
+            color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
+            background:rgba(0,40,0,0.85); border:1px solid rgba(0,255,0,0.7);
+            border-radius:5px; padding:2px 4px; outline:none;
+            -moz-appearance:textfield;
+        `;
+        valInput.min  = min;
+        valInput.max  = max;
+        valInput.step = step;
+
+        function commitInput() {
+            let v = parseFloat(valInput.value);
+            if (!isFinite(v)) v = get();
+            v = Math.max(min, Math.min(max, v));
+            // Round to nearest step
+            v = Math.round(v / step) * step;
+            set(v);
+            valSpan.textContent = fmt(get());
+            valInput.style.display = 'none';
+            valSpan.style.display  = 'inline-block';
+            if (onCommit) onCommit();
+        }
+
+        valSpan.addEventListener('click', () => {
+            valInput.value = get();
+            valSpan.style.display  = 'none';
+            valInput.style.display = 'inline-block';
+            valInput.focus();
+            valInput.select();
+        });
+        valInput.addEventListener('blur',    commitInput);
+        valInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); commitInput(); }
+            if (e.key === 'Escape') {
+                valInput.style.display = 'none';
+                valSpan.style.display  = 'inline-block';
+            }
+        });
+
+        valWrap.appendChild(valSpan);
+        valWrap.appendChild(valInput);
+
+        // Button helper
+        function makeBtn(label) {
+            const b = document.createElement('button');
+            b.textContent = label;
+            b.style.cssText = `
+                width:26px; height:26px; border-radius:5px; flex-shrink:0;
+                background:rgba(0,60,0,0.7); color:rgba(0,255,0,0.9);
+                border:1px solid rgba(0,255,0,0.3); font:bold 15px ${FONT_SANS};
+                cursor:pointer; display:flex; align-items:center; justify-content:center;
+                transition:background .12s; line-height:1;
+            `;
+            b.onmouseover = () => b.style.background = 'rgba(0,100,0,0.8)';
+            b.onmouseout  = () => b.style.background = 'rgba(0,60,0,0.7)';
+            return b;
+        }
+
+        const btnMinus = makeBtn('−');
+        const btnPlus  = makeBtn('+');
+
+        btnMinus.onclick = () => {
+            const v = Math.max(min, get() - step);
+            set(v);
+            valSpan.textContent = fmt(get());
+            if (onCommit) onCommit();
+        };
+        btnPlus.onclick = () => {
+            const v = Math.min(max, get() + step);
+            set(v);
+            valSpan.textContent = fmt(get());
+            if (onCommit) onCommit();
+        };
+
+        row.appendChild(lbl);
+        row.appendChild(btnMinus);
+        row.appendChild(valWrap);
+        row.appendChild(btnPlus);
+        if (placeholder) {
+            placeholder.replaceWith(row);
+        } else {
+            panel.appendChild(row);
+        }
+        return { row, valSpan, valInput };
+    }
+
+    // ── Radar Preferences ────────────────────────────────────────────────
+    addSep();
+    addSection('Radar Preferences');
+
+    // ── Radar Size ───────────────────────────────────────────────────────
+    {
+        // Unit toggle (px / %)
+        const unitRow = document.createElement('div');
+        unitRow.style.cssText = `
+            display:flex; align-items:center; justify-content:space-between;
+            padding:${UI.menuRowPadY - 1}px 16px; gap:6px;
+        `;
+        const unitLbl = document.createElement('span');
+        unitLbl.dataset.menuRowlbl = '1';
+        unitLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
+        unitLbl.textContent = 'Radar Size';
+        const unitWrap = document.createElement('div');
+        unitWrap.style.cssText = 'display:flex; gap:5px;';
+        ['px', '%'].forEach(u => {
+            const b = document.createElement('button');
+            b.id = `radarSizeUnit_${u}`;
+            b.textContent = u;
+            b.style.cssText = `
+                padding:3px 10px; font:bold ${UI.menuRadioFont}px ${FONT_SANS};
+                border-radius:5px; cursor:pointer;
+                border:1px solid rgba(0,255,0,0.3); transition:all .15s;
+                background:${prefs.radarSizeUnit === u ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)'};
+                color:${prefs.radarSizeUnit === u ? '#0f0' : 'rgba(150,200,150,0.7)'};
+            `;
+            b.onclick = () => {
+                prefs.radarSizeUnit = u;
+                ['px','%'].forEach(o => {
+                    const el = document.getElementById(`radarSizeUnit_${o}`);
+                    if (!el) return;
+                    const on = prefs.radarSizeUnit === o;
+                    el.style.background = on ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)';
+                    el.style.color      = on ? '#0f0' : 'rgba(150,200,150,0.7)';
+                });
+                // Rebuild the stepper row to reflect the new unit's range/step
+                rebuildSizeRow();
+                savePrefs();
+            };
+            unitWrap.appendChild(b);
+        });
+        unitRow.appendChild(unitLbl);
+        unitRow.appendChild(unitWrap);
+        panel.appendChild(unitRow);
+
+        // Placeholder for the dynamic stepper
+        const sizePlaceholder = document.createElement('div');
+        panel.appendChild(sizePlaceholder);
+
+        function rebuildSizeRow() {
+            const isPct = prefs.radarSizeUnit === '%';
+            const newRow = addPrefRow({
+                label: '',
+                get:  () => isPct ? prefs.radarSizePct : prefs.radarSizePx,
+                set:  v  => { if (isPct) prefs.radarSizePct = v; else prefs.radarSizePx = v; },
+                fmt:  v  => _fmtRadarSize(),
+                min:  isPct ? 1   : 150,
+                max:  isPct ? 100 : 900,
+                step: isPct ? 5   : 10,
+                onCommit: applyPrefs,
+                placeholder: sizePlaceholder,
+            });
+            newRow.row.firstChild.style.display = 'none';
+        }
+        rebuildSizeRow();
+    }
+
+    // ── Min Range (stored/displayed/input in km) ──────────────────────────
+    addPrefRow({
+        label: 'Min Range',
+        get:  () => prefs.minRangeKm,
+        set:  v  => { prefs.minRangeKm = v; },
+        fmt:  v  => v.toFixed(1) + ' km',
+        min: 0.5, max: 10, step: 0.5,
+        onCommit: applyPrefs,
+    });
+
+    // ── Max Range (km) ────────────────────────────────────────────────────
+    addPrefRow({
+        label: 'Max Range',
+        get:  () => prefs.maxRangeKm,
+        set:  v  => { prefs.maxRangeKm = v; },
+        fmt:  v  => v.toFixed(0) + ' km',
+        min: 1, max: 100, step: 1,
+        onCommit: applyPrefs,
+    });
+
+    // ── Scroll Step (km) ──────────────────────────────────────────────────
+    addPrefRow({
+        label: 'Scroll Step',
+        get:  () => prefs.scrollIncKm,
+        set:  v  => { prefs.scrollIncKm = v; },
+        fmt:  v  => v.toFixed(1) + ' km',
+        min: 0.5, max: 10, step: 0.5,
+        onCommit: applyPrefs,
+    });
+
+    // ── Update Delay ─────────────────────────────────────────────────────
+    addPrefRow({
+        label: 'Update Delay',
+        get: () => prefs.fetchDelay,
+        set: v => { prefs.fetchDelay = v; },
+        fmt: v => v + ' ms',
+        min: 50, max: 1000, step: 50,
+        onCommit: applyPrefs,
+    });
+
+    // ── Spin Speed + enable toggle ────────────────────────────────────────
+    {
+        const spinEnRow = document.createElement('div');
+        spinEnRow.dataset.menuRow = '_spinEnabled';
+        spinEnRow.style.cssText = `
+            display:flex; align-items:center; justify-content:space-between;
+            padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;
+        `;
+        spinEnRow.onmouseover = () => spinEnRow.style.background = T().menuRowHover;
+        spinEnRow.onmouseout  = () => spinEnRow.style.background = '';
+        const spinEnLbl = document.createElement('span');
+        spinEnLbl.dataset.menuRowlbl = '1';
+        spinEnLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
+        spinEnLbl.textContent = 'Sweep Line';
+        const spinEnSw = document.createElement('div');
+        const spinEnKnobOff = 3, spinEnKnobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
+        spinEnSw.style.cssText = `
+            width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
+            border-radius:${UI.menuSwitchH/2}px; position:relative;
+            background:${prefs.spinEnabled ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
+            border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;
+        `;
+        const spinEnKnob = document.createElement('div');
+        spinEnKnob.style.cssText = `
+            position:absolute; top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+            left:${prefs.spinEnabled ? spinEnKnobOn : spinEnKnobOff}px;
+            width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%;
+            background:${prefs.spinEnabled ? '#0f0' : '#888'};
+            transition:left .2s, background .2s;
+        `;
+        spinEnSw.appendChild(spinEnKnob);
+        spinEnRow.appendChild(spinEnLbl);
+        spinEnRow.appendChild(spinEnSw);
+        spinEnRow.onclick = () => {
+            prefs.spinEnabled = !prefs.spinEnabled;
+            const t2 = T();
+            spinEnSw.style.background   = prefs.spinEnabled ? t2.switchOn  : t2.switchOff;
+            spinEnKnob.style.left       = prefs.spinEnabled ? spinEnKnobOn + 'px' : spinEnKnobOff + 'px';
+            spinEnKnob.style.background = prefs.spinEnabled ? t2.knobOn : t2.knobOff;
+            savePrefs();
+        };
+        panel.appendChild(spinEnRow);
+
+        addPrefRow({
+            label: 'Spin Speed',
+            get: () => prefs.spinSpeed,
+            set: v => { prefs.spinSpeed = Math.round(v * 100) / 100; },
+            fmt: v => v.toFixed(2) + ' rad',
+            min: 0.01, max: 0.5, step: 0.01,
+            onCommit: applyPrefs,
+        });
+    }
+
     // ── API Status ────────────────────────────────────────────────────────
+    addSep();
     addSection('API Status');
     addStatusRow();
 
@@ -1309,10 +1667,29 @@ setInterval(() => {
             isGamePaused = geofs.gui?.pause ?? geofs.pause ?? false;
         }
         const t = T();
-        radarCanvas.style.opacity    = isGamePaused ? '0.5' : '1';
-        radarCanvas.style.boxShadow  = isGamePaused
+        const pauseOpacity = '0.45';
+
+        // ── Canvas ────────────────────────────────────────────────────────
+        radarCanvas.style.opacity   = isGamePaused ? pauseOpacity : '1';
+        radarCanvas.style.boxShadow = isGamePaused
             ? '0 0 10px rgba(255,220,0,0.4)'
             : t.canvasGlow;
+
+        // ── Range box ─────────────────────────────────────────────────────
+        const rb = document.getElementById('radarRangeBox');
+        if (rb) rb.style.opacity = isGamePaused ? pauseOpacity : '1';
+
+        // ── Menu button ───────────────────────────────────────────────────
+        const mb = document.getElementById('radarMenuBtn');
+        if (mb) mb.style.opacity = isGamePaused ? pauseOpacity : '1';
+
+        // ── Settings panel ────────────────────────────────────────────────
+        const mp = document.getElementById('radarMenuPanel');
+        if (mp) mp.style.opacity = isGamePaused ? pauseOpacity : '1';
+
+        // ── HUD ───────────────────────────────────────────────────────────
+        nearestHUD.style.opacity = isGamePaused ? pauseOpacity : '1';
+
     } catch(e) {}
 }, PAUSE_POLL_INTERVAL);
 
@@ -1720,26 +2097,63 @@ function worldToCanvas(dx, dy, cx, cy, rotRad) {
 
 // ═══════════════════════════════════════════════════
 // SECTION 14 — SPIN LINE
+// Angle advances based on real elapsed time (ms since last frame) so the
+// sweep speed is constant regardless of draw rate or fetch delays.
 // ═══════════════════════════════════════════════════
 
-let spinAngle = 0;
+let spinAngle    = 0;
+let _spinLastTs  = null;   // performance.now() of last rAF tick
 
 function drawSpinLine() {
-    if (isGamePaused) return;
-    const cx = radarSize/2, cy = radarSize/2;
-    const R  = radarSize/2 - 10;
+    if (!prefs.spinEnabled) return;
+
+    const cx = radarSize / 2, cy = radarSize / 2;
+    const R  = radarSize / 2 - 10;
     const t  = T();
 
-    spinAngle += SPIN_SPEED;
-    if (spinAngle > Math.PI*2) spinAngle -= Math.PI*2;
+    // ── Shadow pass (drawn first, so the bright line sits on top) ─────────
+    if (prefs.spinShadow) {
+        const shadowOffset = 0.35;                      // rad behind the line
+        const shadowAngle  = spinAngle - shadowOffset;
+        const sx = cx + Math.cos(shadowAngle) * R;
+        const sy = cy + Math.sin(shadowAngle) * R;
 
-    const ex = cx + Math.cos(spinAngle) * R;
-    const ey = cy + Math.sin(spinAngle) * R;
+        // Wide, very faint glow arc
+        const lgShadow = ctx.createConicalGradient
+            ? null                                       // future API; skip for now
+            : null;
 
+        // Radial wedge — same technique as the sweep trail but dimmer & wider
+        const arcStart = shadowAngle - 0.6;
+        ctx.save();
+        ctx.globalAlpha = 0.07;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, R, arcStart, shadowAngle);
+        ctx.closePath();
+        ctx.fillStyle = settings.nightMode
+            ? 'rgba(255,100,30,0.9)'
+            : 'rgba(0,255,0,0.9)';
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Thin shadow line
+        ctx.save();
+        ctx.globalAlpha = 0.25;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(sx, sy);
+        ctx.strokeStyle = settings.nightMode ? 'rgba(255,120,40,0.6)' : 'rgba(0,255,80,0.6)';
+        ctx.lineWidth   = 3;
+        ctx.shadowColor = settings.nightMode ? 'rgba(255,100,20,0.4)' : 'rgba(0,255,0,0.4)';
+        ctx.shadowBlur  = 8;
+        ctx.stroke();
+        ctx.restore();
+        ctx.restore();
+    }
+
+    // ── Sweep trail ───────────────────────────────────────────────────────
     const sweepStart = spinAngle - 1.1;
-    const lg = ctx.createLinearGradient(cx, cy, ex, ey);
-    lg.addColorStop(0, t.scanLine[0]);
-    lg.addColorStop(1, 'transparent');
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, R, sweepStart, spinAngle);
@@ -1747,12 +2161,59 @@ function drawSpinLine() {
     ctx.fillStyle = t.trailColor(0.08);
     ctx.fill();
 
-    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey);
-    ctx.strokeStyle = t.scanLine[0]; ctx.lineWidth = 2; ctx.stroke();
+    // ── Main sweep line ───────────────────────────────────────────────────
+    const ex = cx + Math.cos(spinAngle) * R;
+    const ey = cy + Math.sin(spinAngle) * R;
 
-    ctx.beginPath(); ctx.arc(ex, ey, 3, 0, Math.PI*2);
-    ctx.fillStyle = t.scanLine[0]; ctx.fill();
+    ctx.save();
+    ctx.shadowColor = t.scanLine[0];
+    ctx.shadowBlur  = 6;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(ex, ey);
+    ctx.strokeStyle = t.scanLine[0];
+    ctx.lineWidth   = 2;
+    ctx.stroke();
+    ctx.restore();
+
+    // Tip dot
+    ctx.beginPath();
+    ctx.arc(ex, ey, 3, 0, Math.PI * 2);
+    ctx.fillStyle = t.scanLine[0];
+    ctx.fill();
 }
+
+// ── requestAnimationFrame draw loop — runs every frame for smooth spin ────
+// The heavier drawRadar() still runs on DRAW_INTERVAL for performance; the
+// rAF loop only redraws the spin overlay in between heavy frames.
+let _rafActive    = true;
+let _lastHeavyTs  = 0;
+
+function _rafTick(ts) {
+    if (!_rafActive) return;
+
+    // Advance spin angle by elapsed time — speed is in rad per 60-fps frame
+    if (_spinLastTs !== null && !isGamePaused && prefs.spinEnabled) {
+        const dtMs  = Math.min(ts - _spinLastTs, 100); // cap at 100ms to avoid jumps
+        const dtFrames = dtMs / (1000 / 60);           // normalise to 60-fps frames
+        spinAngle += prefs.spinSpeed * dtFrames;
+        if (spinAngle > Math.PI * 2) spinAngle -= Math.PI * 2;
+    }
+    _spinLastTs = ts;
+
+    // Run full drawRadar on interval; in between, just overdraw the spin line
+    const now = performance.now();
+    if (now - _lastHeavyTs >= DRAW_INTERVAL && !isDragging) {
+        _lastHeavyTs = now;
+        drawRadar();   // drawRadar calls drawSpinLine() itself
+    } else if (prefs.spinEnabled && !isGamePaused) {
+        // Lightweight overdraw: just repaint the sweep on top without clearing
+        drawSpinLine();
+    }
+
+    requestAnimationFrame(_rafTick);
+}
+requestAnimationFrame(_rafTick);
 
 // ═══════════════════════════════════════════════════
 // SECTION 15 — AIRPORT / RUNWAY DRAWING
@@ -2050,25 +2511,28 @@ function drawRadar() {
         const myCs = _cachedCallsign || playerCallsign;
 
         aircraftListCache.forEach(ac => {
+            if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
+            if (ac.cs && myCs && myCs !== 'YOU' && ac.cs.toLowerCase() === myCs.toLowerCase()) return;
+
+            const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
+            const distM    = Math.hypot(dx, dy);
+
+            // Track nearest regardless of radar range (HUD always shows closest)
+            if (distM < nearestMeters) {
+                nearestMeters = distM;
+                nearestAc = ac;
+            }
+
+            // Only draw blip if within radar range
+            if (distM > radarRange) return;
+
             ctx.save();
             try {
-                if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
-
-                if (ac.cs && myCs && myCs !== 'YOU' && ac.cs.toLowerCase() === myCs.toLowerCase()) return;
-
-                if (_trackedId && settings.isolateTracked && ac.id !== _trackedId) return;
-
-                const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
-                const distM    = Math.hypot(dx, dy);
-                if (distM > radarRange) return;
+                // Isolate mode: skip drawing non-tracked blips (but nearest still tracked above)
+                if (_trackedId && settings.isolateTracked && ac.id !== _trackedId) { ctx.restore(); return; }
 
                 const [rx, ry] = worldToCanvas(dx, dy, cx, cy, rotRad);
-                if (Math.hypot(rx-cx, ry-cy) > radarSize/2) return;
-
-                if (distM < nearestMeters) {
-                    nearestMeters = distM;
-                    nearestAc = ac;
-                }
+                if (Math.hypot(rx-cx, ry-cy) > radarSize/2) { ctx.restore(); return; }
 
                 lastBlipPositions.push({ x:rx, y:ry, ac, distance:distM, myData });
 
@@ -2246,9 +2710,10 @@ function drawRadar() {
 
 // ═══════════════════════════════════════════════════
 // SECTION 18 — DRAW LOOP
+// The requestAnimationFrame loop in Section 14 handles all drawing.
+// setInterval only drives the reposition helper.
 // ═══════════════════════════════════════════════════
 
-setInterval(() => { if (!isDragging) drawRadar(); }, DRAW_INTERVAL);
 setInterval(repositionUI, REPOSITION_INTERVAL);
 
 // ═══════════════════════════════════════════════════
