@@ -1345,7 +1345,7 @@ function createMenu() {
     });
 
     addPrefToggle('Sweep Shadow', 'spinShadow', () => {
-        if (prefs.spinEnabled) updateShadowSetting();
+        if (prefs.spinEnabled) redrawBaseGraphics();
     });
 
     addPrefRow({
