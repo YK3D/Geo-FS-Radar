@@ -1216,71 +1216,99 @@ function createMenu() {
     addSep();
     addSection('Radar Preferences');
 
-    // ── Radar Size ───────────────────────────────────────────────────────
-    {
-        // Unit toggle (px / %)
-        const unitRow = document.createElement('div');
-        unitRow.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding:${UI.menuRowPadY - 1}px 16px; gap:6px;
+// ── Radar Size ───────────────────────────────────────────────────────
+{
+    // Unit toggle (px / %)
+    const unitRow = document.createElement('div');
+    unitRow.style.cssText = `
+        display:flex; align-items:center; justify-content:space-between;
+        padding:${UI.menuRowPadY - 1}px 16px; gap:6px;
+    `;
+    const unitLbl = document.createElement('span');
+    unitLbl.dataset.menuRowlbl = '1';
+    unitLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
+    unitLbl.textContent = 'Radar Size';
+    const unitWrap = document.createElement('div');
+    unitWrap.style.cssText = 'display:flex; gap:5px;';
+    ['px', '%'].forEach(u => {
+        const b = document.createElement('button');
+        b.id = `radarSizeUnit_${u}`;
+        b.textContent = u;
+        b.style.cssText = `
+            padding:3px 10px; font:bold ${UI.menuRadioFont}px ${FONT_SANS};
+            border-radius:5px; cursor:pointer;
+            border:1px solid rgba(0,255,0,0.3); transition:all .15s;
+            background:${prefs.radarSizeUnit === u ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)'};
+            color:${prefs.radarSizeUnit === u ? '#0f0' : 'rgba(150,200,150,0.7)'};
         `;
-        const unitLbl = document.createElement('span');
-        unitLbl.dataset.menuRowlbl = '1';
-        unitLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
-        unitLbl.textContent = 'Radar Size';
-        const unitWrap = document.createElement('div');
-        unitWrap.style.cssText = 'display:flex; gap:5px;';
-        ['px', '%'].forEach(u => {
-            const b = document.createElement('button');
-            b.id = `radarSizeUnit_${u}`;
-            b.textContent = u;
-            b.style.cssText = `
-                padding:3px 10px; font:bold ${UI.menuRadioFont}px ${FONT_SANS};
-                border-radius:5px; cursor:pointer;
-                border:1px solid rgba(0,255,0,0.3); transition:all .15s;
-                background:${prefs.radarSizeUnit === u ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)'};
-                color:${prefs.radarSizeUnit === u ? '#0f0' : 'rgba(150,200,150,0.7)'};
-            `;
-            b.onclick = () => {
-                prefs.radarSizeUnit = u;
-                ['px','%'].forEach(o => {
-                    const el = document.getElementById(`radarSizeUnit_${o}`);
-                    if (!el) return;
-                    const on = prefs.radarSizeUnit === o;
-                    el.style.background = on ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)';
-                    el.style.color      = on ? '#0f0' : 'rgba(150,200,150,0.7)';
-                });
-                // Rebuild the stepper row to reflect the new unit's range/step
-                rebuildSizeRow();
-                savePrefs();
-            };
-            unitWrap.appendChild(b);
-        });
-        unitRow.appendChild(unitLbl);
-        unitRow.appendChild(unitWrap);
-        panel.appendChild(unitRow);
-
-        // Placeholder for the dynamic stepper
-        const sizePlaceholder = document.createElement('div');
-        panel.appendChild(sizePlaceholder);
-
-        function rebuildSizeRow() {
-            const isPct = prefs.radarSizeUnit === '%';
-            const newRow = addPrefRow({
-                label: '',
-                get:  () => isPct ? prefs.radarSizePct : prefs.radarSizePx,
-                set:  v  => { if (isPct) prefs.radarSizePct = v; else prefs.radarSizePx = v; },
-                fmt:  v  => _fmtRadarSize(),
-                min:  isPct ? 1   : 150,
-                max:  isPct ? 100 : 900,
-                step: isPct ? 5   : 10,
-                onCommit: applyPrefs,
-                placeholder: sizePlaceholder,
+        b.onclick = () => {
+            prefs.radarSizeUnit = u;
+            ['px','%'].forEach(o => {
+                const el = document.getElementById(`radarSizeUnit_${o}`);
+                if (!el) return;
+                const on = prefs.radarSizeUnit === o;
+                el.style.background = on ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)';
+                el.style.color      = on ? '#0f0' : 'rgba(150,200,150,0.7)';
             });
-            newRow.row.firstChild.style.display = 'none';
+            // Rebuild the stepper row to reflect the new unit's range/step
+            rebuildSizeRow();
+            
+            // Force an update of the radar display
+            if (typeof applyPrefs === 'function') {
+                applyPrefs();
+            }
+            
+            savePrefs();
+        };
+        unitWrap.appendChild(b);
+    });
+    unitRow.appendChild(unitLbl);
+    unitRow.appendChild(unitWrap);
+    panel.appendChild(unitRow);
+
+    // Placeholder for the dynamic stepper
+    const sizePlaceholder = document.createElement('div');
+    panel.appendChild(sizePlaceholder);
+
+    function rebuildSizeRow() {
+        // Clear the placeholder first
+        while (sizePlaceholder.firstChild) {
+            sizePlaceholder.removeChild(sizePlaceholder.firstChild);
         }
-        rebuildSizeRow();
+        
+        const isPct = prefs.radarSizeUnit === '%';
+        const newRow = addPrefRow({
+            label: '',
+            get:  () => isPct ? prefs.radarSizePct : prefs.radarSizePx,
+            set:  v  => { 
+                if (isPct) {
+                    prefs.radarSizePct = v;
+                } else {
+                    prefs.radarSizePx = v;
+                }
+                // Immediately apply the change
+                if (typeof applyPrefs === 'function') {
+                    applyPrefs();
+                }
+            },
+            fmt:  v  => _fmtRadarSize(),
+            min:  isPct ? 1   : 150,
+            max:  isPct ? 100 : 900,
+            step: isPct ? 5   : 10,
+            onCommit: applyPrefs,
+            placeholder: sizePlaceholder,
+        });
+        
+        // Hide the label (since we already have "Radar Size" above)
+        if (newRow && newRow.row) {
+            const firstChild = newRow.row.firstChild;
+            if (firstChild) {
+                firstChild.style.display = 'none';
+            }
+        }
     }
+    rebuildSizeRow();
+}
 
     // ── Min Range (stored/displayed/input in km) ──────────────────────────
     addPrefRow({
