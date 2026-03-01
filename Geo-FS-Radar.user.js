@@ -9,7 +9,6 @@
 // ── Default values (used only when no saved prefs exist) ─────────────────
 const _PREF_DEFAULTS = {
     radarSizePx:   450,    // canvas diameter in px (used when unit='px')
-    radarSizePct:  40,     // canvas diameter as % of min(screen w, h) (1–100, used when unit='%')
     radarSizeUnit: 'px',   // 'px' or '%'
     minRangeKm:    0.5,    // km — minimum radar range   (0.5 – 10)
     maxRangeKm:    50,     // km — maximum radar range   (1 – 100)
@@ -1490,7 +1489,7 @@ function createMenu() {
 let spinAnimationFrame = null;
 let spinAngle = 0;
 let lastDrawTime = 0;
-const TARGET_FPS = 60;
+const TARGET_FPS = 10;
 const FRAME_TIME = 1000 / TARGET_FPS;
 
 function startSpinAnimation() {
