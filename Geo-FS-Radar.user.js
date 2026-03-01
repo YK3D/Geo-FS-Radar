@@ -82,7 +82,7 @@ function _fmtRadarSize() {
 // SECTION 1b — TIMING & INTERVALS (fixed, not user-editable)
 // ═══════════════════════════════════════════════════
 
-const FETCH_DELAY_MAX     =  2000;
+const FETCH_DELAY_MAX     =  800;
 const FETCH_DELAY_INITIAL =   500;
 const FETCH_SPEED_DT_MIN  =   0.5;
 const FETCH_SPEED_DT_MAX  =  30;
