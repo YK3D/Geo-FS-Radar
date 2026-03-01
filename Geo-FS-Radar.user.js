@@ -1541,67 +1541,61 @@ function drawFullFrame() {
     drawSpinLine();
 }
 
-function drawSpinLine() {
-    if (isGamePaused) return;
-    
-    const cx = radarSize/2, cy = radarSize/2;
-    const R  = radarSize/2 - 10;
-    const t  = T();
+// Replace the user's drawSpinLine with this improved version
+    function drawSpinLine(ctx, radarSize, spinAngle, prefs, T) {
+        if (!prefs.spinEnabled) return;
 
-    const ex = cx + Math.cos(spinAngle) * R;
-    const ey = cy + Math.sin(spinAngle) * R;
+        const cx = radarSize / 2;
+        const cy = radarSize / 2;
+        const radius = radarSize / 2 - 5;
+        const t = T();
 
-    const sweepStart = spinAngle - 1.1;
-    
-    // Draw sweep trail
-    const lg = ctx.createLinearGradient(cx, cy, ex, ey);
-    lg.addColorStop(0, t.scanLine[0]);
-    lg.addColorStop(1, 'transparent');
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, R, sweepStart, spinAngle);
-    ctx.closePath();
-    ctx.fillStyle = t.trailColor(0.08);
-    ctx.fill();
+        // 1. Draw the trailing green shadow (sweep) if enabled
+        if (prefs.spinShadow) {
+            const trailLength = 60; // Length of the trail in degrees
+            for (let i = 0; i < trailLength; i++) {
+                const alpha = (trailLength - i) / trailLength * 0.3;
+                const currentAngle = spinAngle - (i * Math.PI / 180);
+                
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.arc(cx, cy, radius, currentAngle, currentAngle + 0.02);
+                ctx.fillStyle = `rgba(0, 255, 0, ${alpha})`;
+                ctx.fill();
+            }
+        }
 
-    // Draw shadow if enabled
-    if (prefs.spinShadow) {
-        ctx.save();
-        ctx.shadowColor = 'rgba(0, 255, 0, 0.8)';
-        ctx.shadowBlur = 15;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-        
-        // Draw line with shadow
+        // 2. Draw the rotating green radius line
         ctx.beginPath();
         ctx.moveTo(cx, cy);
-        ctx.lineTo(ex, ey);
-        ctx.strokeStyle = t.scanLine[0];
-        ctx.lineWidth = 3;
+        const lineX = cx + radius * Math.cos(spinAngle);
+        const lineY = cy + radius * Math.sin(spinAngle);
+        ctx.lineTo(lineX, lineY);
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 2;
         ctx.stroke();
         
-        // Draw endpoint with shadow
+        // Add a small glow to the line tip
         ctx.beginPath();
-        ctx.arc(ex, ey, 4, 0, Math.PI*2);
-        ctx.fillStyle = t.scanLine[0];
+        ctx.arc(lineX, lineY, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#00ff00';
         ctx.fill();
-        ctx.restore();
     }
-    
-    // Draw main line (without shadow to prevent double shadow)
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(ex, ey);
-    ctx.strokeStyle = t.scanLine[0];
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    addPrefRow({
+        label: 'Rotation Speed',
+        get: () => prefs.spinSpeed,
+        set: v => { prefs.spinSpeed = parseFloat(v); },
+        fmt: v => v.toFixed(3),
+        min: 0.005, max: 0.2, step: 0.005,
+        onCommit: savePrefs
+    });
 
-    // Draw main endpoint (without shadow)
-    ctx.beginPath();
-    ctx.arc(ex, ey, 3, 0, Math.PI*2);
-    ctx.fillStyle = t.scanLine[0];
-    ctx.fill();
-}
+    addToggleRow({
+        label: 'Radar Shadow',
+        get: () => prefs.spinShadow,
+        set: v => { prefs.spinShadow = v; },
+        onCommit: savePrefs
+    });
 
 function updateShadowSetting() {
     // Just redraw current frame with new shadow setting
