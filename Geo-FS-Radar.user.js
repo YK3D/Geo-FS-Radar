@@ -1481,7 +1481,7 @@ function createMenu() {
         }
     });
 }
-
+/*
 // Spin animation variables
 let spinAnimationFrame = null;
 let spinAngle = 0;
@@ -1622,7 +1622,7 @@ function redrawBaseGraphics() {
         drawRadarBase();
     }
 }
-
+*/
     // ── API Status ────────────────────────────────────────────────────────
     addSep();
     addSection('API Status');
@@ -2339,7 +2339,7 @@ function worldToCanvas(dx, dy, cx, cy, rotRad) {
 // sweep speed is constant regardless of draw rate or fetch delays.
 // ═══════════════════════════════════════════════════
 
-/*let spinAngle    = 0;
+let spinAngle    = 0;
 let _spinLastTs  = null;   // performance.now() of last rAF tick
 
 function drawSpinLine() {
@@ -2452,7 +2452,7 @@ function _rafTick(ts) {
     requestAnimationFrame(_rafTick);
 }
 requestAnimationFrame(_rafTick);
-*/
+
 // ═══════════════════════════════════════════════════
 // SECTION 15 — AIRPORT / RUNWAY DRAWING
 // ═══════════════════════════════════════════════════
