@@ -952,8 +952,7 @@ function createMenu() {
                 settings[key] = opt;
                 const t = T();
                 saveSettings();
-                // Radio buttons in your script need manual UI update or panel refresh
-                createMenu(); // Simplest way to refresh radio state
+                createMenu();
             };
             wrap.appendChild(b);
         });
@@ -1046,10 +1045,10 @@ function createMenu() {
     addPrefRow({ label: 'Update Delay', get: () => prefs.fetchDelay, set: v => { prefs.fetchDelay = v; applyPrefs(); }, fmt: v => v + ' ms', min: 50, max: 1000, step: 50, onCommit: savePrefs });
     addSep();
 
-    // --- New Sweep Settings ---
+    // --- Sweep Settings ---
     addSection('Sweep Settings');
     addToggle('Sweep Line', 'spinEnabled', (v) => { if (v) startSpinAnimation(); else stopSpinAnimation(); });
-    addToggle('Sweep Shadow', 'spinShadow', () => { redrawBaseGraphics(); });
+    addToggle('Sweep Trail', 'spinShadow');
     addPrefRow({ label: 'Sweep Speed', get: () => prefs.spinSpeed, set: v => { prefs.spinSpeed = Math.round(v * 1000) / 1000; }, fmt: v => v.toFixed(3) + ' rad/f', min: 0.001, max: 0.1, step: 0.001, onCommit: savePrefs });
     addSep();
 
@@ -1066,6 +1065,7 @@ function createMenu() {
     document.body.appendChild(panel);
     repositionMenu();
 }
+
 
 
 // ═══════════════════════════════════════════════════
