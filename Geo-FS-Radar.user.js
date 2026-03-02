@@ -964,51 +964,6 @@ function createMenu() {
         return row;
     }
 
-    // Special toggle for prefs (not settings)
-    function addPrefToggle(label, key, onChange) {
-        const row = document.createElement('div');
-        row.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;
-        `;
-        row.onmouseover = () => row.style.background = T().menuRowHover;
-        row.onmouseout  = () => row.style.background = '';
-
-        const lbl = document.createElement('span');
-        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
-        lbl.textContent = label;
-
-        const sw = document.createElement('div');
-        sw.style.cssText = `
-            width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
-            border-radius:${UI.menuSwitchH/2}px; position:relative;
-            background:${prefs[key] ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
-            border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;
-        `;
-        const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
-        const knob = document.createElement('div');
-        knob.style.cssText = `
-            position:absolute; top:${(UI.menuSwitchH - UI.menuKnobSize)/2}px;
-            left:${prefs[key] ? knobOn : knobOff}px;
-            width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%;
-            background:${prefs[key] ? '#0f0' : '#888'};
-            transition:left .2s, background .2s;
-        `;
-        sw.appendChild(knob);
-        row.appendChild(lbl); row.appendChild(sw);
-
-        row.onclick = () => {
-            prefs[key] = !prefs[key];
-            const t = T();
-            sw.style.background   = prefs[key] ? t.switchOn  : t.switchOff;
-            knob.style.left       = prefs[key] ? knobOn + 'px' : knobOff + 'px';
-            knob.style.background = prefs[key] ? t.knobOn : t.knobOff;
-            savePrefs();
-            if (onChange) onChange(prefs[key]);
-        };
-        panel.appendChild(row);
-    }
-
     function addRadio(label, key, opt1, opt2, label1, label2) {
         const row = document.createElement('div');
         row.style.cssText = `
@@ -1123,12 +1078,16 @@ function createMenu() {
 
     // ── My Aircraft ───────────────────────────────────────────────────────
     addSection('My Aircraft');
+    addInfoRow('Callsign', 'callsign');
     addInfoRow('Position', 'position');
     addToggle('Show My Callsign',       'showMyCallsign');
 
     addSep();
 
     // ── Preference stepper row ────────────────────────────────────────────
+    // Renders a label + value display with −/+ buttons.
+    // opts: { label, get, set, fmt, min, max, step, onCommit }
+    // Manual keyboard input is activated by clicking the value display.
     function addPrefRow(opts) {
         const { label, get, set, fmt, min, max, step, onCommit, placeholder } = opts;
         const t = T();
@@ -1144,6 +1103,7 @@ function createMenu() {
         lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1; min-width:0;`;
         lbl.textContent = label;
 
+        // Value display / inline input wrapper
         const valWrap = document.createElement('div');
         valWrap.style.cssText = `position:relative; flex-shrink:0;`;
 
@@ -1158,6 +1118,7 @@ function createMenu() {
         valSpan.textContent = fmt(get());
         valSpan.title = 'Click to type a value';
 
+        // Inline input (hidden by default)
         const valInput = document.createElement('input');
         valInput.type = 'number';
         valInput.style.cssText = `
@@ -1175,6 +1136,7 @@ function createMenu() {
             let v = parseFloat(valInput.value);
             if (!isFinite(v)) v = get();
             v = Math.max(min, Math.min(max, v));
+            // Round to nearest step
             v = Math.round(v / step) * step;
             set(v);
             valSpan.textContent = fmt(get());
@@ -1202,6 +1164,7 @@ function createMenu() {
         valWrap.appendChild(valSpan);
         valWrap.appendChild(valInput);
 
+        // Button helper
         function makeBtn(label) {
             const b = document.createElement('button');
             b.textContent = label;
@@ -1249,84 +1212,160 @@ function createMenu() {
     addSep();
     addSection('Radar Preferences');
 
-    // Radar Size
-    {
-        const row = document.createElement('div');
-        row.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding:${UI.menuRowPadY - 1}px 16px; gap:6px;
-        `;
-        const lbl = document.createElement('span');
-        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
-        lbl.textContent = 'Radar Size';
+// ── Radar Size ───────────────────────────────────────────────────────
+{
+    const row = document.createElement('div');
+    row.style.cssText = `
+        display:flex; align-items:center; justify-content:space-between;
+        padding:${UI.menuRowPadY - 1}px 16px; gap:6px;
+    `;
 
-        const btnMinus = document.createElement('button');
-        btnMinus.textContent = '−';
-        btnMinus.style.cssText = `
-            width:26px; height:26px; border-radius:5px; flex-shrink:0;
-            background:rgba(0,60,0,0.7); color:rgba(0,255,0,0.9);
-            border:1px solid rgba(0,255,0,0.3); font:bold 15px ${FONT_SANS};
-            cursor:pointer; display:flex; align-items:center; justify-content:center;
-            transition:background .12s; line-height:1;
-        `;
-        btnMinus.onmouseover = () => btnMinus.style.background = 'rgba(0,100,0,0.8)';
-        btnMinus.onmouseout  = () => btnMinus.style.background = 'rgba(0,60,0,0.7)';
+    // Label
+    const lbl = document.createElement('span');
+    lbl.dataset.menuRowlbl = '1';
+    lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
+    lbl.textContent = 'Radar Size';
 
-        const valSpan = document.createElement('span');
-        valSpan.style.cssText = `
-            display:inline-block; min-width:64px; text-align:center;
-            color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
-            background:rgba(0,40,0,0.6); border:1px solid rgba(0,255,0,0.3);
-            border-radius:5px; padding:2px 6px; cursor:pointer;
-        `;
-        
-        const updateDisplay = () => { valSpan.textContent = prefs.radarSizePx + ' px'; };
-        updateDisplay();
+    // Minus button
+    const btnMinus = document.createElement('button');
+    btnMinus.textContent = '−';
+    btnMinus.style.cssText = `
+        width:26px; height:26px; border-radius:5px; flex-shrink:0;
+        background:rgba(0,60,0,0.7); color:rgba(0,255,0,0.9);
+        border:1px solid rgba(0,255,0,0.3); font:bold 15px ${FONT_SANS};
+        cursor:pointer; display:flex; align-items:center; justify-content:center;
+        transition:background .12s; line-height:1;
+    `;
+    btnMinus.onmouseover = () => btnMinus.style.background = 'rgba(0,100,0,0.8)';
+    btnMinus.onmouseout  = () => btnMinus.style.background = 'rgba(0,60,0,0.7)';
 
-        const btnPlus = document.createElement('button');
-        btnPlus.textContent = '+';
-        btnPlus.style.cssText = btnMinus.style.cssText;
-
-        btnMinus.onclick = () => {
-            prefs.radarSizePx = Math.max(150, Math.round((prefs.radarSizePx - 10) / 10) * 10);
-            updateDisplay(); applyPrefs(); savePrefs();
-        };
-        btnPlus.onclick = () => {
-            prefs.radarSizePx = Math.min(900, Math.round((prefs.radarSizePx + 10) / 10) * 10);
-            updateDisplay(); applyPrefs(); savePrefs();
-        };
-
-        row.appendChild(lbl); row.appendChild(btnMinus); row.appendChild(valSpan); row.appendChild(btnPlus);
-        panel.appendChild(row);
+    // Value display
+    const valSpan = document.createElement('span');
+    valSpan.style.cssText = `
+        display:inline-block; min-width:64px; text-align:center;
+        color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
+        background:rgba(0,40,0,0.6); border:1px solid rgba(0,255,0,0.3);
+        border-radius:5px; padding:2px 6px; cursor:pointer;
+    `;
+    
+    function updateDisplay() {
+        valSpan.textContent = prefs.radarSizePx + ' px';
     }
+    updateDisplay();
 
+    // Plus button
+    const btnPlus = document.createElement('button');
+    btnPlus.textContent = '+';
+    btnPlus.style.cssText = btnMinus.style.cssText; // Same style as minus
+
+    // Button click handlers
+    btnMinus.onclick = () => {
+        let v = prefs.radarSizePx - 10;
+        v = Math.max(150, Math.min(900, v));
+        v = Math.round(v / 10) * 10;
+        prefs.radarSizePx = v;
+        updateDisplay();
+        applyPrefs();
+        savePrefs();
+    };
+
+    btnPlus.onclick = () => {
+        let v = prefs.radarSizePx + 10;
+        v = Math.max(150, Math.min(900, v));
+        v = Math.round(v / 10) * 10;
+        prefs.radarSizePx = v;
+        updateDisplay();
+        applyPrefs();
+        savePrefs();
+    };
+
+    // Click on value to edit
+    valSpan.addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.value = prefs.radarSizePx;
+        input.min = 150;
+        input.max = 900;
+        input.step = 10;
+        input.style.cssText = `
+            width:64px; text-align:center;
+            color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
+            background:rgba(0,40,0,0.85); border:1px solid rgba(0,255,0,0.7);
+            border-radius:5px; padding:2px 4px; outline:none;
+            -moz-appearance:textfield;
+        `;
+
+        valSpan.style.display = 'none';
+        valSpan.parentNode.insertBefore(input, valSpan.nextSibling);
+
+        function commitInput() {
+            let v = parseInt(input.value);
+            if (!isFinite(v)) v = prefs.radarSizePx;
+            v = Math.max(150, Math.min(900, v));
+            v = Math.round(v / 10) * 10;
+            v = Math.max(150, Math.min(900, v));
+            prefs.radarSizePx = v;
+            updateDisplay();
+            applyPrefs();
+            savePrefs();
+            input.remove();
+            valSpan.style.display = 'inline-block';
+        }
+
+        input.addEventListener('blur', commitInput);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                commitInput();
+            }
+            if (e.key === 'Escape') {
+                input.remove();
+                valSpan.style.display = 'inline-block';
+            }
+        });
+        input.focus();
+        input.select();
+    });
+
+    // Assemble row
+    row.appendChild(lbl);
+    row.appendChild(btnMinus);
+    row.appendChild(valSpan);
+    row.appendChild(btnPlus);
+    
+    panel.appendChild(row);
+}
+    // ── Min Range (stored/displayed/input in km) ──────────────────────────
     addPrefRow({
         label: 'Min Range',
-        get: () => prefs.minRangeKm,
-        set: v => { prefs.minRangeKm = v; },
-        fmt: v => v.toFixed(1) + ' km',
+        get:  () => prefs.minRangeKm,
+        set:  v  => { prefs.minRangeKm = v; },
+        fmt:  v  => v.toFixed(1) + ' km',
         min: 0.5, max: 10, step: 0.5,
         onCommit: applyPrefs,
     });
 
+    // ── Max Range (km) ────────────────────────────────────────────────────
     addPrefRow({
         label: 'Max Range',
-        get: () => prefs.maxRangeKm,
-        set: v => { prefs.maxRangeKm = v; },
-        fmt: v => v.toFixed(0) + ' km',
+        get:  () => prefs.maxRangeKm,
+        set:  v  => { prefs.maxRangeKm = v; },
+        fmt:  v  => v.toFixed(0) + ' km',
         min: 1, max: 100, step: 1,
         onCommit: applyPrefs,
     });
 
+    // ── Scroll Step (km) ──────────────────────────────────────────────────
     addPrefRow({
         label: 'Scroll Step',
-        get: () => prefs.scrollIncKm,
-        set: v => { prefs.scrollIncKm = v; },
-        fmt: v => v.toFixed(1) + ' km',
+        get:  () => prefs.scrollIncKm,
+        set:  v  => { prefs.scrollIncKm = v; },
+        fmt:  v  => v.toFixed(1) + ' km',
         min: 0.5, max: 10, step: 0.5,
         onCommit: applyPrefs,
     });
 
+    // ── Update Delay ─────────────────────────────────────────────────────
     addPrefRow({
         label: 'Update Delay',
         get: () => prefs.fetchDelay,
@@ -1336,33 +1375,339 @@ function createMenu() {
         onCommit: applyPrefs,
     });
 
-    // ── Sweep Preferences ────────────────────────────────────────────────
-    addSep();
-    addSection('Sweep Settings');
+// ── Spin Speed + enable toggle ────────────────────────────────────────
+{
+    const spinEnRow = document.createElement('div');
+    spinEnRow.dataset.menuRow = '_spinEnabled';
+    spinEnRow.style.cssText = `
+        display:flex; align-items:center; justify-content:space-between;
+        padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;
+    `;
+    spinEnRow.onmouseover = () => spinEnRow.style.background = T().menuRowHover;
+    spinEnRow.onmouseout  = () => spinEnRow.style.background = '';
+    const spinEnLbl = document.createElement('span');
+    spinEnLbl.dataset.menuRowlbl = '1';
+    spinEnLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
+    spinEnLbl.textContent = 'Sweep Line';
+    const spinEnSw = document.createElement('div');
+    const spinEnKnobOff = 3, spinEnKnobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
+    spinEnSw.style.cssText = `
+        width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
+        border-radius:${UI.menuSwitchH/2}px; position:relative;
+        background:${prefs.spinEnabled ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
+        border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;
+    `;
+    const spinEnKnob = document.createElement('div');
+    spinEnKnob.style.cssText = `
+        position:absolute; top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+        left:${prefs.spinEnabled ? spinEnKnobOn : spinEnKnobOff}px;
+        width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%;
+        background:${prefs.spinEnabled ? '#0f0' : '#888'};
+        transition:left .2s, background .2s;
+    `;
+    spinEnSw.appendChild(spinEnKnob);
+    spinEnRow.appendChild(spinEnLbl);
+    spinEnRow.appendChild(spinEnSw);
+    spinEnRow.onclick = () => {
+        prefs.spinEnabled = !prefs.spinEnabled;
+        const t2 = T();
+        spinEnSw.style.background   = prefs.spinEnabled ? t2.switchOn  : t2.switchOff;
+        spinEnKnob.style.left       = prefs.spinEnabled ? spinEnKnobOn + 'px' : spinEnKnobOff + 'px';
+        spinEnKnob.style.background = prefs.spinEnabled ? t2.knobOn : t2.knobOff;
+        savePrefs();
+        if (prefs.spinEnabled) startSpinAnimation(); else stopSpinAnimation();
+    };
+    panel.appendChild(spinEnRow);
 
-    addPrefToggle('Sweep Line', 'spinEnabled', (v) => {
-        if (v) startSpinAnimation(); else stopSpinAnimation();
-    });
+    // Sweep shadow toggle
+    {
+        const shadowRow = document.createElement('div');
+        shadowRow.style.cssText = `
+            display:flex; align-items:center; justify-content:space-between;
+            padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;
+        `;
+        shadowRow.onmouseover = () => shadowRow.style.background = T().menuRowHover;
+        shadowRow.onmouseout  = () => shadowRow.style.background = '';
 
-    addPrefToggle('Sweep Shadow', 'spinShadow', () => {
-        if (prefs.spinEnabled) redrawBaseGraphics();
-    });
+        const shadowLbl = document.createElement('span');
+        shadowLbl.dataset.menuRowlbl = '1';
+        shadowLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
+        shadowLbl.textContent = 'Sweep Shadow';
+
+        const shadowSw = document.createElement('div');
+        const shadowKnobOff = 3, shadowKnobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
+        shadowSw.style.cssText = `
+            width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
+            border-radius:${UI.menuSwitchH/2}px; position:relative;
+            background:${prefs.spinShadow ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
+            border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;
+        `;
+
+        const shadowKnob = document.createElement('div');
+        shadowKnob.style.cssText = `
+            position:absolute; top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+            left:${prefs.spinShadow ? shadowKnobOn : shadowKnobOff}px;
+            width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%;
+            background:${prefs.spinShadow ? '#0f0' : '#888'};
+            transition:left .2s, background .2s;
+        `;
+
+        shadowSw.appendChild(shadowKnob);
+        shadowRow.appendChild(shadowLbl);
+        shadowRow.appendChild(shadowSw);
+
+        shadowRow.onclick = () => {
+            prefs.spinShadow = !prefs.spinShadow;
+            const t2 = T();
+            shadowSw.style.background   = prefs.spinShadow ? t2.switchOn  : t2.switchOff;
+            shadowKnob.style.left       = prefs.spinShadow ? shadowKnobOn + 'px' : shadowKnobOff + 'px';
+            shadowKnob.style.background = prefs.spinShadow ? t2.knobOn : t2.knobOff;
+            savePrefs();
+            if (prefs.spinEnabled) updateShadowSetting();
+        };
+
+        panel.appendChild(shadowRow);
+    }
 
     addPrefRow({
-        label: 'Sweep Speed',
+        label: 'Spin Speed',
         get: () => prefs.spinSpeed,
         set: v => { prefs.spinSpeed = Math.round(v * 1000) / 1000; },
-        fmt: v => v.toFixed(3) + ' rad/f',
-        min: 0.001, max: 0.1, step: 0.001,
-        onCommit: savePrefs,
+        fmt: v => v.toFixed(3) + ' rad/frame',
+        min: 0.001, max: 0.05, step: 0.001,
+        onCommit: () => {
+            savePrefs();
+            // Speed will be used directly in animation
+        }
     });
+}
 
+// Spin animation variables
+let spinAnimationFrame = null;
+let spinAngle = 0;
+let lastDrawTime = 0;
+const TARGET_FPS = 10;
+const FRAME_TIME = 1000 / TARGET_FPS;
+
+function startSpinAnimation() {
+    if (spinAnimationFrame) cancelAnimationFrame(spinAnimationFrame);
+    spinAnimationFrame = requestAnimationFrame(animateSpin);
+}
+
+function stopSpinAnimation() {
+    if (spinAnimationFrame) {
+        cancelAnimationFrame(spinAnimationFrame);
+        spinAnimationFrame = null;
+    }
+    // Redraw without the spin line
+    redrawBaseGraphics();
+}
+
+function animateSpin(currentTime) {
+    if (!prefs.spinEnabled || isGamePaused) {
+        spinAnimationFrame = requestAnimationFrame(animateSpin);
+        return;
+    }
+
+    // Control frame rate for consistent animation
+    if (currentTime - lastDrawTime >= FRAME_TIME) {
+        // Update angle using prefs.spinSpeed directly
+        spinAngle += prefs.spinSpeed;
+        if (spinAngle > Math.PI * 2) spinAngle -= Math.PI * 2;
+        
+        // Draw the frame
+        drawFullFrame();
+        lastDrawTime = currentTime;
+    }
+    
+    spinAnimationFrame = requestAnimationFrame(animateSpin);
+}
+
+function drawFullFrame() {
+    // Clear the radar area only (not the entire canvas if there's UI)
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(radarSize/2, radarSize/2, radarSize/2, 0, Math.PI*2);
+    ctx.clip();
+    ctx.clearRect(0, 0, radarSize, radarSize);
+    ctx.restore();
+    
+    // Draw base radar graphics first
+    if (typeof drawRadarBase === 'function') {
+        drawRadarBase();
+    }
+    
+    // Draw the spin line with current angle
+    drawSpinLine();
+}
+
+function drawSpinLine() {
+    if (isGamePaused) return;
+    
+    const cx = radarSize/2, cy = radarSize/2;
+    const R  = radarSize/2 - 10;
+    const t  = T();
+
+    const ex = cx + Math.cos(spinAngle) * R;
+    const ey = cy + Math.sin(spinAngle) * R;
+
+    const sweepStart = spinAngle - 1.1;
+    
+    // Draw sweep trail
+    const lg = ctx.createLinearGradient(cx, cy, ex, ey);
+    lg.addColorStop(0, t.scanLine[0]);
+    lg.addColorStop(1, 'transparent');
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, R, sweepStart, spinAngle);
+    ctx.closePath();
+    ctx.fillStyle = t.trailColor(0.08);
+    ctx.fill();
+
+    // Draw shadow if enabled
+    if (prefs.spinShadow) {
+        ctx.save();
+        ctx.shadowColor = 'rgba(0, 255, 0, 0.8)';
+        ctx.shadowBlur = 15;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        
+        // Draw line with shadow
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(ex, ey);
+        ctx.strokeStyle = t.scanLine[0];
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        
+        // Draw endpoint with shadow
+        ctx.beginPath();
+        ctx.arc(ex, ey, 4, 0, Math.PI*2);
+        ctx.fillStyle = t.scanLine[0];
+        ctx.fill();
+        ctx.restore();
+    }
+    
+    // Draw main line (without shadow to prevent double shadow)
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(ex, ey);
+    ctx.strokeStyle = t.scanLine[0];
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Draw main endpoint (without shadow)
+    ctx.beginPath();
+    ctx.arc(ex, ey, 3, 0, Math.PI*2);
+    ctx.fillStyle = t.scanLine[0];
+    ctx.fill();
+}
+
+function updateShadowSetting() {
+    // Just redraw current frame with new shadow setting
+    if (prefs.spinEnabled && !isGamePaused) {
+        drawFullFrame();
+    }
+}
+
+function redrawBaseGraphics() {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(radarSize/2, radarSize/2, radarSize/2, 0, Math.PI*2);
+    ctx.clip();
+    ctx.clearRect(0, 0, radarSize, radarSize);
+    ctx.restore();
+    
+    if (typeof drawRadarBase === 'function') {
+        drawRadarBase();
+    }
+}
+
+    // ── API Status ────────────────────────────────────────────────────────
     addSep();
+    addSection('API Status');
     addStatusRow();
 
     document.body.appendChild(panel);
+
     repositionMenu();
 }
+
+function repositionMenu() {
+    const btn = document.getElementById('radarMenuBtn');
+    const panel = document.getElementById('radarMenuPanel');
+    if (!btn || !panel) return;
+
+    const rl = parseInt(radarCanvas.style.left) || 5;
+    const rt = parseInt(radarCanvas.style.top) || 0;
+    const menuFullHeight = 600;
+    const buttonSize = 40;
+    const spacing = 5;
+    const bottomMargin = 60;
+    const windowHeight = window.innerHeight;
+
+    btn.style.left = (rl + radarSize + spacing) + 'px';
+    btn.style.top = rt + 'px';
+
+    const panelTop = rt + buttonSize + spacing;
+    panel.style.top = panelTop + 'px';
+
+    const maxAllowedHeight = windowHeight - panelTop - bottomMargin;
+    const panelHeight = Math.min(menuFullHeight, maxAllowedHeight);
+    panel.style.height = panelHeight + 'px';
+    panel.style.left = (rl + radarSize + spacing) + 'px';
+
+    const panelRight = parseInt(panel.style.left) + UI.menuW;
+    if (panelRight > window.innerWidth) {
+        panel.style.left = (window.innerWidth - UI.menuW - spacing) + 'px';
+    }
+
+    const isTruncated = panelHeight < menuFullHeight;
+    panel.style.borderBottom = isTruncated ? '2px solid rgba(255,200,0,0.5)' : '1.5px solid rgba(0,255,0,0.35)';
+}
+
+function updateMenuInfoCallsign(cs, lat, lon) {
+    const csEl = document.getElementById('radarInfo_callsign');
+    const posEl = document.getElementById('radarInfo_position');
+    if (csEl) csEl.textContent = cs || '—';
+    if (posEl && lat != null) {
+        const latStr = Math.abs(lat).toFixed(3) + (lat >= 0 ? '°N' : '°S');
+        const lonStr = Math.abs(lon).toFixed(3) + (lon >= 0 ? '°E' : '°W');
+        posEl.textContent = `${latStr} ${lonStr}`;
+    } else if (posEl) {
+        posEl.textContent = '—';
+    }
+}
+
+function updateApiStatus(msg, ok) {
+    const el = document.getElementById('radarInfo_apistatus');
+    if (!el) return;
+    el.textContent       = msg;
+    el.dataset.statusOk  = ok ? 'true' : 'false';
+    el.style.color = ok ? T().menuStatus : 'rgba(255,120,60,0.95)';
+}
+
+function toggleMenu() { menuOpen ? closeMenu() : openMenu(); }
+
+function openMenu() {
+    menuOpen = true;
+    const p = document.getElementById('radarMenuPanel');
+    if (p) {
+        p.style.display = 'block';
+        repositionMenu();
+    }
+}
+
+function closeMenu() {
+    menuOpen = false;
+    const p = document.getElementById('radarMenuPanel');
+    if (p) p.style.display = 'none';
+}
+
+window.addEventListener('resize', () => {
+    repositionMenu();
+    repositionNearestHUD();
+});
 
 // ═══════════════════════════════════════════════════
 // SECTION 6 — BLIP POPUP
