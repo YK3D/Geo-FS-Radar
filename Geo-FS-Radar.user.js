@@ -1,4 +1,3 @@
-
 // ═══════════════════════════════════════════════════
 // SECTION 1 — RADAR PREFERENCES
 // These values are editable via the in-game Radar Preferences menu and are
@@ -13,9 +12,6 @@
         maxRangeKm:    50,
         scrollIncKm:   0.5,
         fetchDelay:    250,
-        spinSpeed:     0.03,   // Speed of rotation (rad/frame)
-        spinEnabled:   true,
-        spinShadow:    true,   // Shadow toggle
     };
 
     let prefs;
@@ -45,7 +41,7 @@ let MIN_RANGE    = prefs.minRangeKm  * 1000;  // converted to metres
 let MAX_RANGE    = prefs.maxRangeKm  * 1000;
 let SCROLL_INC   = prefs.scrollIncKm * 1000;
 let FETCH_DELAY_BASE = prefs.fetchDelay;
-let SPIN_SPEED   = prefs.spinSpeed;
+
 
 // ── applyPrefs — call after any prefs mutation ────────────────────────────
 function applyPrefs() {
@@ -55,7 +51,6 @@ function applyPrefs() {
     MAX_RANGE        = prefs.maxRangeKm  * 1000;
     SCROLL_INC       = prefs.scrollIncKm * 1000;
     FETCH_DELAY_BASE = prefs.fetchDelay;
-    SPIN_SPEED       = prefs.spinSpeed;
 
     radarCanvas.width  = radarSize;
     radarCanvas.height = radarSize;
@@ -854,6 +849,7 @@ function repositionUI() {
 let menuOpen = false;
 
 function createMenu() {
+    // 1. Create the Menu Toggle Button
     const btn = document.createElement('button');
     btn.id = 'radarMenuBtn';
     btn.title = 'Radar Settings';
@@ -868,12 +864,10 @@ function createMenu() {
     `;
     btn.onmouseover = () => btn.style.background = T().menuBtnBgHov;
     btn.onmouseout  = () => btn.style.background = T().menuBtnBg;
-    btn.onclick = (e) => {
-        e.stopPropagation();
-        toggleMenu();
-    };
+    btn.onclick = (e) => { e.stopPropagation(); toggleMenu(); };
     document.body.appendChild(btn);
 
+    // 2. Create the Menu Panel
     const panel = document.createElement('div');
     panel.id = 'radarMenuPanel';
     panel.style.cssText = `
@@ -892,8 +886,8 @@ function createMenu() {
         scrollbar-color:rgba(0,200,0,0.4) rgba(0,30,0,0.5);
     `;
 
+    // 3. Title Section
     const title = document.createElement('div');
-    title.dataset.menuTitle = '1';
     title.style.cssText = `
         color:rgba(0,255,0,0.9); font:bold ${UI.menuTitleFont}px ${FONT_SANS};
         text-align:center; padding:2px 14px 10px;
@@ -903,811 +897,160 @@ function createMenu() {
     title.textContent = 'RADAR SETTINGS';
     panel.appendChild(title);
 
+    // --- Helper Functions ---
     function addSection(label) {
         const s = document.createElement('div');
-        s.dataset.menuSection = '1';
-        s.style.cssText = `
-            color:rgba(0,255,0,0.5); font:bold ${UI.menuSectionFont}px ${FONT_SANS};
-            padding:8px 16px 3px; letter-spacing:1.5px; text-transform:uppercase;
-        `;
+        s.style.cssText = `color:rgba(0,255,0,0.5); font:bold ${UI.menuSectionFont}px ${FONT_SANS}; padding:8px 16px 3px; letter-spacing:1.5px; text-transform:uppercase;`;
         s.textContent = label;
         panel.appendChild(s);
     }
 
     function addToggle(label, key, onChange) {
         const row = document.createElement('div');
-        row.dataset.menuRow = key;
-        row.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;
-        `;
+        row.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;`;
         row.onmouseover = () => row.style.background = T().menuRowHover;
         row.onmouseout  = () => row.style.background = '';
-
         const lbl = document.createElement('span');
-        lbl.dataset.menuRowlbl = '1';
         lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
         lbl.textContent = label;
-
         const sw = document.createElement('div');
-        sw.dataset.menuSw = key;
-        sw.style.cssText = `
-            width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
-            border-radius:${UI.menuSwitchH/2}px; position:relative;
-            background:${settings[key] ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
-            border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;
-        `;
+        sw.style.cssText = `width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px; border-radius:${UI.menuSwitchH/2}px; position:relative; background:${settings[key] ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'}; border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;`;
         const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
         const knob = document.createElement('div');
-        knob.dataset.menuKnob = key;
-        knob.style.cssText = `
-            position:absolute; top:${(UI.menuSwitchH - UI.menuKnobSize)/2}px;
-            left:${settings[key] ? knobOn : knobOff}px;
-            width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%;
-            background:${settings[key] ? '#0f0' : '#888'};
-            transition:left .2s, background .2s;
-        `;
-        sw.appendChild(knob);
-        row.appendChild(lbl); row.appendChild(sw);
-
+        knob.style.cssText = `position:absolute; top:${(UI.menuSwitchH - UI.menuKnobSize)/2}px; left:${settings[key] ? knobOn : knobOff}px; width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%; background:${settings[key] ? '#0f0' : '#888'}; transition:left .2s, background .2s;`;
+        sw.appendChild(knob); row.appendChild(lbl); row.appendChild(sw);
         row.onclick = () => {
             settings[key] = !settings[key];
             const t = T();
-            sw.style.background   = settings[key] ? t.switchOn  : t.switchOff;
-            sw.style.borderColor  = t.switchBorder;
-            knob.style.left       = settings[key] ? knobOn + 'px' : knobOff + 'px';
+            sw.style.background = settings[key] ? t.switchOn : t.switchOff;
+            knob.style.left = settings[key] ? knobOn + 'px' : knobOff + 'px';
             knob.style.background = settings[key] ? t.knobOn : t.knobOff;
             saveSettings();
             if (onChange) onChange(settings[key]);
         };
         panel.appendChild(row);
-        return row;
     }
 
     function addRadio(label, key, opt1, opt2, label1, label2) {
         const row = document.createElement('div');
-        row.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding:${UI.menuRowPadY}px 16px;
-        `;
+        row.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:${UI.menuRowPadY}px 16px;`;
         const lbl = document.createElement('span');
-        lbl.dataset.menuRowlbl = '1';
         lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
         lbl.textContent = label;
-
         const wrap = document.createElement('div');
         wrap.style.cssText = 'display:flex; gap:5px;';
-
         [opt1, opt2].forEach((opt, i) => {
             const b = document.createElement('button');
-            b.id = `radarRadio_${key}_${opt}`;
-            b.dataset.radioKey = key;
-            b.dataset.radioOpt = opt;
             b.textContent = [label1, label2][i];
-            b.style.cssText = `
-                padding:4px 10px; font:bold ${UI.menuRadioFont}px ${FONT_SANS};
-                border-radius:5px; cursor:pointer;
-                border:1px solid rgba(0,255,0,0.3); transition:all .15s;
-                background:${settings[key]===opt ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)'};
-                color:${settings[key]===opt ? '#0f0' : 'rgba(150,200,150,0.7)'};
-            `;
+            b.style.cssText = `padding:4px 10px; font:bold ${UI.menuRadioFont}px ${FONT_SANS}; border-radius:5px; cursor:pointer; border:1px solid rgba(0,255,0,0.3); transition:all .15s; background:${settings[key]===opt ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)'}; color:${settings[key]===opt ? '#0f0' : 'rgba(150,200,150,0.7)'};`;
             b.onclick = () => {
                 settings[key] = opt;
-                const t = T();
-                [opt1, opt2].forEach(o => {
-                    const el = document.getElementById(`radarRadio_${key}_${o}`);
-                    if (!el) return;
-                    el.style.background  = settings[key]===o ? t.radioBtnOn  : t.radioBtnOff;
-                    el.style.color       = settings[key]===o ? t.radioTextOn : t.radioTextOff;
-                    el.style.borderColor = t.radioBorder;
-                });
                 saveSettings();
+                createMenu();
             };
             wrap.appendChild(b);
         });
-
         row.appendChild(lbl); row.appendChild(wrap);
         panel.appendChild(row);
-    }
-
-    function addSep() {
-        const s = document.createElement('div');
-        s.dataset.menuSep = '1';
-        s.style.cssText = 'border-top:1px solid rgba(0,255,0,0.1); margin:4px 0;';
-        panel.appendChild(s);
     }
 
     function addInfoRow(label, idSuffix) {
         const row = document.createElement('div');
         row.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:5px 16px;`;
         const lbl = document.createElement('span');
-        lbl.dataset.menuInfolbl = '1';
         lbl.style.cssText = `color:rgba(150,200,150,0.7); font:${UI.menuInfoFont}px ${FONT_SANS};`;
         lbl.textContent = label;
         const val = document.createElement('span');
         val.id = `radarInfo_${idSuffix}`;
-        val.dataset.menuInfoval = '1';
         val.style.cssText = `color:rgba(0,255,0,0.9); font:bold ${UI.menuInfoFont}px ${FONT_MONO}; text-align:right; max-width:155px; word-break:break-all;`;
         val.textContent = '—';
         row.appendChild(lbl); row.appendChild(val);
         panel.appendChild(row);
     }
 
-    function addStatusRow() {
-        const row = document.createElement('div');
-        row.style.cssText = `padding:5px 16px;`;
-        const val = document.createElement('span');
-        val.id = 'radarInfo_apistatus';
-        val.dataset.statusOk = 'true';
-        val.style.cssText = `color:rgba(0,200,0,0.8); font:${UI.menuInfoFont - 1}px ${FONT_MONO}; word-break:break-all;`;
-        val.textContent = 'Waiting for data…';
-        row.appendChild(val);
-        panel.appendChild(row);
-    }
-
-    // ── Display ──────────────────────────────────────────────────────────
-    addSection('Display');
-    addToggle('Night Mode',             'nightMode',        () => applyTheme());
-    addRadio ('Orientation',            'orientMode',       'north', 'track', 'N↑', 'TRK↑');
-    addToggle('Player Triangle',        'showPlayerTriangle');
-    addToggle('Range Rings',            'showRings');
-    addToggle('Ring Labels',            'showRingLabels');
-
-    addSep();
-
-    // ── Traffic ───────────────────────────────────────────────────────────
-    addSection('Traffic');
-    addToggle('Show Traffic',           'showTraffic');
-    addToggle('Traffic Triangles',      'showBlipTriangle');
-    addToggle('Callsign',               'showCallsign');
-    addToggle('Altitude',               'showAltitude');
-    addToggle('Speed',                  'showSpeed');
-    addToggle('Distance',               'showBlipDist');
-    addToggle('Heading Vectors',        'showVectors');
-    addToggle('Tracking / Nearby Traffic', 'showNearestHUD', (v) => {
-        if (!v) nearestHUD.style.display = 'none';
-    });
-
-    addSep();
-
-    // ── Map ───────────────────────────────────────────────────────────────
-    addSection('Map');
-    addToggle('Airports & Runways',     'showAirports');
-
-    addSep();
-
-    // ── My Aircraft ───────────────────────────────────────────────────────
-    addSection('My Aircraft');
-    addInfoRow('Callsign', 'callsign');
-    addInfoRow('Position', 'position');
-    addToggle('Show My Callsign',       'showMyCallsign');
-
-    addSep();
-
-    // ── Preference stepper row ────────────────────────────────────────────
-    // Renders a label + value display with −/+ buttons.
-    // opts: { label, get, set, fmt, min, max, step, onCommit }
-    // Manual keyboard input is activated by clicking the value display.
     function addPrefRow(opts) {
-        const { label, get, set, fmt, min, max, step, onCommit, placeholder } = opts;
-        const t = T();
-
+        const { label, get, set, fmt, min, max, step, onCommit } = opts;
         const row = document.createElement('div');
-        row.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding:${UI.menuRowPadY - 1}px 16px; gap:6px;
-        `;
-
+        row.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:${UI.menuRowPadY - 1}px 16px; gap:6px;`;
         const lbl = document.createElement('span');
-        lbl.dataset.menuRowlbl = '1';
-        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1; min-width:0;`;
+        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
         lbl.textContent = label;
-
-        // Value display / inline input wrapper
-        const valWrap = document.createElement('div');
-        valWrap.style.cssText = `position:relative; flex-shrink:0;`;
-
         const valSpan = document.createElement('span');
-        valSpan.style.cssText = `
-            display:inline-block; min-width:64px; text-align:center;
-            color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
-            background:rgba(0,40,0,0.6); border:1px solid rgba(0,255,0,0.3);
-            border-radius:5px; padding:2px 6px; cursor:text;
-            transition:border-color .15s;
-        `;
-        valSpan.textContent = fmt(get());
-        valSpan.title = 'Click to type a value';
-
-        // Inline input (hidden by default)
-        const valInput = document.createElement('input');
-        valInput.type = 'number';
-        valInput.style.cssText = `
-            display:none; width:64px; text-align:center;
-            color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
-            background:rgba(0,40,0,0.85); border:1px solid rgba(0,255,0,0.7);
-            border-radius:5px; padding:2px 4px; outline:none;
-            -moz-appearance:textfield;
-        `;
-        valInput.min  = min;
-        valInput.max  = max;
-        valInput.step = step;
-
-        function commitInput() {
-            let v = parseFloat(valInput.value);
-            if (!isFinite(v)) v = get();
-            v = Math.max(min, Math.min(max, v));
-            // Round to nearest step
-            v = Math.round(v / step) * step;
-            set(v);
-            valSpan.textContent = fmt(get());
-            valInput.style.display = 'none';
-            valSpan.style.display  = 'inline-block';
-            if (onCommit) onCommit();
-        }
-
-        valSpan.addEventListener('click', () => {
-            valInput.value = get();
-            valSpan.style.display  = 'none';
-            valInput.style.display = 'inline-block';
-            valInput.focus();
-            valInput.select();
-        });
-        valInput.addEventListener('blur',    commitInput);
-        valInput.addEventListener('keydown', e => {
-            if (e.key === 'Enter') { e.preventDefault(); commitInput(); }
-            if (e.key === 'Escape') {
-                valInput.style.display = 'none';
-                valSpan.style.display  = 'inline-block';
-            }
-        });
-
-        valWrap.appendChild(valSpan);
-        valWrap.appendChild(valInput);
-
-        // Button helper
-        function makeBtn(label) {
+        valSpan.style.cssText = `display:inline-block; min-width:64px; text-align:center; color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO}; background:rgba(0,40,0,0.6); border:1px solid rgba(0,255,0,0.3); border-radius:5px; padding:2px 6px; cursor:pointer;`;
+        const updateVal = () => { valSpan.textContent = fmt(get()); };
+        updateVal();
+        const makeBtn = (txt) => {
             const b = document.createElement('button');
-            b.textContent = label;
-            b.style.cssText = `
-                width:26px; height:26px; border-radius:5px; flex-shrink:0;
-                background:rgba(0,60,0,0.7); color:rgba(0,255,0,0.9);
-                border:1px solid rgba(0,255,0,0.3); font:bold 15px ${FONT_SANS};
-                cursor:pointer; display:flex; align-items:center; justify-content:center;
-                transition:background .12s; line-height:1;
-            `;
+            b.textContent = txt;
+            b.style.cssText = `width:26px; height:26px; border-radius:5px; background:rgba(0,60,0,0.7); color:rgba(0,255,0,0.9); border:1px solid rgba(0,255,0,0.3); font:bold 15px ${FONT_SANS}; cursor:pointer; transition:background .12s;`;
             b.onmouseover = () => b.style.background = 'rgba(0,100,0,0.8)';
             b.onmouseout  = () => b.style.background = 'rgba(0,60,0,0.7)';
             return b;
-        }
-
+        };
         const btnMinus = makeBtn('−');
-        const btnPlus  = makeBtn('+');
-
-        btnMinus.onclick = () => {
-            const v = Math.max(min, get() - step);
-            set(v);
-            valSpan.textContent = fmt(get());
-            if (onCommit) onCommit();
-        };
-        btnPlus.onclick = () => {
-            const v = Math.min(max, get() + step);
-            set(v);
-            valSpan.textContent = fmt(get());
-            if (onCommit) onCommit();
-        };
-
-        row.appendChild(lbl);
-        row.appendChild(btnMinus);
-        row.appendChild(valWrap);
-        row.appendChild(btnPlus);
-        if (placeholder) {
-            placeholder.replaceWith(row);
-        } else {
-            panel.appendChild(row);
-        }
-        return { row, valSpan, valInput };
+        const btnPlus = makeBtn('+');
+        btnMinus.onclick = () => { set(Math.max(min, get() - step)); updateVal(); if (onCommit) onCommit(); };
+        btnPlus.onclick = () => { set(Math.min(max, get() + step)); updateVal(); if (onCommit) onCommit(); };
+        row.appendChild(lbl); row.appendChild(btnMinus); row.appendChild(valSpan); row.appendChild(btnPlus);
+        panel.appendChild(row);
     }
 
-    // ── Radar Preferences ────────────────────────────────────────────────
+    function addSep() {
+        const s = document.createElement('div');
+        s.style.cssText = 'border-top:1px solid rgba(0,255,0,0.1); margin:4px 0;';
+        panel.appendChild(s);
+    }
+
+    // --- Build Sections ---
+    addSection('Display');
+    addToggle('Night Mode', 'nightMode', () => applyTheme());
+    addRadio ('Orientation', 'orientMode', 'north', 'track', 'N↑', 'TRK↑');
+    addToggle('Player Triangle', 'showPlayerTriangle');
+    addToggle('Range Rings', 'showRings');
+    addToggle('Ring Labels', 'showRingLabels');
     addSep();
+
+    addSection('Traffic');
+    addToggle('Show Traffic', 'showTraffic');
+    addToggle('Traffic Triangles', 'showBlipTriangle');
+    addToggle('Callsign', 'showCallsign');
+    addToggle('Altitude', 'showAltitude');
+    addToggle('Speed', 'showSpeed');
+    addToggle('Distance', 'showBlipDist');
+    addToggle('Heading Vectors', 'showVectors');
+    addToggle('Tracking / Nearby HUD', 'showNearestHUD', (v) => { if (!v) nearestHUD.style.display = 'none'; });
+    addSep();
+
+    addSection('Map');
+    addToggle('Airports & Runways', 'showAirports');
+    addSep();
+
+    addSection('My Aircraft');
+    addInfoRow('Position', 'position');
+    addToggle('Show My Callsign', 'showMyCallsign');
+    addSep();
+
     addSection('Radar Preferences');
-
-// ── Radar Size ───────────────────────────────────────────────────────
-{
-    const row = document.createElement('div');
-    row.style.cssText = `
-        display:flex; align-items:center; justify-content:space-between;
-        padding:${UI.menuRowPadY - 1}px 16px; gap:6px;
-    `;
-
-    // Label
-    const lbl = document.createElement('span');
-    lbl.dataset.menuRowlbl = '1';
-    lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
-    lbl.textContent = 'Radar Size';
-
-    // Minus button
-    const btnMinus = document.createElement('button');
-    btnMinus.textContent = '−';
-    btnMinus.style.cssText = `
-        width:26px; height:26px; border-radius:5px; flex-shrink:0;
-        background:rgba(0,60,0,0.7); color:rgba(0,255,0,0.9);
-        border:1px solid rgba(0,255,0,0.3); font:bold 15px ${FONT_SANS};
-        cursor:pointer; display:flex; align-items:center; justify-content:center;
-        transition:background .12s; line-height:1;
-    `;
-    btnMinus.onmouseover = () => btnMinus.style.background = 'rgba(0,100,0,0.8)';
-    btnMinus.onmouseout  = () => btnMinus.style.background = 'rgba(0,60,0,0.7)';
-
-    // Value display
-    const valSpan = document.createElement('span');
-    valSpan.style.cssText = `
-        display:inline-block; min-width:64px; text-align:center;
-        color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
-        background:rgba(0,40,0,0.6); border:1px solid rgba(0,255,0,0.3);
-        border-radius:5px; padding:2px 6px; cursor:pointer;
-    `;
-    
-    function updateDisplay() {
-        valSpan.textContent = prefs.radarSizePx + ' px';
-    }
-    updateDisplay();
-
-    // Plus button
-    const btnPlus = document.createElement('button');
-    btnPlus.textContent = '+';
-    btnPlus.style.cssText = btnMinus.style.cssText; // Same style as minus
-
-    // Button click handlers
-    btnMinus.onclick = () => {
-        let v = prefs.radarSizePx - 10;
-        v = Math.max(150, Math.min(900, v));
-        v = Math.round(v / 10) * 10;
-        prefs.radarSizePx = v;
-        updateDisplay();
-        applyPrefs();
-        savePrefs();
-    };
-
-    btnPlus.onclick = () => {
-        let v = prefs.radarSizePx + 10;
-        v = Math.max(150, Math.min(900, v));
-        v = Math.round(v / 10) * 10;
-        prefs.radarSizePx = v;
-        updateDisplay();
-        applyPrefs();
-        savePrefs();
-    };
-
-    // Click on value to edit
-    valSpan.addEventListener('click', () => {
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.value = prefs.radarSizePx;
-        input.min = 150;
-        input.max = 900;
-        input.step = 10;
-        input.style.cssText = `
-            width:64px; text-align:center;
-            color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
-            background:rgba(0,40,0,0.85); border:1px solid rgba(0,255,0,0.7);
-            border-radius:5px; padding:2px 4px; outline:none;
-            -moz-appearance:textfield;
-        `;
-
-        valSpan.style.display = 'none';
-        valSpan.parentNode.insertBefore(input, valSpan.nextSibling);
-
-        function commitInput() {
-            let v = parseInt(input.value);
-            if (!isFinite(v)) v = prefs.radarSizePx;
-            v = Math.max(150, Math.min(900, v));
-            v = Math.round(v / 10) * 10;
-            v = Math.max(150, Math.min(900, v));
-            prefs.radarSizePx = v;
-            updateDisplay();
-            applyPrefs();
-            savePrefs();
-            input.remove();
-            valSpan.style.display = 'inline-block';
-        }
-
-        input.addEventListener('blur', commitInput);
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                commitInput();
-            }
-            if (e.key === 'Escape') {
-                input.remove();
-                valSpan.style.display = 'inline-block';
-            }
-        });
-        input.focus();
-        input.select();
-    });
-
-    // Assemble row
-    row.appendChild(lbl);
-    row.appendChild(btnMinus);
-    row.appendChild(valSpan);
-    row.appendChild(btnPlus);
-    
-    panel.appendChild(row);
-}
-    // ── Min Range (stored/displayed/input in km) ──────────────────────────
-    addPrefRow({
-        label: 'Min Range',
-        get:  () => prefs.minRangeKm,
-        set:  v  => { prefs.minRangeKm = v; },
-        fmt:  v  => v.toFixed(1) + ' km',
-        min: 0.5, max: 10, step: 0.5,
-        onCommit: applyPrefs,
-    });
-
-    // ── Max Range (km) ────────────────────────────────────────────────────
-    addPrefRow({
-        label: 'Max Range',
-        get:  () => prefs.maxRangeKm,
-        set:  v  => { prefs.maxRangeKm = v; },
-        fmt:  v  => v.toFixed(0) + ' km',
-        min: 1, max: 100, step: 1,
-        onCommit: applyPrefs,
-    });
-
-    // ── Scroll Step (km) ──────────────────────────────────────────────────
-    addPrefRow({
-        label: 'Scroll Step',
-        get:  () => prefs.scrollIncKm,
-        set:  v  => { prefs.scrollIncKm = v; },
-        fmt:  v  => v.toFixed(1) + ' km',
-        min: 0.5, max: 10, step: 0.5,
-        onCommit: applyPrefs,
-    });
-
-    // ── Update Delay ─────────────────────────────────────────────────────
-    addPrefRow({
-        label: 'Update Delay',
-        get: () => prefs.fetchDelay,
-        set: v => { prefs.fetchDelay = v; },
-        fmt: v => v + ' ms',
-        min: 50, max: 1000, step: 50,
-        onCommit: applyPrefs,
-    });
-
-// ── Spin Speed + enable toggle ────────────────────────────────────────
-{
-    const spinEnRow = document.createElement('div');
-    spinEnRow.dataset.menuRow = '_spinEnabled';
-    spinEnRow.style.cssText = `
-        display:flex; align-items:center; justify-content:space-between;
-        padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;
-    `;
-    spinEnRow.onmouseover = () => spinEnRow.style.background = T().menuRowHover;
-    spinEnRow.onmouseout  = () => spinEnRow.style.background = '';
-    const spinEnLbl = document.createElement('span');
-    spinEnLbl.dataset.menuRowlbl = '1';
-    spinEnLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
-    spinEnLbl.textContent = 'Sweep Line';
-    const spinEnSw = document.createElement('div');
-    const spinEnKnobOff = 3, spinEnKnobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
-    spinEnSw.style.cssText = `
-        width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
-        border-radius:${UI.menuSwitchH/2}px; position:relative;
-        background:${prefs.spinEnabled ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
-        border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;
-    `;
-    const spinEnKnob = document.createElement('div');
-    spinEnKnob.style.cssText = `
-        position:absolute; top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
-        left:${prefs.spinEnabled ? spinEnKnobOn : spinEnKnobOff}px;
-        width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%;
-        background:${prefs.spinEnabled ? '#0f0' : '#888'};
-        transition:left .2s, background .2s;
-    `;
-    spinEnSw.appendChild(spinEnKnob);
-    spinEnRow.appendChild(spinEnLbl);
-    spinEnRow.appendChild(spinEnSw);
-    spinEnRow.onclick = () => {
-        prefs.spinEnabled = !prefs.spinEnabled;
-        const t2 = T();
-        spinEnSw.style.background   = prefs.spinEnabled ? t2.switchOn  : t2.switchOff;
-        spinEnKnob.style.left       = prefs.spinEnabled ? spinEnKnobOn + 'px' : spinEnKnobOff + 'px';
-        spinEnKnob.style.background = prefs.spinEnabled ? t2.knobOn : t2.knobOff;
-        savePrefs();
-        if (prefs.spinEnabled) startSpinAnimation(); else stopSpinAnimation();
-    };
-    panel.appendChild(spinEnRow);
-
-    // Sweep shadow toggle
-    {
-        const shadowRow = document.createElement('div');
-        shadowRow.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;
-        `;
-        shadowRow.onmouseover = () => shadowRow.style.background = T().menuRowHover;
-        shadowRow.onmouseout  = () => shadowRow.style.background = '';
-
-        const shadowLbl = document.createElement('span');
-        shadowLbl.dataset.menuRowlbl = '1';
-        shadowLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
-        shadowLbl.textContent = 'Sweep Shadow';
-
-        const shadowSw = document.createElement('div');
-        const shadowKnobOff = 3, shadowKnobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
-        shadowSw.style.cssText = `
-            width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
-            border-radius:${UI.menuSwitchH/2}px; position:relative;
-            background:${prefs.spinShadow ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
-            border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;
-        `;
-
-        const shadowKnob = document.createElement('div');
-        shadowKnob.style.cssText = `
-            position:absolute; top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
-            left:${prefs.spinShadow ? shadowKnobOn : shadowKnobOff}px;
-            width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%;
-            background:${prefs.spinShadow ? '#0f0' : '#888'};
-            transition:left .2s, background .2s;
-        `;
-
-        shadowSw.appendChild(shadowKnob);
-        shadowRow.appendChild(shadowLbl);
-        shadowRow.appendChild(shadowSw);
-
-        shadowRow.onclick = () => {
-            prefs.spinShadow = !prefs.spinShadow;
-            const t2 = T();
-            shadowSw.style.background   = prefs.spinShadow ? t2.switchOn  : t2.switchOff;
-            shadowKnob.style.left       = prefs.spinShadow ? shadowKnobOn + 'px' : shadowKnobOff + 'px';
-            shadowKnob.style.background = prefs.spinShadow ? t2.knobOn : t2.knobOff;
-            savePrefs();
-            if (prefs.spinEnabled) updateShadowSetting();
-        };
-
-        panel.appendChild(shadowRow);
-    }
-
-    addPrefRow({
-        label: 'Spin Speed',
-        get: () => prefs.spinSpeed,
-        set: v => { prefs.spinSpeed = Math.round(v * 1000) / 1000; },
-        fmt: v => v.toFixed(3) + ' rad/frame',
-        min: 0.001, max: 0.05, step: 0.001,
-        onCommit: () => {
-            savePrefs();
-            // Speed will be used directly in animation
-        }
-    });
-}
-/*
-// Spin animation variables
-let spinAnimationFrame = null;
-let spinAngle = 0;
-let lastDrawTime = 0;
-const TARGET_FPS = 10;
-const FRAME_TIME = 1000 / TARGET_FPS;
-
-function startSpinAnimation() {
-    if (spinAnimationFrame) cancelAnimationFrame(spinAnimationFrame);
-    spinAnimationFrame = requestAnimationFrame(animateSpin);
-}
-
-function stopSpinAnimation() {
-    if (spinAnimationFrame) {
-        cancelAnimationFrame(spinAnimationFrame);
-        spinAnimationFrame = null;
-    }
-    // Redraw without the spin line
-    redrawBaseGraphics();
-}
-
-function animateSpin(currentTime) {
-    if (!prefs.spinEnabled || isGamePaused) {
-        spinAnimationFrame = requestAnimationFrame(animateSpin);
-        return;
-    }
-
-    // Control frame rate for consistent animation
-    if (currentTime - lastDrawTime >= FRAME_TIME) {
-        // Update angle using prefs.spinSpeed directly
-        spinAngle += prefs.spinSpeed;
-        if (spinAngle > Math.PI * 2) spinAngle -= Math.PI * 2;
-        
-        // Draw the frame
-        drawFullFrame();
-        lastDrawTime = currentTime;
-    }
-    
-    spinAnimationFrame = requestAnimationFrame(animateSpin);
-}
-
-function drawFullFrame() {
-    // Clear the radar area only (not the entire canvas if there's UI)
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(radarSize/2, radarSize/2, radarSize/2, 0, Math.PI*2);
-    ctx.clip();
-    ctx.clearRect(0, 0, radarSize, radarSize);
-    ctx.restore();
-    
-    // Draw base radar graphics first
-    if (typeof drawRadarBase === 'function') {
-        drawRadarBase();
-    }
-    
-    // Draw the spin line with current angle
-    drawSpinLine();
-}
-
-function drawSpinLine() {
-    if (isGamePaused) return;
-    
-    const cx = radarSize/2, cy = radarSize/2;
-    const R  = radarSize/2 - 10;
-    const t  = T();
-
-    const ex = cx + Math.cos(spinAngle) * R;
-    const ey = cy + Math.sin(spinAngle) * R;
-
-    const sweepStart = spinAngle - 1.1;
-    
-    // Draw sweep trail
-    const lg = ctx.createLinearGradient(cx, cy, ex, ey);
-    lg.addColorStop(0, t.scanLine[0]);
-    lg.addColorStop(1, 'transparent');
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, R, sweepStart, spinAngle);
-    ctx.closePath();
-    ctx.fillStyle = t.trailColor(0.08);
-    ctx.fill();
-
-    // Draw shadow if enabled
-    if (prefs.spinShadow) {
-        ctx.save();
-        ctx.shadowColor = 'rgba(0, 255, 0, 0.8)';
-        ctx.shadowBlur = 15;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-        
-        // Draw line with shadow
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(ex, ey);
-        ctx.strokeStyle = t.scanLine[0];
-        ctx.lineWidth = 3;
-        ctx.stroke();
-        
-        // Draw endpoint with shadow
-        ctx.beginPath();
-        ctx.arc(ex, ey, 4, 0, Math.PI*2);
-        ctx.fillStyle = t.scanLine[0];
-        ctx.fill();
-        ctx.restore();
-    }
-    
-    // Draw main line (without shadow to prevent double shadow)
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(ex, ey);
-    ctx.strokeStyle = t.scanLine[0];
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Draw main endpoint (without shadow)
-    ctx.beginPath();
-    ctx.arc(ex, ey, 3, 0, Math.PI*2);
-    ctx.fillStyle = t.scanLine[0];
-    ctx.fill();
-}
-
-function updateShadowSetting() {
-    // Just redraw current frame with new shadow setting
-    if (prefs.spinEnabled && !isGamePaused) {
-        drawFullFrame();
-    }
-}
-
-function redrawBaseGraphics() {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(radarSize/2, radarSize/2, radarSize/2, 0, Math.PI*2);
-    ctx.clip();
-    ctx.clearRect(0, 0, radarSize, radarSize);
-    ctx.restore();
-    
-    if (typeof drawRadarBase === 'function') {
-        drawRadarBase();
-    }
-}
-*/
-    // ── API Status ────────────────────────────────────────────────────────
+    addPrefRow({ label: 'Radar Size', get: () => prefs.radarSizePx, set: v => { prefs.radarSizePx = Math.round(v/10)*10; applyPrefs(); }, fmt: v => v + ' px', min: 150, max: 900, step: 10, onCommit: savePrefs });
+    addPrefRow({ label: 'Min Range', get: () => prefs.minRangeKm, set: v => { prefs.minRangeKm = v; applyPrefs(); }, fmt: v => v.toFixed(1) + ' km', min: 0.5, max: 10, step: 0.5, onCommit: savePrefs });
+    addPrefRow({ label: 'Max Range', get: () => prefs.maxRangeKm, set: v => { prefs.maxRangeKm = v; applyPrefs(); }, fmt: v => v.toFixed(0) + ' km', min: 1, max: 100, step: 1, onCommit: savePrefs });
+    addPrefRow({ label: 'Scroll Step', get: () => prefs.scrollIncKm, set: v => { prefs.scrollIncKm = v; applyPrefs(); }, fmt: v => v.toFixed(1) + ' km', min: 0.5, max: 10, step: 0.5, onCommit: savePrefs });
+    addPrefRow({ label: 'Update Delay', get: () => prefs.fetchDelay, set: v => { prefs.fetchDelay = v; applyPrefs(); }, fmt: v => v + ' ms', min: 50, max: 1000, step: 50, onCommit: savePrefs });
     addSep();
-    addSection('API Status');
-    addStatusRow();
+
+    // Status row at the bottom
+    const statusRow = document.createElement('div');
+    statusRow.style.cssText = `padding:5px 16px;`;
+    const statusVal = document.createElement('span');
+    statusVal.id = 'radarInfo_apistatus';
+    statusVal.style.cssText = `color:rgba(0,200,0,0.8); font:${UI.menuInfoFont - 1}px ${FONT_MONO}; word-break:break-all;`;
+    statusVal.textContent = 'Waiting for data…';
+    statusRow.appendChild(statusVal);
+    panel.appendChild(statusRow);
 
     document.body.appendChild(panel);
-
     repositionMenu();
 }
-
-function repositionMenu() {
-    const btn = document.getElementById('radarMenuBtn');
-    const panel = document.getElementById('radarMenuPanel');
-    if (!btn || !panel) return;
-
-    const rl = parseInt(radarCanvas.style.left) || 5;
-    const rt = parseInt(radarCanvas.style.top) || 0;
-    const menuFullHeight = 600;
-    const buttonSize = 40;
-    const spacing = 5;
-    const bottomMargin = 60;
-    const windowHeight = window.innerHeight;
-
-    btn.style.left = (rl + radarSize + spacing) + 'px';
-    btn.style.top = rt + 'px';
-
-    const panelTop = rt + buttonSize + spacing;
-    panel.style.top = panelTop + 'px';
-
-    const maxAllowedHeight = windowHeight - panelTop - bottomMargin;
-    const panelHeight = Math.min(menuFullHeight, maxAllowedHeight);
-    panel.style.height = panelHeight + 'px';
-    panel.style.left = (rl + radarSize + spacing) + 'px';
-
-    const panelRight = parseInt(panel.style.left) + UI.menuW;
-    if (panelRight > window.innerWidth) {
-        panel.style.left = (window.innerWidth - UI.menuW - spacing) + 'px';
-    }
-
-    const isTruncated = panelHeight < menuFullHeight;
-    panel.style.borderBottom = isTruncated ? '2px solid rgba(255,200,0,0.5)' : '1.5px solid rgba(0,255,0,0.35)';
-}
-
-function updateMenuInfoCallsign(cs, lat, lon) {
-    const csEl = document.getElementById('radarInfo_callsign');
-    const posEl = document.getElementById('radarInfo_position');
-    if (csEl) csEl.textContent = cs || '—';
-    if (posEl && lat != null) {
-        const latStr = Math.abs(lat).toFixed(3) + (lat >= 0 ? '°N' : '°S');
-        const lonStr = Math.abs(lon).toFixed(3) + (lon >= 0 ? '°E' : '°W');
-        posEl.textContent = `${latStr} ${lonStr}`;
-    } else if (posEl) {
-        posEl.textContent = '—';
-    }
-}
-
-function updateApiStatus(msg, ok) {
-    const el = document.getElementById('radarInfo_apistatus');
-    if (!el) return;
-    el.textContent       = msg;
-    el.dataset.statusOk  = ok ? 'true' : 'false';
-    el.style.color = ok ? T().menuStatus : 'rgba(255,120,60,0.95)';
-}
-
-function toggleMenu() { menuOpen ? closeMenu() : openMenu(); }
-
-function openMenu() {
-    menuOpen = true;
-    const p = document.getElementById('radarMenuPanel');
-    if (p) {
-        p.style.display = 'block';
-        repositionMenu();
-    }
-}
-
-function closeMenu() {
-    menuOpen = false;
-    const p = document.getElementById('radarMenuPanel');
-    if (p) p.style.display = 'none';
-}
-
-window.addEventListener('resize', () => {
-    repositionMenu();
-    repositionNearestHUD();
-});
 
 // ═══════════════════════════════════════════════════
 // SECTION 6 — BLIP POPUP
@@ -1907,32 +1250,27 @@ setInterval(() => {
         const t = T();
         const pauseOpacity = '0.45';
 
-        // ── Canvas ────────────────────────────────────────────────────────
         radarCanvas.style.opacity   = isGamePaused ? pauseOpacity : '1';
         radarCanvas.style.boxShadow = isGamePaused
             ? '0 0 10px rgba(255,220,0,0.4)'
             : t.canvasGlow;
 
-        // ── Range box ─────────────────────────────────────────────────────
         const rb = document.getElementById('radarRangeBox');
         if (rb) rb.style.opacity = isGamePaused ? pauseOpacity : '1';
 
-        // ── Menu button ───────────────────────────────────────────────────
         const mb = document.getElementById('radarMenuBtn');
         if (mb) mb.style.opacity = isGamePaused ? pauseOpacity : '1';
 
-        // ── Settings panel ────────────────────────────────────────────────
         const mp = document.getElementById('radarMenuPanel');
         if (mp) mp.style.opacity = isGamePaused ? pauseOpacity : '1';
 
-        // ── HUD ───────────────────────────────────────────────────────────
         nearestHUD.style.opacity = isGamePaused ? pauseOpacity : '1';
 
     } catch(e) {}
 }, PAUSE_POLL_INTERVAL);
 
 let aircraftListCache = [];
-const prevAcData = new Map();  // used by internal source speed-delta
+const prevAcData = new Map();
 
 function normalizeAc(raw) {
     const ac = Object.assign({}, raw);
@@ -1953,21 +1291,9 @@ function normalizeAc(raw) {
 
 // ═══════════════════════════════════════════════════
 // SECTION 11 — MULTIPLAYER DATA SOURCE
-//
-// Priority 1 — Internal (geofs.multiplayer live cache)
-//   GeoFS already maintains a real-time player list via its own WebSocket.
-//   Reading from it directly costs zero HTTP requests and has zero rate-limit
-//   risk. We probe several known property paths on geofs.multiplayer and
-//   normalise whichever one returns valid player objects.
-//
-// Priority 2 — REST fallback (mps.geo-fs.com/map)
-//   Used only when the internal cache is unavailable (e.g. multiplayer is
-//   disabled in the options, or GeoFS hasn't finished initialising yet).
-//   Retains full exponential backoff to handle HTTP 429 responses.
 // ═══════════════════════════════════════════════════
 
-// ── Shared speed-delta helper (used by both sources) ─────────────────────
-const prevAcData_rest = new Map(); // separate history map for REST path
+const prevAcData_rest = new Map();
 
 function _applySpeedDelta(ac, prevMap, now) {
     if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
@@ -1999,42 +1325,28 @@ function _applySpeedDelta(ac, prevMap, now) {
     });
 }
 
-// ── Internal source — reads geofs.multiplayer directly ───────────────────
-// GeoFS stores other players in its multiplayer module. The exact property
-// path has varied across versions; we try all known paths in order.
-// Each player entry in the internal cache uses a different shape from the
-// REST API: position is in `llaLocation[]`, heading in `animationValue`,
-// speed in `animationValue.speed` etc.  `_normalizeInternal` converts this
-// to the same `co[]` / `h` / `s` shape that the rest of the radar expects.
-
 function _normalizeInternal(raw) {
     if (!raw) return null;
     try {
         const ac = {};
 
-        // ── Session / callsign identity ──────────────────────────────────
         ac.id = raw.id ?? raw.userId ?? raw.sessionId ?? null;
         ac.cs = raw.callsign ?? raw.cs ?? null;
-
-        // ── Aircraft type ID ─────────────────────────────────────────────
         ac.ac = raw.aircraftIndex ?? raw.ac ?? raw.aircraftId ?? null;
 
-        // ── Position — try llaLocation first, then co[] ──────────────────
         if (Array.isArray(raw.llaLocation) && raw.llaLocation.length >= 2) {
             const lat = parseFloat(raw.llaLocation[0]);
             const lon = parseFloat(raw.llaLocation[1]);
             const alt = parseFloat(raw.llaLocation[2]);
             if (!isFinite(lat) || !isFinite(lon)) return null;
-            // co[2] in the REST API is metres; llaLocation[2] is also metres
             ac.co = [lat, lon, isFinite(alt) ? alt : 0];
-            if (isFinite(alt)) ac.al = alt * 3.28084; // feet
+            if (isFinite(alt)) ac.al = alt * 3.28084;
         } else if (Array.isArray(raw.co) && raw.co.length >= 2) {
             ac.co = raw.co;
         } else {
-            return null; // no position — skip
+            return null;
         }
 
-        // ── Heading ──────────────────────────────────────────────────────
         const hdg = raw.animationValue?.heading360
                  ?? raw.animationValue?.heading
                  ?? raw.heading
@@ -2043,14 +1355,12 @@ function _normalizeInternal(raw) {
                  ?? null;
         if (hdg != null && isFinite(parseFloat(hdg))) ac.h = parseFloat(hdg);
 
-        // ── Altitude (feet) — override if not set above ───────────────────
         if (ac.al == null) {
             const altFt = raw.animationValue?.altitude ?? raw.altitude ?? null;
             if (altFt != null && isFinite(parseFloat(altFt))) ac.al = parseFloat(altFt);
         }
 
-        // ── Speed (knots) ─────────────────────────────────────────────────
-        const spd = raw.animationValue?.speed           // kts in animation
+        const spd = raw.animationValue?.speed
                  ?? raw.animationValue?.kias
                  ?? raw.st?.as
                  ?? raw.s
@@ -2063,22 +1373,14 @@ function _normalizeInternal(raw) {
     }
 }
 
-// Returns an array of normalised aircraft objects from the internal GeoFS
-// multiplayer cache, or null if no suitable data was found.
 function _readInternalMultiplayer() {
     try {
         const mp = window.geofs?.multiplayer;
         if (!mp) return null;
 
-        // Candidate property paths, tried in order
         const candidates = [
-            mp._users,      // common in 3.x builds
-            mp.users,
-            mp._clients,
-            mp.clients,
-            mp._otherAircraft,
-            mp.otherAircraft,
-            mp._aircraft,
+            mp._users, mp.users, mp._clients, mp.clients,
+            mp._otherAircraft, mp.otherAircraft, mp._aircraft,
         ];
 
         for (const raw of candidates) {
@@ -2097,12 +1399,10 @@ function _readInternalMultiplayer() {
 
             if (!list.length) continue;
 
-            // Quick sanity-check: does the first item look like a player?
             const sample = list[0];
             const hasPos = Array.isArray(sample?.llaLocation) || Array.isArray(sample?.co);
             if (!hasPos) continue;
 
-            // Normalise and filter out bad entries
             const now  = Date.now();
             const acList = [];
             list.forEach(raw => {
@@ -2118,11 +1418,9 @@ function _readInternalMultiplayer() {
     return null;
 }
 
-// ── Internal polling loop ─────────────────────────────────────────────────
-// Runs at the draw-interval cadence so blips update every frame.
 let _internalSourceActive = false;
 let _internalConsecutiveFails = 0;
-const INTERNAL_FAIL_THRESHOLD = 10; // give up on internal after N misses
+const INTERNAL_FAIL_THRESHOLD = 10;
 
 function _tickInternalSource() {
     if (isGamePaused) return;
@@ -2135,7 +1433,6 @@ function _tickInternalSource() {
     } else {
         _internalConsecutiveFails++;
         if (_internalSourceActive && _internalConsecutiveFails >= INTERNAL_FAIL_THRESHOLD) {
-            // Internal source has gone away — restart REST fallback
             _internalSourceActive = false;
             updateApiStatus('Internal unavailable — switching to REST…', false);
             scheduleFetch(FETCH_DELAY_BASE);
@@ -2145,7 +1442,6 @@ function _tickInternalSource() {
 
 setInterval(_tickInternalSource, DRAW_INTERVAL);
 
-// ── REST fallback — polls mps.geo-fs.com/map when internal is unavailable ─
 let _fetchConsecutiveErrors = 0;
 let _fetchDelay = FETCH_DELAY_BASE;
 const FETCH_MIN = FETCH_DELAY_BASE;
@@ -2158,9 +1454,8 @@ function scheduleFetch(delay) {
 }
 
 async function doFetch() {
-    // Skip REST entirely while the internal source is healthy
     if (_internalSourceActive) {
-        scheduleFetch(2000); // check again in 2 s in case internal drops
+        scheduleFetch(2000);
         return;
     }
 
@@ -2200,7 +1495,6 @@ async function doFetch() {
     scheduleFetch(_fetchDelay);
 }
 
-// Kick off the initial REST fetch (internal source will suppress it once ready)
 scheduleFetch(FETCH_DELAY_INITIAL);
 
 // ═══════════════════════════════════════════════════
@@ -2332,126 +1626,6 @@ function worldToCanvas(dx, dy, cx, cy, rotRad) {
         cy - (ry / radarRange) * (radarSize / 2)
     ];
 }
-
-// ═══════════════════════════════════════════════════
-// SECTION 14 — SPIN LINE
-// Angle advances based on real elapsed time (ms since last frame) so the
-// sweep speed is constant regardless of draw rate or fetch delays.
-// ═══════════════════════════════════════════════════
-
-let spinAngle    = 0;
-let _spinLastTs  = null;   // performance.now() of last rAF tick
-
-function drawSpinLine() {
-    if (!prefs.spinEnabled) return;
-
-    const cx = radarSize / 2, cy = radarSize / 2;
-    const R  = radarSize / 2 - 10;
-    const t  = T();
-
-    // ── Shadow pass (drawn first, so the bright line sits on top) ─────────
-    if (prefs.spinShadow) {
-        const shadowOffset = 0.35;                      // rad behind the line
-        const shadowAngle  = spinAngle - shadowOffset;
-        const sx = cx + Math.cos(shadowAngle) * R;
-        const sy = cy + Math.sin(shadowAngle) * R;
-
-        // Wide, very faint glow arc
-        const lgShadow = ctx.createConicalGradient
-            ? null                                       // future API; skip for now
-            : null;
-
-        // Radial wedge — same technique as the sweep trail but dimmer & wider
-        const arcStart = shadowAngle - 0.6;
-        ctx.save();
-        ctx.globalAlpha = 0.07;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.arc(cx, cy, R, arcStart, shadowAngle);
-        ctx.closePath();
-        ctx.fillStyle = settings.nightMode
-            ? 'rgba(255,100,30,0.9)'
-            : 'rgba(0,255,0,0.9)';
-        ctx.fill();
-        ctx.globalAlpha = 1;
-
-        // Thin shadow line
-        ctx.save();
-        ctx.globalAlpha = 0.25;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(sx, sy);
-        ctx.strokeStyle = settings.nightMode ? 'rgba(255,120,40,0.6)' : 'rgba(0,255,80,0.6)';
-        ctx.lineWidth   = 3;
-        ctx.shadowColor = settings.nightMode ? 'rgba(255,100,20,0.4)' : 'rgba(0,255,0,0.4)';
-        ctx.shadowBlur  = 8;
-        ctx.stroke();
-        ctx.restore();
-        ctx.restore();
-    }
-
-    // ── Sweep trail ───────────────────────────────────────────────────────
-    const sweepStart = spinAngle - 1.1;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, R, sweepStart, spinAngle);
-    ctx.closePath();
-    ctx.fillStyle = t.trailColor(0.08);
-    ctx.fill();
-
-    // ── Main sweep line ───────────────────────────────────────────────────
-    const ex = cx + Math.cos(spinAngle) * R;
-    const ey = cy + Math.sin(spinAngle) * R;
-
-    ctx.save();
-    ctx.shadowColor = t.scanLine[0];
-    ctx.shadowBlur  = 6;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(ex, ey);
-    ctx.strokeStyle = t.scanLine[0];
-    ctx.lineWidth   = 2;
-    ctx.stroke();
-    ctx.restore();
-
-    // Tip dot
-    ctx.beginPath();
-    ctx.arc(ex, ey, 3, 0, Math.PI * 2);
-    ctx.fillStyle = t.scanLine[0];
-    ctx.fill();
-}
-
-// ── requestAnimationFrame draw loop — runs every frame for smooth spin ────
-// The heavier drawRadar() still runs on DRAW_INTERVAL for performance; the
-// rAF loop only redraws the spin overlay in between heavy frames.
-let _rafActive    = true;
-let _lastHeavyTs  = 0;
-
-function _rafTick(ts) {
-    if (!_rafActive) return;
-
-    // Advance spin angle by elapsed time — speed is in rad per 60-fps frame
-    if (_spinLastTs !== null && !isGamePaused && prefs.spinEnabled) {
-        const dtMs  = Math.min(ts - _spinLastTs, 100); // cap at 100ms to avoid jumps
-        const dtFrames = dtMs / (1000 / 60);           // normalise to 60-fps frames
-        spinAngle += prefs.spinSpeed * dtFrames;
-        if (spinAngle > Math.PI * 2) spinAngle -= Math.PI * 2;
-    }
-    _spinLastTs = ts;
-
-    // Run full drawRadar on interval; in between, just overdraw the spin line
-    const now = performance.now();
-    if (now - _lastHeavyTs >= DRAW_INTERVAL && !isDragging) {
-        _lastHeavyTs = now;
-        drawRadar();   // drawRadar calls drawSpinLine() itself
-    } else if (prefs.spinEnabled && !isGamePaused) {
-        // Lightweight overdraw: just repaint the sweep on top without clearing
-        drawSpinLine();
-    }
-
-    requestAnimationFrame(_rafTick);
-}
-requestAnimationFrame(_rafTick);
 
 // ═══════════════════════════════════════════════════
 // SECTION 15 — AIRPORT / RUNWAY DRAWING
@@ -2612,6 +1786,7 @@ function drawRadar() {
     const t  = T();
     const cx = radarSize/2, cy = radarSize/2;
 
+    // ── 1. Clear & fill opaque background ────────────────────────────────
     ctx.clearRect(0, 0, radarSize, radarSize);
     ctx.beginPath();
     ctx.arc(cx, cy, radarSize/2, 0, Math.PI*2);
@@ -2654,9 +1829,7 @@ function drawRadar() {
     }
     const displayCallsign = _cachedCallsign || playerCallsign;
 
-    {
-        updateMenuInfoCallsign(displayCallsign, hasPos ? playerLat : null, hasPos ? playerLon : null);
-    }
+    updateMenuInfoCallsign(displayCallsign, hasPos ? playerLat : null, hasPos ? playerLon : null);
 
     const myData = hasPos ? {
         lat:   playerLat,
@@ -2668,18 +1841,18 @@ function drawRadar() {
         ? (playerHeading * Math.PI / 180)
         : 0;
 
-    // ── Clip to circle ───────────────────────────
+    // ── 2. Clip to circle ─────────────────────────────────────────────────
     ctx.save();
     ctx.beginPath(); ctx.arc(cx,cy,radarSize/2,0,Math.PI*2); ctx.clip();
 
-    // ── Grid lines ───────────────────────────────
+    // ── 3. Grid lines ─────────────────────────────────────────────────────
     ctx.strokeStyle = t.grid; ctx.lineWidth = UI.gridLineW;
     ctx.beginPath();
     ctx.moveTo(cx,0); ctx.lineTo(cx,radarSize);
     ctx.moveTo(0,cy); ctx.lineTo(radarSize,cy);
     ctx.stroke();
 
-    // ── Range rings ──────────────────────────────
+    // ── 4. Range rings ────────────────────────────────────────────────────
     if (settings.showRings) {
         for (let i=1; i<=3; i++) {
             const rr = (radarSize/2) * (i/3);
@@ -2705,7 +1878,7 @@ function drawRadar() {
         }
     }
 
-    // ── Compass ──────────────────────────────────
+    // ── 5. Compass ────────────────────────────────────────────────────────
     {
         const dirs  = ['N','E','S','W'];
         const edgeR = radarSize/2 - 16;
@@ -2733,15 +1906,12 @@ function drawRadar() {
         }
     }
 
-    // ── Spin line ────────────────────────────────
-    if (!isGamePaused) drawSpinLine();
-
-    // ── Airports & runways ───────────────────────
+    // ── 7. Airports & runways ─────────────────────────────────────────────
     if (!isGamePaused && hasPos) {
         drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad);
     }
 
-    // ── Other aircraft blips ─────────────────────
+    // ── 8. Other aircraft blips ───────────────────────────────────────────
     lastBlipPositions = [];
     let nearestAc = null, nearestMeters = Infinity;
 
@@ -2755,18 +1925,15 @@ function drawRadar() {
             const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
             const distM    = Math.hypot(dx, dy);
 
-            // Track nearest regardless of radar range (HUD always shows closest)
             if (distM < nearestMeters) {
                 nearestMeters = distM;
                 nearestAc = ac;
             }
 
-            // Only draw blip if within radar range
             if (distM > radarRange) return;
 
             ctx.save();
             try {
-                // Isolate mode: skip drawing non-tracked blips (but nearest still tracked above)
                 if (_trackedId && settings.isolateTracked && ac.id !== _trackedId) { ctx.restore(); return; }
 
                 const [rx, ry] = worldToCanvas(dx, dy, cx, cy, rotRad);
@@ -2786,7 +1953,6 @@ function drawRadar() {
                 const _compSpd = typeof ac._computedSpd === 'number' ? ac._computedSpd : NaN;
                 const acS = isFinite(_apiSpd) ? _apiSpd : (isFinite(_compSpd) ? _compSpd : NaN);
 
-                // ── Velocity vector ──────────────────────────
                 if (settings.showVectors && isFinite(acH) && isFinite(acS)) {
                     const speedMs = acS * 0.514444;
                     const vecLen  = Math.min((speedMs * 30) / radarRange * (radarSize / 2), radarSize/2);
@@ -2798,7 +1964,6 @@ function drawRadar() {
                     ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
                 }
 
-                // ── Blip shape ───────────────────────────────
                 const blipColor  = isTrackedBlip ? 'rgba(255,220,60,1)' : T().blipFill;
                 const blipStroke = isTrackedBlip ? 'rgba(255,240,120,0.9)' : 'rgba(255,255,255,0.7)';
 
@@ -2833,7 +1998,6 @@ function drawRadar() {
                     ctx.strokeStyle = blipStroke; ctx.lineWidth = isActive ? 2 : 1; ctx.stroke();
                 }
 
-                // ── Labels ───────────────────────────────────
                 const blipBottom = settings.showBlipTriangle && isFinite(acH)
                     ? ry + UI.blipTriTip + 4
                     : ry + (isActive ? UI.blipDotRActive : UI.blipDotR) + 4;
@@ -2886,7 +2050,7 @@ function drawRadar() {
 
     ctx.restore(); // end circle clip
 
-    // ── Player callsign tag ───────────────────────
+    // ── Player callsign tag ───────────────────────────────────────────────
     let _playerTagBottomY = cy + UI.playerTriBaseOff + UI.playerTriTip + 13;
     if (settings.showMyCallsign && displayCallsign) {
         const lbl = displayCallsign.substring(0, 12);
@@ -2903,18 +2067,17 @@ function drawRadar() {
         _playerTagBottomY = ty + 14;
     }
 
-    // ── Player aircraft type tag ──────────────────
-    // ── Paused overlay ───────────────────────────
+    // ── Paused overlay ────────────────────────────────────────────────────
     if (isGamePaused) {
         ctx.fillStyle = T().pauseText;
         ctx.font = `bold ${UI.pausedFont}px ${FONT_CANVAS}`; ctx.textAlign = 'center';
         ctx.fillText('PAUSED', cx, radarSize - 30);
     }
 
-    // ── Player triangle — always on top ──────────
+    // ── Player triangle — always on top ───────────────────────────────────
     drawPlayerTriangle(cx, cy, playerHeading, isGamePaused);
 
-    // ── Update Tracking / Nearby Traffic HUD ─────
+    // ── Update Tracking / Nearby Traffic HUD ─────────────────────────────
     if (!isGamePaused) {
         const _hudNow = Date.now();
 
@@ -2947,10 +2110,14 @@ function drawRadar() {
 }
 
 // ═══════════════════════════════════════════════════
-// SECTION 18 — DRAW LOOP
-// The requestAnimationFrame loop in Section 14 handles all drawing.
-// setInterval only drives the reposition helper.
+// SECTION 18 — DRAW LOOP (requestAnimationFrame)
 // ═══════════════════════════════════════════════════
+
+function _rafLoop() {
+    drawRadar();
+    requestAnimationFrame(_rafLoop);
+}
+requestAnimationFrame(_rafLoop);
 
 setInterval(repositionUI, REPOSITION_INTERVAL);
 
