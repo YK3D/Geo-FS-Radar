@@ -1044,6 +1044,7 @@ function createMenu() {
     addSep();
 
     addSection('Sweep Settings');
+    
     // Sweep Line Toggle
     const sweepRow = document.createElement('div');
     sweepRow.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;`;
@@ -1060,17 +1061,16 @@ function createMenu() {
     sweepSw.appendChild(sweepKnob); sweepRow.appendChild(sweepLbl); sweepRow.appendChild(sweepSw);
     sweepRow.onclick = () => {
         prefs.spinEnabled = !prefs.spinEnabled;
+        savePrefs();
         const t = T();
         sweepSw.style.background = prefs.spinEnabled ? t.switchOn : t.switchOff;
         sweepKnob.style.left = prefs.spinEnabled ? knobOn + 'px' : knobOff + 'px';
         sweepKnob.style.background = prefs.spinEnabled ? t.knobOn : t.knobOff;
-        savePrefs();
-        if (prefs.spinEnabled) startSpinAnimation(); else stopSpinAnimation();
     };
     panel.appendChild(sweepRow);
 
-    // NOTE: Shadow toggle removed as per request.
-    // The SweepLine function now always draws the shadow trail.
+    // Shadow toggle removed as requested. 
+    // Trail logic is now baked into the SweepLine function below.
 
     addPrefRow({ label: 'Sweep Speed', get: () => prefs.spinSpeed, set: v => { prefs.spinSpeed = Math.round(v * 1000) / 1000; }, fmt: v => v.toFixed(3) + ' rad/f', min: 0.001, max: 0.1, step: 0.001, onCommit: savePrefs });
     addSep();
@@ -1090,53 +1090,21 @@ function createMenu() {
 }
 
 /**
- * UPDATED ANIMATION LOGIC: SweepLine
- * Rewritten to use the user-provided trail logic.
- * The shadow toggle has been removed; the trail is always drawn when the sweep is active.
+ * SWEEP LINE FUNCTION
+ * Draws the rotating sweep line and a smooth trailing shadow.
+ * Note: This function ONLY draws the sweep. It does NOT clear the canvas or 
+ * draw the background, preventing the "transparent radar" issue.
  */
-
-let spinAngle = 0;
-let lastDrawTime = 0;
-let spinAnimationFrame = null;
-let isSweeping = false;
-
-function animateSpin(currentTime) {
-    if (!prefs.spinEnabled || isGamePaused) {
-        isSweeping = false;
-        spinAngle = 0; // Optional: reset or freeze
-        spinAnimationFrame = requestAnimationFrame(animateSpin);
-        return;
-    }
-
-    const dt = currentTime - lastDrawTime;
-    if (dt >= (1000 / 60)) { 
-        if (!isSweeping) {
-            isSweeping = true;
-            spinAngle = 0;
-        }
-
-        // Update angle based on speed
-        spinAngle += prefs.spinSpeed;
-        if (spinAngle > Math.PI * 2) {
-            spinAngle -= Math.PI * 2;
-        }
-        
-        drawFullFrame();
-        lastDrawTime = currentTime;
-    }
-    
-    spinAnimationFrame = requestAnimationFrame(animateSpin);
-}
-
-// Renamed function as requested
 function SweepLine() {
-    if (isGamePaused || !prefs.spinEnabled || !isSweeping) return;
-    
-    const cx = radarSize / 2, cy = radarSize / 2, R = radarSize / 2 - 10;
-    const t = T();
+    if (!prefs.spinEnabled) return;
 
+    // Use global radarSize defined in Section 1/2
+    const cx = radarSize / 2;
+    const cy = radarSize / 2;
+    const R = radarSize / 2 - 10;
+    
     // Draw the trailing green shadow (sweep)
-    // Using multiple thin segments to simulate a smooth trail
+    // We use multiple thin segments to simulate a smooth trail
     const trailLength = 60; // Length of the trail in degrees
     for (let i = 0; i < trailLength; i++) {
         const alpha = (trailLength - i) / trailLength * 0.4;
@@ -1145,8 +1113,7 @@ function SweepLine() {
         ctx.beginPath();
         ctx.moveTo(cx, cy);
         ctx.arc(cx, cy, R, currentAngle, currentAngle + 0.02);
-        // Using theme color for consistency
-        ctx.fillStyle = t.trailColor(alpha); 
+        ctx.fillStyle = `rgba(0, 255, 0, ${alpha})`;
         ctx.fill();
     }
 
@@ -1156,14 +1123,13 @@ function SweepLine() {
     const lineX = cx + R * Math.cos(spinAngle);
     const lineY = cy + R * Math.sin(spinAngle);
     ctx.lineTo(lineX, lineY);
-    ctx.strokeStyle = t.scanLine[0];
+    ctx.strokeStyle = '#00ff00';
     ctx.lineWidth = 2;
     ctx.stroke();
 }
 
-// Compatibility alias for existing calls in other sections
-const drawSpinLine = SweepLine;
-
+// Assign to window.drawSpinLine so the existing drawRadar loop in Section 17 can call it.
+window.drawSpinLine = SweepLine;
 
 
 // ═══════════════════════════════════════════════════
