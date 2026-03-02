@@ -848,7 +848,7 @@ function repositionUI() {
 }
 
 // ═══════════════════════════════════════════════════
-// SECTION 5 — MENU (COMPLETE REWRITE)
+// SECTION 5 — MENU (COMPLETE REWRITE V2)
 // ═══════════════════════════════════════════════════
 
 let menuOpen = false;
@@ -950,8 +950,8 @@ function createMenu() {
             b.style.cssText = `padding:4px 10px; font:bold ${UI.menuRadioFont}px ${FONT_SANS}; border-radius:5px; cursor:pointer; border:1px solid rgba(0,255,0,0.3); transition:all .15s; background:${settings[key]===opt ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)'}; color:${settings[key]===opt ? '#0f0' : 'rgba(150,200,150,0.7)'};`;
             b.onclick = () => {
                 settings[key] = opt;
-                const t = T();
                 saveSettings();
+                // Manually refresh radio state
                 createMenu();
             };
             wrap.appendChild(b);
@@ -1007,8 +1007,7 @@ function createMenu() {
         panel.appendChild(s);
     }
 
-    // --- Build All Original Sections ---
-
+    // --- Build Sections ---
     addSection('Display');
     addToggle('Night Mode', 'nightMode', () => applyTheme());
     addRadio ('Orientation', 'orientMode', 'north', 'track', 'N↑', 'TRK↑');
@@ -1045,14 +1044,60 @@ function createMenu() {
     addPrefRow({ label: 'Update Delay', get: () => prefs.fetchDelay, set: v => { prefs.fetchDelay = v; applyPrefs(); }, fmt: v => v + ' ms', min: 50, max: 1000, step: 50, onCommit: savePrefs });
     addSep();
 
-    // --- Sweep Settings ---
     addSection('Sweep Settings');
-    addToggle('Sweep Line', 'spinEnabled', (v) => { if (v) startSpinAnimation(); else stopSpinAnimation(); });
-    addToggle('Sweep Trail', 'spinShadow');
+    // We use a custom toggle logic for the sweep to ensure the "one-sweep-at-a-time" logic is respected
+    const sweepRow = document.createElement('div');
+    sweepRow.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;`;
+    sweepRow.onmouseover = () => sweepRow.style.background = T().menuRowHover;
+    sweepRow.onmouseout  = () => sweepRow.style.background = '';
+    const sweepLbl = document.createElement('span');
+    sweepLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
+    sweepLbl.textContent = 'Sweep Line';
+    const sweepSw = document.createElement('div');
+    sweepSw.style.cssText = `width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px; border-radius:${UI.menuSwitchH/2}px; position:relative; background:${prefs.spinEnabled ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'}; border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;`;
+    const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
+    const sweepKnob = document.createElement('div');
+    sweepKnob.style.cssText = `position:absolute; top:${(UI.menuSwitchH - UI.menuKnobSize)/2}px; left:${prefs.spinEnabled ? knobOn : knobOff}px; width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%; background:${prefs.spinEnabled ? '#0f0' : '#888'}; transition:left .2s, background .2s;`;
+    sweepSw.appendChild(sweepKnob); sweepRow.appendChild(sweepLbl); sweepRow.appendChild(sweepSw);
+    sweepRow.onclick = () => {
+        prefs.spinEnabled = !prefs.spinEnabled;
+        const t = T();
+        sweepSw.style.background = prefs.spinEnabled ? t.switchOn : t.switchOff;
+        sweepKnob.style.left = prefs.spinEnabled ? knobOn + 'px' : knobOff + 'px';
+        sweepKnob.style.background = prefs.spinEnabled ? t.knobOn : t.knobOff;
+        savePrefs();
+        if (prefs.spinEnabled) startSpinAnimation(); else stopSpinAnimation();
+    };
+    panel.appendChild(sweepRow);
+
+    // Shadow toggle for prefs
+    const shadowRow = document.createElement('div');
+    shadowRow.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;`;
+    shadowRow.onmouseover = () => shadowRow.style.background = T().menuRowHover;
+    shadowRow.onmouseout  = () => shadowRow.style.background = '';
+    const shadowLbl = document.createElement('span');
+    shadowLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
+    shadowLbl.textContent = 'Sweep Shadow';
+    const shadowSw = document.createElement('div');
+    shadowSw.style.cssText = `width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px; border-radius:${UI.menuSwitchH/2}px; position:relative; background:${prefs.spinShadow ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'}; border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;`;
+    const shadowKnob = document.createElement('div');
+    shadowKnob.style.cssText = `position:absolute; top:${(UI.menuSwitchH - UI.menuKnobSize)/2}px; left:${prefs.spinShadow ? knobOn : knobOff}px; width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%; background:${prefs.spinShadow ? '#0f0' : '#888'}; transition:left .2s, background .2s;`;
+    shadowSw.appendChild(shadowKnob); shadowRow.appendChild(shadowLbl); shadowRow.appendChild(shadowSw);
+    shadowRow.onclick = () => {
+        prefs.spinShadow = !prefs.spinShadow;
+        const t = T();
+        shadowSw.style.background = prefs.spinShadow ? t.switchOn : t.switchOff;
+        shadowKnob.style.left = prefs.spinShadow ? knobOn + 'px' : knobOff + 'px';
+        shadowKnob.style.background = prefs.spinShadow ? t.knobOn : t.knobOff;
+        savePrefs();
+        redrawBaseGraphics();
+    };
+    panel.appendChild(shadowRow);
+
     addPrefRow({ label: 'Sweep Speed', get: () => prefs.spinSpeed, set: v => { prefs.spinSpeed = Math.round(v * 1000) / 1000; }, fmt: v => v.toFixed(3) + ' rad/f', min: 0.001, max: 0.1, step: 0.001, onCommit: savePrefs });
     addSep();
 
-    // Status row at the very bottom
+    // Status row at the bottom
     const statusRow = document.createElement('div');
     statusRow.style.cssText = `padding:5px 16px;`;
     const statusVal = document.createElement('span');
@@ -1064,6 +1109,71 @@ function createMenu() {
 
     document.body.appendChild(panel);
     repositionMenu();
+}
+
+/**
+ * UPDATED ANIMATION LOGIC: One sweep at a time.
+ * Replace your current animateSpin and drawSpinLine with these.
+ */
+
+let spinAngle = 0;
+let lastDrawTime = 0;
+let spinAnimationFrame = null;
+let isSweeping = false;
+
+function animateSpin(currentTime) {
+    if (!prefs.spinEnabled || isGamePaused) {
+        isSweeping = false;
+        spinAngle = 0;
+        spinAnimationFrame = requestAnimationFrame(animateSpin);
+        return;
+    }
+
+    const dt = currentTime - lastDrawTime;
+    if (dt >= (1000 / 60)) { 
+        // Logic: A new sweep only starts if isSweeping is true.
+        // If spinEnabled is on, we ensure isSweeping starts.
+        if (!isSweeping) {
+            isSweeping = true;
+            spinAngle = 0;
+        }
+
+        spinAngle += prefs.spinSpeed;
+
+        // Check if the sweep has completed a full circle
+        if (spinAngle >= Math.PI * 2) {
+            spinAngle = 0;
+            // The "only create a new line if the previous has disappeared" logic
+            // is handled by resetting the angle and starting a fresh loop.
+        }
+        
+        drawFullFrame();
+        lastDrawTime = currentTime;
+    }
+    
+    spinAnimationFrame = requestAnimationFrame(animateSpin);
+}
+
+function drawSpinLine() {
+    if (isGamePaused || !prefs.spinEnabled || !isSweeping) return;
+    
+    const cx = radarSize / 2, cy = radarSize / 2, R = radarSize / 2 - 10;
+    const ctx = radarCanvas.getContext('2d');
+
+    if (prefs.spinShadow) {
+        const trailLength = 60;
+        for (let i = 0; i < trailLength; i++) {
+            const alpha = (trailLength - i) / trailLength * 0.3;
+            const currentAngle = spinAngle - (i * Math.PI / 180);
+            ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, currentAngle, currentAngle + 0.02);
+            ctx.fillStyle = `rgba(0, 255, 0, ${alpha})`; ctx.fill();
+        }
+    }
+    
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(spinAngle) * R, cy + Math.sin(spinAngle) * R);
+    ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx + Math.cos(spinAngle) * R, cy + Math.sin(spinAngle) * R, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#00ff00'; ctx.fill();
 }
 
 
