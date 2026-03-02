@@ -1,4 +1,3 @@
-
 // ═══════════════════════════════════════════════════
 // SECTION 1 — RADAR PREFERENCES
 // These values are editable via the in-game Radar Preferences menu and are
@@ -14,8 +13,6 @@
         scrollIncKm:   0.5,
         fetchDelay:    250,
         spinSpeed:     0.03,   // Speed of rotation (rad/frame)
-        spinEnabled:   true,
-        spinShadow:    true,   // Shadow toggle
     };
 
     let prefs;
@@ -848,7 +845,7 @@ function repositionUI() {
 }
 
 // ═══════════════════════════════════════════════════
-// SECTION 5 — MENU (COMPLETE REWRITE V2)
+// SECTION 5 — MENU
 // ═══════════════════════════════════════════════════
 
 let menuOpen = false;
@@ -1044,35 +1041,7 @@ function createMenu() {
     addSep();
 
     addSection('Sweep Settings');
-    
-    // Sweep Line Toggle
-    const sweepRow = document.createElement('div');
-    sweepRow.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;`;
-    sweepRow.onmouseover = () => sweepRow.style.background = T().menuRowHover;
-    sweepRow.onmouseout  = () => sweepRow.style.background = '';
-    const sweepLbl = document.createElement('span');
-    sweepLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
-    sweepLbl.textContent = 'Sweep Line';
-    const sweepSw = document.createElement('div');
-    sweepSw.style.cssText = `width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px; border-radius:${UI.menuSwitchH/2}px; position:relative; background:${prefs.spinEnabled ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'}; border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;`;
-    const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
-    const sweepKnob = document.createElement('div');
-    sweepKnob.style.cssText = `position:absolute; top:${(UI.menuSwitchH - UI.menuKnobSize)/2}px; left:${prefs.spinEnabled ? knobOn : knobOff}px; width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%; background:${prefs.spinEnabled ? '#0f0' : '#888'}; transition:left .2s, background .2s;`;
-    sweepSw.appendChild(sweepKnob); sweepRow.appendChild(sweepLbl); sweepRow.appendChild(sweepSw);
-    sweepRow.onclick = () => {
-        prefs.spinEnabled = !prefs.spinEnabled;
-        savePrefs();
-        const t = T();
-        sweepSw.style.background = prefs.spinEnabled ? t.switchOn : t.switchOff;
-        sweepKnob.style.left = prefs.spinEnabled ? knobOn + 'px' : knobOff + 'px';
-        sweepKnob.style.background = prefs.spinEnabled ? t.knobOn : t.knobOff;
-    };
-    panel.appendChild(sweepRow);
-
-    // Shadow toggle removed as requested. 
-    // Trail logic is now baked into the SweepLine function below.
-
-    addPrefRow({ label: 'Sweep Speed', get: () => prefs.spinSpeed, set: v => { prefs.spinSpeed = Math.round(v * 1000) / 1000; }, fmt: v => v.toFixed(3) + ' rad/f', min: 0.001, max: 0.1, step: 0.001, onCommit: savePrefs });
+    addPrefRow({ label: 'Sweep Speed', get: () => prefs.spinSpeed, set: v => { prefs.spinSpeed = Math.round(v * 1000) / 1000; SPIN_SPEED = prefs.spinSpeed; }, fmt: v => v.toFixed(3) + ' rad/f', min: 0.001, max: 0.1, step: 0.001, onCommit: savePrefs });
     addSep();
 
     // Status row at the bottom
@@ -1088,49 +1057,6 @@ function createMenu() {
     document.body.appendChild(panel);
     repositionMenu();
 }
-
-/**
- * SWEEP LINE FUNCTION
- * Draws the rotating sweep line and a smooth trailing shadow.
- * Note: This function ONLY draws the sweep. It does NOT clear the canvas or 
- * draw the background, preventing the "transparent radar" issue.
- */
-function SweepLine() {
-    if (!prefs.spinEnabled) return;
-
-    // Use global radarSize defined in Section 1/2
-    const cx = radarSize / 2;
-    const cy = radarSize / 2;
-    const R = radarSize / 2 - 10;
-    
-    // Draw the trailing green shadow (sweep)
-    // We use multiple thin segments to simulate a smooth trail
-    const trailLength = 60; // Length of the trail in degrees
-    for (let i = 0; i < trailLength; i++) {
-        const alpha = (trailLength - i) / trailLength * 0.4;
-        const currentAngle = spinAngle - (i * Math.PI / 180);
-        
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.arc(cx, cy, R, currentAngle, currentAngle + 0.02);
-        ctx.fillStyle = `rgba(0, 255, 0, ${alpha})`;
-        ctx.fill();
-    }
-
-    // Draw the rotating green radius line
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    const lineX = cx + R * Math.cos(spinAngle);
-    const lineY = cy + R * Math.sin(spinAngle);
-    ctx.lineTo(lineX, lineY);
-    ctx.strokeStyle = '#00ff00';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-}
-
-// Assign to window.drawSpinLine so the existing drawRadar loop in Section 17 can call it.
-window.drawSpinLine = SweepLine;
-
 
 // ═══════════════════════════════════════════════════
 // SECTION 6 — BLIP POPUP
@@ -1330,32 +1256,27 @@ setInterval(() => {
         const t = T();
         const pauseOpacity = '0.45';
 
-        // ── Canvas ────────────────────────────────────────────────────────
         radarCanvas.style.opacity   = isGamePaused ? pauseOpacity : '1';
         radarCanvas.style.boxShadow = isGamePaused
             ? '0 0 10px rgba(255,220,0,0.4)'
             : t.canvasGlow;
 
-        // ── Range box ─────────────────────────────────────────────────────
         const rb = document.getElementById('radarRangeBox');
         if (rb) rb.style.opacity = isGamePaused ? pauseOpacity : '1';
 
-        // ── Menu button ───────────────────────────────────────────────────
         const mb = document.getElementById('radarMenuBtn');
         if (mb) mb.style.opacity = isGamePaused ? pauseOpacity : '1';
 
-        // ── Settings panel ────────────────────────────────────────────────
         const mp = document.getElementById('radarMenuPanel');
         if (mp) mp.style.opacity = isGamePaused ? pauseOpacity : '1';
 
-        // ── HUD ───────────────────────────────────────────────────────────
         nearestHUD.style.opacity = isGamePaused ? pauseOpacity : '1';
 
     } catch(e) {}
 }, PAUSE_POLL_INTERVAL);
 
 let aircraftListCache = [];
-const prevAcData = new Map();  // used by internal source speed-delta
+const prevAcData = new Map();
 
 function normalizeAc(raw) {
     const ac = Object.assign({}, raw);
@@ -1376,21 +1297,9 @@ function normalizeAc(raw) {
 
 // ═══════════════════════════════════════════════════
 // SECTION 11 — MULTIPLAYER DATA SOURCE
-//
-// Priority 1 — Internal (geofs.multiplayer live cache)
-//   GeoFS already maintains a real-time player list via its own WebSocket.
-//   Reading from it directly costs zero HTTP requests and has zero rate-limit
-//   risk. We probe several known property paths on geofs.multiplayer and
-//   normalise whichever one returns valid player objects.
-//
-// Priority 2 — REST fallback (mps.geo-fs.com/map)
-//   Used only when the internal cache is unavailable (e.g. multiplayer is
-//   disabled in the options, or GeoFS hasn't finished initialising yet).
-//   Retains full exponential backoff to handle HTTP 429 responses.
 // ═══════════════════════════════════════════════════
 
-// ── Shared speed-delta helper (used by both sources) ─────────────────────
-const prevAcData_rest = new Map(); // separate history map for REST path
+const prevAcData_rest = new Map();
 
 function _applySpeedDelta(ac, prevMap, now) {
     if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
@@ -1422,42 +1331,28 @@ function _applySpeedDelta(ac, prevMap, now) {
     });
 }
 
-// ── Internal source — reads geofs.multiplayer directly ───────────────────
-// GeoFS stores other players in its multiplayer module. The exact property
-// path has varied across versions; we try all known paths in order.
-// Each player entry in the internal cache uses a different shape from the
-// REST API: position is in `llaLocation[]`, heading in `animationValue`,
-// speed in `animationValue.speed` etc.  `_normalizeInternal` converts this
-// to the same `co[]` / `h` / `s` shape that the rest of the radar expects.
-
 function _normalizeInternal(raw) {
     if (!raw) return null;
     try {
         const ac = {};
 
-        // ── Session / callsign identity ──────────────────────────────────
         ac.id = raw.id ?? raw.userId ?? raw.sessionId ?? null;
         ac.cs = raw.callsign ?? raw.cs ?? null;
-
-        // ── Aircraft type ID ─────────────────────────────────────────────
         ac.ac = raw.aircraftIndex ?? raw.ac ?? raw.aircraftId ?? null;
 
-        // ── Position — try llaLocation first, then co[] ──────────────────
         if (Array.isArray(raw.llaLocation) && raw.llaLocation.length >= 2) {
             const lat = parseFloat(raw.llaLocation[0]);
             const lon = parseFloat(raw.llaLocation[1]);
             const alt = parseFloat(raw.llaLocation[2]);
             if (!isFinite(lat) || !isFinite(lon)) return null;
-            // co[2] in the REST API is metres; llaLocation[2] is also metres
             ac.co = [lat, lon, isFinite(alt) ? alt : 0];
-            if (isFinite(alt)) ac.al = alt * 3.28084; // feet
+            if (isFinite(alt)) ac.al = alt * 3.28084;
         } else if (Array.isArray(raw.co) && raw.co.length >= 2) {
             ac.co = raw.co;
         } else {
-            return null; // no position — skip
+            return null;
         }
 
-        // ── Heading ──────────────────────────────────────────────────────
         const hdg = raw.animationValue?.heading360
                  ?? raw.animationValue?.heading
                  ?? raw.heading
@@ -1466,14 +1361,12 @@ function _normalizeInternal(raw) {
                  ?? null;
         if (hdg != null && isFinite(parseFloat(hdg))) ac.h = parseFloat(hdg);
 
-        // ── Altitude (feet) — override if not set above ───────────────────
         if (ac.al == null) {
             const altFt = raw.animationValue?.altitude ?? raw.altitude ?? null;
             if (altFt != null && isFinite(parseFloat(altFt))) ac.al = parseFloat(altFt);
         }
 
-        // ── Speed (knots) ─────────────────────────────────────────────────
-        const spd = raw.animationValue?.speed           // kts in animation
+        const spd = raw.animationValue?.speed
                  ?? raw.animationValue?.kias
                  ?? raw.st?.as
                  ?? raw.s
@@ -1486,22 +1379,14 @@ function _normalizeInternal(raw) {
     }
 }
 
-// Returns an array of normalised aircraft objects from the internal GeoFS
-// multiplayer cache, or null if no suitable data was found.
 function _readInternalMultiplayer() {
     try {
         const mp = window.geofs?.multiplayer;
         if (!mp) return null;
 
-        // Candidate property paths, tried in order
         const candidates = [
-            mp._users,      // common in 3.x builds
-            mp.users,
-            mp._clients,
-            mp.clients,
-            mp._otherAircraft,
-            mp.otherAircraft,
-            mp._aircraft,
+            mp._users, mp.users, mp._clients, mp.clients,
+            mp._otherAircraft, mp.otherAircraft, mp._aircraft,
         ];
 
         for (const raw of candidates) {
@@ -1520,12 +1405,10 @@ function _readInternalMultiplayer() {
 
             if (!list.length) continue;
 
-            // Quick sanity-check: does the first item look like a player?
             const sample = list[0];
             const hasPos = Array.isArray(sample?.llaLocation) || Array.isArray(sample?.co);
             if (!hasPos) continue;
 
-            // Normalise and filter out bad entries
             const now  = Date.now();
             const acList = [];
             list.forEach(raw => {
@@ -1541,11 +1424,9 @@ function _readInternalMultiplayer() {
     return null;
 }
 
-// ── Internal polling loop ─────────────────────────────────────────────────
-// Runs at the draw-interval cadence so blips update every frame.
 let _internalSourceActive = false;
 let _internalConsecutiveFails = 0;
-const INTERNAL_FAIL_THRESHOLD = 10; // give up on internal after N misses
+const INTERNAL_FAIL_THRESHOLD = 10;
 
 function _tickInternalSource() {
     if (isGamePaused) return;
@@ -1558,7 +1439,6 @@ function _tickInternalSource() {
     } else {
         _internalConsecutiveFails++;
         if (_internalSourceActive && _internalConsecutiveFails >= INTERNAL_FAIL_THRESHOLD) {
-            // Internal source has gone away — restart REST fallback
             _internalSourceActive = false;
             updateApiStatus('Internal unavailable — switching to REST…', false);
             scheduleFetch(FETCH_DELAY_BASE);
@@ -1568,7 +1448,6 @@ function _tickInternalSource() {
 
 setInterval(_tickInternalSource, DRAW_INTERVAL);
 
-// ── REST fallback — polls mps.geo-fs.com/map when internal is unavailable ─
 let _fetchConsecutiveErrors = 0;
 let _fetchDelay = FETCH_DELAY_BASE;
 const FETCH_MIN = FETCH_DELAY_BASE;
@@ -1581,9 +1460,8 @@ function scheduleFetch(delay) {
 }
 
 async function doFetch() {
-    // Skip REST entirely while the internal source is healthy
     if (_internalSourceActive) {
-        scheduleFetch(2000); // check again in 2 s in case internal drops
+        scheduleFetch(2000);
         return;
     }
 
@@ -1623,7 +1501,6 @@ async function doFetch() {
     scheduleFetch(_fetchDelay);
 }
 
-// Kick off the initial REST fetch (internal source will suppress it once ready)
 scheduleFetch(FETCH_DELAY_INITIAL);
 
 // ═══════════════════════════════════════════════════
@@ -1757,54 +1634,60 @@ function worldToCanvas(dx, dy, cx, cy, rotRad) {
 }
 
 // ═══════════════════════════════════════════════════
-// SECTION 14 — SPIN LINE
-// Angle advances based on real elapsed time (ms since last frame) so the
-// sweep speed is constant regardless of draw rate or fetch delays.
+// SECTION 14 — SWEEP LINE
+// Rotates every frame via requestAnimationFrame.
+// Always active — no toggle. Drawn inside the circle
+// clip AFTER the background fill so the radar never
+// goes transparent.
 // ═══════════════════════════════════════════════════
 
+// spinAngle advances in drawRadar via the RAF loop below.
+let spinAngle = -Math.PI / 2; // start pointing up (north)
 
-
-/*
- * SWEEP LINE FUNCTION
- * Draws the rotating sweep line and a smooth trailing shadow.
- * Note: This function ONLY draws the sweep. It does NOT clear the canvas or 
- * draw the background, preventing the "transparent radar" issue.
+/**
+ * drawSweepLine()
+ * Called from inside drawRadar() while the circle clip is active.
+ * Draws a smooth trailing glow then the bright leading edge.
+ * Uses only source-over compositing so nothing is erased.
  */
-function SweepLine() {
-    if (!prefs.spinEnabled) return;
-
-    // Use global radarSize defined in Section 1/2
+function drawSweepLine() {
     const cx = radarSize / 2;
     const cy = radarSize / 2;
-    const R = radarSize / 2 - 10;
-    
-    // Draw the trailing green shadow (sweep)
-    // We use multiple thin segments to simulate a smooth trail
-    const trailLength = 60; // Length of the trail in degrees
-    for (let i = 0; i < trailLength; i++) {
-        const alpha = (trailLength - i) / trailLength * 0.4;
-        const currentAngle = spinAngle - (i * Math.PI / 180);
-        
+    const R  = radarSize / 2 - 2;
+
+    ctx.save();
+
+    // ── Trailing glow — 30 gradient wedge slices ──────────────────────────
+    const trailDeg = 75;                          // degrees of trail
+    const steps    = 30;
+    for (let i = 0; i < steps; i++) {
+        const t0    = spinAngle - (trailDeg * Math.PI / 180) + (i / steps) * (trailDeg * Math.PI / 180);
+        const t1    = spinAngle - (trailDeg * Math.PI / 180) + ((i + 1) / steps) * (trailDeg * Math.PI / 180);
+        const alpha = (i / steps) * 0.28;         // fades from 0 → 0.28
+
         ctx.beginPath();
         ctx.moveTo(cx, cy);
-        ctx.arc(cx, cy, R, currentAngle, currentAngle + 0.02);
-        ctx.fillStyle = `rgba(0, 255, 0, ${alpha})`;
+        ctx.arc(cx, cy, R, t0, t1);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(0,255,0,${alpha.toFixed(3)})`;
         ctx.fill();
     }
 
-    // Draw the rotating green radius line
+    // ── Bright leading-edge line ──────────────────────────────────────────
+    const ex = cx + R * Math.cos(spinAngle);
+    const ey = cy + R * Math.sin(spinAngle);
     ctx.beginPath();
     ctx.moveTo(cx, cy);
-    const lineX = cx + R * Math.cos(spinAngle);
-    const lineY = cy + R * Math.sin(spinAngle);
-    ctx.lineTo(lineX, lineY);
-    ctx.strokeStyle = '#00ff00';
-    ctx.lineWidth = 2;
+    ctx.lineTo(ex, ey);
+    ctx.strokeStyle = 'rgba(0,255,0,0.95)';
+    ctx.lineWidth   = 2;
+    ctx.shadowColor = 'rgba(0,255,0,0.6)';
+    ctx.shadowBlur  = 6;
     ctx.stroke();
+
+    ctx.restore();
 }
 
-// Assign to window.drawSpinLine so the existing drawRadar loop in Section 17 can call it.
-window.drawSpinLine = SweepLine;
 // ═══════════════════════════════════════════════════
 // SECTION 15 — AIRPORT / RUNWAY DRAWING
 // ═══════════════════════════════════════════════════
@@ -1964,6 +1847,8 @@ function drawRadar() {
     const t  = T();
     const cx = radarSize/2, cy = radarSize/2;
 
+    // ── 1. Clear & fill opaque background ────────────────────────────────
+    // This MUST happen before the sweep line so the canvas never goes transparent.
     ctx.clearRect(0, 0, radarSize, radarSize);
     ctx.beginPath();
     ctx.arc(cx, cy, radarSize/2, 0, Math.PI*2);
@@ -2006,9 +1891,7 @@ function drawRadar() {
     }
     const displayCallsign = _cachedCallsign || playerCallsign;
 
-    {
-        updateMenuInfoCallsign(displayCallsign, hasPos ? playerLat : null, hasPos ? playerLon : null);
-    }
+    updateMenuInfoCallsign(displayCallsign, hasPos ? playerLat : null, hasPos ? playerLon : null);
 
     const myData = hasPos ? {
         lat:   playerLat,
@@ -2020,18 +1903,18 @@ function drawRadar() {
         ? (playerHeading * Math.PI / 180)
         : 0;
 
-    // ── Clip to circle ───────────────────────────
+    // ── 2. Clip to circle ─────────────────────────────────────────────────
     ctx.save();
     ctx.beginPath(); ctx.arc(cx,cy,radarSize/2,0,Math.PI*2); ctx.clip();
 
-    // ── Grid lines ───────────────────────────────
+    // ── 3. Grid lines ─────────────────────────────────────────────────────
     ctx.strokeStyle = t.grid; ctx.lineWidth = UI.gridLineW;
     ctx.beginPath();
     ctx.moveTo(cx,0); ctx.lineTo(cx,radarSize);
     ctx.moveTo(0,cy); ctx.lineTo(radarSize,cy);
     ctx.stroke();
 
-    // ── Range rings ──────────────────────────────
+    // ── 4. Range rings ────────────────────────────────────────────────────
     if (settings.showRings) {
         for (let i=1; i<=3; i++) {
             const rr = (radarSize/2) * (i/3);
@@ -2057,7 +1940,7 @@ function drawRadar() {
         }
     }
 
-    // ── Compass ──────────────────────────────────
+    // ── 5. Compass ────────────────────────────────────────────────────────
     {
         const dirs  = ['N','E','S','W'];
         const edgeR = radarSize/2 - 16;
@@ -2085,15 +1968,19 @@ function drawRadar() {
         }
     }
 
-    // ── Spin line ────────────────────────────────
-    if (!isGamePaused) drawSpinLine();
+    // ── 6. Sweep line — drawn after background, before blips ─────────────
+    // Advance angle here (inside RAF callback, once per frame)
+    if (!isGamePaused) {
+        spinAngle = (spinAngle + SPIN_SPEED) % (Math.PI * 2);
+        drawSweepLine();
+    }
 
-    // ── Airports & runways ───────────────────────
+    // ── 7. Airports & runways ─────────────────────────────────────────────
     if (!isGamePaused && hasPos) {
         drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad);
     }
 
-    // ── Other aircraft blips ─────────────────────
+    // ── 8. Other aircraft blips ───────────────────────────────────────────
     lastBlipPositions = [];
     let nearestAc = null, nearestMeters = Infinity;
 
@@ -2107,18 +1994,15 @@ function drawRadar() {
             const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
             const distM    = Math.hypot(dx, dy);
 
-            // Track nearest regardless of radar range (HUD always shows closest)
             if (distM < nearestMeters) {
                 nearestMeters = distM;
                 nearestAc = ac;
             }
 
-            // Only draw blip if within radar range
             if (distM > radarRange) return;
 
             ctx.save();
             try {
-                // Isolate mode: skip drawing non-tracked blips (but nearest still tracked above)
                 if (_trackedId && settings.isolateTracked && ac.id !== _trackedId) { ctx.restore(); return; }
 
                 const [rx, ry] = worldToCanvas(dx, dy, cx, cy, rotRad);
@@ -2138,7 +2022,6 @@ function drawRadar() {
                 const _compSpd = typeof ac._computedSpd === 'number' ? ac._computedSpd : NaN;
                 const acS = isFinite(_apiSpd) ? _apiSpd : (isFinite(_compSpd) ? _compSpd : NaN);
 
-                // ── Velocity vector ──────────────────────────
                 if (settings.showVectors && isFinite(acH) && isFinite(acS)) {
                     const speedMs = acS * 0.514444;
                     const vecLen  = Math.min((speedMs * 30) / radarRange * (radarSize / 2), radarSize/2);
@@ -2150,7 +2033,6 @@ function drawRadar() {
                     ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
                 }
 
-                // ── Blip shape ───────────────────────────────
                 const blipColor  = isTrackedBlip ? 'rgba(255,220,60,1)' : T().blipFill;
                 const blipStroke = isTrackedBlip ? 'rgba(255,240,120,0.9)' : 'rgba(255,255,255,0.7)';
 
@@ -2185,7 +2067,6 @@ function drawRadar() {
                     ctx.strokeStyle = blipStroke; ctx.lineWidth = isActive ? 2 : 1; ctx.stroke();
                 }
 
-                // ── Labels ───────────────────────────────────
                 const blipBottom = settings.showBlipTriangle && isFinite(acH)
                     ? ry + UI.blipTriTip + 4
                     : ry + (isActive ? UI.blipDotRActive : UI.blipDotR) + 4;
@@ -2238,7 +2119,7 @@ function drawRadar() {
 
     ctx.restore(); // end circle clip
 
-    // ── Player callsign tag ───────────────────────
+    // ── Player callsign tag ───────────────────────────────────────────────
     let _playerTagBottomY = cy + UI.playerTriBaseOff + UI.playerTriTip + 13;
     if (settings.showMyCallsign && displayCallsign) {
         const lbl = displayCallsign.substring(0, 12);
@@ -2255,18 +2136,17 @@ function drawRadar() {
         _playerTagBottomY = ty + 14;
     }
 
-    // ── Player aircraft type tag ──────────────────
-    // ── Paused overlay ───────────────────────────
+    // ── Paused overlay ────────────────────────────────────────────────────
     if (isGamePaused) {
         ctx.fillStyle = T().pauseText;
         ctx.font = `bold ${UI.pausedFont}px ${FONT_CANVAS}`; ctx.textAlign = 'center';
         ctx.fillText('PAUSED', cx, radarSize - 30);
     }
 
-    // ── Player triangle — always on top ──────────
+    // ── Player triangle — always on top ───────────────────────────────────
     drawPlayerTriangle(cx, cy, playerHeading, isGamePaused);
 
-    // ── Update Tracking / Nearby Traffic HUD ─────
+    // ── Update Tracking / Nearby Traffic HUD ─────────────────────────────
     if (!isGamePaused) {
         const _hudNow = Date.now();
 
@@ -2299,10 +2179,17 @@ function drawRadar() {
 }
 
 // ═══════════════════════════════════════════════════
-// SECTION 18 — DRAW LOOP
-// The requestAnimationFrame loop in Section 14 handles all drawing.
-// setInterval only drives the reposition helper.
+// SECTION 18 — DRAW LOOP (requestAnimationFrame)
+// This is the sole render driver. spinAngle advances
+// inside drawRadar() every frame so the sweep is
+// always smooth regardless of fetch delays.
 // ═══════════════════════════════════════════════════
+
+function _rafLoop() {
+    drawRadar();
+    requestAnimationFrame(_rafLoop);
+}
+requestAnimationFrame(_rafLoop);
 
 setInterval(repositionUI, REPOSITION_INTERVAL);
 
