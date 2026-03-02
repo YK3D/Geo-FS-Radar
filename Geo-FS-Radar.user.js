@@ -1762,120 +1762,289 @@ function worldToCanvas(dx, dy, cx, cy, rotRad) {
 // sweep speed is constant regardless of draw rate or fetch delays.
 // ═══════════════════════════════════════════════════
 
-let spinAngle    = 0;
-let _spinLastTs  = null;   // performance.now() of last rAF tick
+// ═══════════════════════════════════════════════════
+// SECTION 5 — MENU (COMPLETE REWRITE V2)
+// ═══════════════════════════════════════════════════
 
-function drawSpinLine() {
+let menuOpen = false;
+
+function createMenu() {
+    // 1. Create the Menu Toggle Button
+    const btn = document.createElement('button');
+    btn.id = 'radarMenuBtn';
+    btn.title = 'Radar Settings';
+    btn.innerHTML = '☰';
+    btn.style.cssText = `
+        position:fixed; width:40px; height:40px;
+        background:rgba(0,60,0,0.92); color:#0f0;
+        border:1.5px solid rgba(0,255,0,0.5); border-radius:50%;
+        cursor:pointer; font-size:20px; font-weight:bold;
+        z-index:2147483647; display:flex; align-items:center; justify-content:center;
+        box-shadow:0 0 10px rgba(0,255,0,0.4); transition:all .2s;
+    `;
+    btn.onmouseover = () => btn.style.background = T().menuBtnBgHov;
+    btn.onmouseout  = () => btn.style.background = T().menuBtnBg;
+    btn.onclick = (e) => { e.stopPropagation(); toggleMenu(); };
+    document.body.appendChild(btn);
+
+    // 2. Create the Menu Panel
+    const panel = document.createElement('div');
+    panel.id = 'radarMenuPanel';
+    panel.style.cssText = `
+        position:fixed; width:${UI.menuW}px;
+        background:rgba(0,12,0,0.97);
+        border:1.5px solid rgba(0,255,0,0.35);
+        border-radius:12px; padding:12px 0 10px;
+        z-index:2147483646; display:none;
+        box-shadow:0 4px 28px rgba(0,0,0,0.75);
+        font-family:${FONT_SANS};
+        user-select:none;
+        height:600px;
+        overflow-y:auto;
+        overflow-x:hidden;
+        scrollbar-width:thin;
+        scrollbar-color:rgba(0,200,0,0.4) rgba(0,30,0,0.5);
+    `;
+
+    // 3. Title Section
+    const title = document.createElement('div');
+    title.style.cssText = `
+        color:rgba(0,255,0,0.9); font:bold ${UI.menuTitleFont}px ${FONT_SANS};
+        text-align:center; padding:2px 14px 10px;
+        border-bottom:1px solid rgba(0,255,0,0.18);
+        margin-bottom:4px; letter-spacing:1.5px;
+    `;
+    title.textContent = 'RADAR SETTINGS';
+    panel.appendChild(title);
+
+    // --- Helper Functions ---
+    function addSection(label) {
+        const s = document.createElement('div');
+        s.style.cssText = `color:rgba(0,255,0,0.5); font:bold ${UI.menuSectionFont}px ${FONT_SANS}; padding:8px 16px 3px; letter-spacing:1.5px; text-transform:uppercase;`;
+        s.textContent = label;
+        panel.appendChild(s);
+    }
+
+    function addToggle(label, key, onChange) {
+        const row = document.createElement('div');
+        row.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;`;
+        row.onmouseover = () => row.style.background = T().menuRowHover;
+        row.onmouseout  = () => row.style.background = '';
+        const lbl = document.createElement('span');
+        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
+        lbl.textContent = label;
+        const sw = document.createElement('div');
+        sw.style.cssText = `width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px; border-radius:${UI.menuSwitchH/2}px; position:relative; background:${settings[key] ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'}; border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;`;
+        const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
+        const knob = document.createElement('div');
+        knob.style.cssText = `position:absolute; top:${(UI.menuSwitchH - UI.menuKnobSize)/2}px; left:${settings[key] ? knobOn : knobOff}px; width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%; background:${settings[key] ? '#0f0' : '#888'}; transition:left .2s, background .2s;`;
+        sw.appendChild(knob); row.appendChild(lbl); row.appendChild(sw);
+        row.onclick = () => {
+            settings[key] = !settings[key];
+            const t = T();
+            sw.style.background = settings[key] ? t.switchOn : t.switchOff;
+            knob.style.left = settings[key] ? knobOn + 'px' : knobOff + 'px';
+            knob.style.background = settings[key] ? t.knobOn : t.knobOff;
+            saveSettings();
+            if (onChange) onChange(settings[key]);
+        };
+        panel.appendChild(row);
+    }
+
+    function addRadio(label, key, opt1, opt2, label1, label2) {
+        const row = document.createElement('div');
+        row.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:${UI.menuRowPadY}px 16px;`;
+        const lbl = document.createElement('span');
+        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
+        lbl.textContent = label;
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex; gap:5px;';
+        [opt1, opt2].forEach((opt, i) => {
+            const b = document.createElement('button');
+            b.textContent = [label1, label2][i];
+            b.style.cssText = `padding:4px 10px; font:bold ${UI.menuRadioFont}px ${FONT_SANS}; border-radius:5px; cursor:pointer; border:1px solid rgba(0,255,0,0.3); transition:all .15s; background:${settings[key]===opt ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)'}; color:${settings[key]===opt ? '#0f0' : 'rgba(150,200,150,0.7)'};`;
+            b.onclick = () => {
+                settings[key] = opt;
+                saveSettings();
+                createMenu();
+            };
+            wrap.appendChild(b);
+        });
+        row.appendChild(lbl); row.appendChild(wrap);
+        panel.appendChild(row);
+    }
+
+    function addInfoRow(label, idSuffix) {
+        const row = document.createElement('div');
+        row.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:5px 16px;`;
+        const lbl = document.createElement('span');
+        lbl.style.cssText = `color:rgba(150,200,150,0.7); font:${UI.menuInfoFont}px ${FONT_SANS};`;
+        lbl.textContent = label;
+        const val = document.createElement('span');
+        val.id = `radarInfo_${idSuffix}`;
+        val.style.cssText = `color:rgba(0,255,0,0.9); font:bold ${UI.menuInfoFont}px ${FONT_MONO}; text-align:right; max-width:155px; word-break:break-all;`;
+        val.textContent = '—';
+        row.appendChild(lbl); row.appendChild(val);
+        panel.appendChild(row);
+    }
+
+    function addPrefRow(opts) {
+        const { label, get, set, fmt, min, max, step, onCommit } = opts;
+        const row = document.createElement('div');
+        row.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:${UI.menuRowPadY - 1}px 16px; gap:6px;`;
+        const lbl = document.createElement('span');
+        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
+        lbl.textContent = label;
+        const valSpan = document.createElement('span');
+        valSpan.style.cssText = `display:inline-block; min-width:64px; text-align:center; color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO}; background:rgba(0,40,0,0.6); border:1px solid rgba(0,255,0,0.3); border-radius:5px; padding:2px 6px; cursor:pointer;`;
+        const updateVal = () => { valSpan.textContent = fmt(get()); };
+        updateVal();
+        const makeBtn = (txt) => {
+            const b = document.createElement('button');
+            b.textContent = txt;
+            b.style.cssText = `width:26px; height:26px; border-radius:5px; background:rgba(0,60,0,0.7); color:rgba(0,255,0,0.9); border:1px solid rgba(0,255,0,0.3); font:bold 15px ${FONT_SANS}; cursor:pointer; transition:background .12s;`;
+            b.onmouseover = () => b.style.background = 'rgba(0,100,0,0.8)';
+            b.onmouseout  = () => b.style.background = 'rgba(0,60,0,0.7)';
+            return b;
+        };
+        const btnMinus = makeBtn('−');
+        const btnPlus = makeBtn('+');
+        btnMinus.onclick = () => { set(Math.max(min, get() - step)); updateVal(); if (onCommit) onCommit(); };
+        btnPlus.onclick = () => { set(Math.min(max, get() + step)); updateVal(); if (onCommit) onCommit(); };
+        row.appendChild(lbl); row.appendChild(btnMinus); row.appendChild(valSpan); row.appendChild(btnPlus);
+        panel.appendChild(row);
+    }
+
+    function addSep() {
+        const s = document.createElement('div');
+        s.style.cssText = 'border-top:1px solid rgba(0,255,0,0.1); margin:4px 0;';
+        panel.appendChild(s);
+    }
+
+    // --- Build Sections ---
+    addSection('Display');
+    addToggle('Night Mode', 'nightMode', () => applyTheme());
+    addRadio ('Orientation', 'orientMode', 'north', 'track', 'N↑', 'TRK↑');
+    addToggle('Player Triangle', 'showPlayerTriangle');
+    addToggle('Range Rings', 'showRings');
+    addToggle('Ring Labels', 'showRingLabels');
+    addSep();
+
+    addSection('Traffic');
+    addToggle('Show Traffic', 'showTraffic');
+    addToggle('Traffic Triangles', 'showBlipTriangle');
+    addToggle('Callsign', 'showCallsign');
+    addToggle('Altitude', 'showAltitude');
+    addToggle('Speed', 'showSpeed');
+    addToggle('Distance', 'showBlipDist');
+    addToggle('Heading Vectors', 'showVectors');
+    addToggle('Tracking / Nearby HUD', 'showNearestHUD', (v) => { if (!v) nearestHUD.style.display = 'none'; });
+    addSep();
+
+    addSection('Map');
+    addToggle('Airports & Runways', 'showAirports');
+    addSep();
+
+    addSection('My Aircraft');
+    addInfoRow('Position', 'position');
+    addToggle('Show My Callsign', 'showMyCallsign');
+    addSep();
+
+    addSection('Radar Preferences');
+    addPrefRow({ label: 'Radar Size', get: () => prefs.radarSizePx, set: v => { prefs.radarSizePx = Math.round(v/10)*10; applyPrefs(); }, fmt: v => v + ' px', min: 150, max: 900, step: 10, onCommit: savePrefs });
+    addPrefRow({ label: 'Min Range', get: () => prefs.minRangeKm, set: v => { prefs.minRangeKm = v; applyPrefs(); }, fmt: v => v.toFixed(1) + ' km', min: 0.5, max: 10, step: 0.5, onCommit: savePrefs });
+    addPrefRow({ label: 'Max Range', get: () => prefs.maxRangeKm, set: v => { prefs.maxRangeKm = v; applyPrefs(); }, fmt: v => v.toFixed(0) + ' km', min: 1, max: 100, step: 1, onCommit: savePrefs });
+    addPrefRow({ label: 'Scroll Step', get: () => prefs.scrollIncKm, set: v => { prefs.scrollIncKm = v; applyPrefs(); }, fmt: v => v.toFixed(1) + ' km', min: 0.5, max: 10, step: 0.5, onCommit: savePrefs });
+    addPrefRow({ label: 'Update Delay', get: () => prefs.fetchDelay, set: v => { prefs.fetchDelay = v; applyPrefs(); }, fmt: v => v + ' ms', min: 50, max: 1000, step: 50, onCommit: savePrefs });
+    addSep();
+
+    addSection('Sweep Settings');
+    
+    // Sweep Line Toggle
+    const sweepRow = document.createElement('div');
+    sweepRow.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;`;
+    sweepRow.onmouseover = () => sweepRow.style.background = T().menuRowHover;
+    sweepRow.onmouseout  = () => sweepRow.style.background = '';
+    const sweepLbl = document.createElement('span');
+    sweepLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
+    sweepLbl.textContent = 'Sweep Line';
+    const sweepSw = document.createElement('div');
+    sweepSw.style.cssText = `width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px; border-radius:${UI.menuSwitchH/2}px; position:relative; background:${prefs.spinEnabled ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'}; border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;`;
+    const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
+    const sweepKnob = document.createElement('div');
+    sweepKnob.style.cssText = `position:absolute; top:${(UI.menuSwitchH - UI.menuKnobSize)/2}px; left:${prefs.spinEnabled ? knobOn : knobOff}px; width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%; background:${prefs.spinEnabled ? '#0f0' : '#888'}; transition:left .2s, background .2s;`;
+    sweepSw.appendChild(sweepKnob); sweepRow.appendChild(sweepLbl); sweepRow.appendChild(sweepSw);
+    sweepRow.onclick = () => {
+        prefs.spinEnabled = !prefs.spinEnabled;
+        savePrefs();
+        const t = T();
+        sweepSw.style.background = prefs.spinEnabled ? t.switchOn : t.switchOff;
+        sweepKnob.style.left = prefs.spinEnabled ? knobOn + 'px' : knobOff + 'px';
+        sweepKnob.style.background = prefs.spinEnabled ? t.knobOn : t.knobOff;
+    };
+    panel.appendChild(sweepRow);
+
+    // Shadow toggle removed as requested. 
+    // Trail logic is now baked into the SweepLine function below.
+
+    addPrefRow({ label: 'Sweep Speed', get: () => prefs.spinSpeed, set: v => { prefs.spinSpeed = Math.round(v * 1000) / 1000; }, fmt: v => v.toFixed(3) + ' rad/f', min: 0.001, max: 0.1, step: 0.001, onCommit: savePrefs });
+    addSep();
+
+    // Status row at the bottom
+    const statusRow = document.createElement('div');
+    statusRow.style.cssText = `padding:5px 16px;`;
+    const statusVal = document.createElement('span');
+    statusVal.id = 'radarInfo_apistatus';
+    statusVal.style.cssText = `color:rgba(0,200,0,0.8); font:${UI.menuInfoFont - 1}px ${FONT_MONO}; word-break:break-all;`;
+    statusVal.textContent = 'Waiting for data…';
+    statusRow.appendChild(statusVal);
+    panel.appendChild(statusRow);
+
+    document.body.appendChild(panel);
+    repositionMenu();
+}
+
+/**
+ * SWEEP LINE FUNCTION
+ * Draws the rotating sweep line and a smooth trailing shadow.
+ * Note: This function ONLY draws the sweep. It does NOT clear the canvas or 
+ * draw the background, preventing the "transparent radar" issue.
+ */
+/*function SweepLine() {
     if (!prefs.spinEnabled) return;
 
-    const cx = radarSize / 2, cy = radarSize / 2;
-    const R  = radarSize / 2 - 10;
-    const t  = T();
-
-    // ── Shadow pass (drawn first, so the bright line sits on top) ─────────
-    if (prefs.spinShadow) {
-        const shadowOffset = 0.35;                      // rad behind the line
-        const shadowAngle  = spinAngle - shadowOffset;
-        const sx = cx + Math.cos(shadowAngle) * R;
-        const sy = cy + Math.sin(shadowAngle) * R;
-
-        // Wide, very faint glow arc
-        const lgShadow = ctx.createConicalGradient
-            ? null                                       // future API; skip for now
-            : null;
-
-        // Radial wedge — same technique as the sweep trail but dimmer & wider
-        const arcStart = shadowAngle - 0.6;
-        ctx.save();
-        ctx.globalAlpha = 0.07;
+    // Use global radarSize defined in Section 1/2
+    const cx = radarSize / 2;
+    const cy = radarSize / 2;
+    const R = radarSize / 2 - 10;
+    
+    // Draw the trailing green shadow (sweep)
+    // We use multiple thin segments to simulate a smooth trail
+    const trailLength = 60; // Length of the trail in degrees
+    for (let i = 0; i < trailLength; i++) {
+        const alpha = (trailLength - i) / trailLength * 0.4;
+        const currentAngle = spinAngle - (i * Math.PI / 180);
+        
         ctx.beginPath();
         ctx.moveTo(cx, cy);
-        ctx.arc(cx, cy, R, arcStart, shadowAngle);
-        ctx.closePath();
-        ctx.fillStyle = settings.nightMode
-            ? 'rgba(255,100,30,0.9)'
-            : 'rgba(0,255,0,0.9)';
+        ctx.arc(cx, cy, R, currentAngle, currentAngle + 0.02);
+        ctx.fillStyle = `rgba(0, 255, 0, ${alpha})`;
         ctx.fill();
-        ctx.globalAlpha = 1;
-
-        // Thin shadow line
-        ctx.save();
-        ctx.globalAlpha = 0.25;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(sx, sy);
-        ctx.strokeStyle = settings.nightMode ? 'rgba(255,120,40,0.6)' : 'rgba(0,255,80,0.6)';
-        ctx.lineWidth   = 3;
-        ctx.shadowColor = settings.nightMode ? 'rgba(255,100,20,0.4)' : 'rgba(0,255,0,0.4)';
-        ctx.shadowBlur  = 8;
-        ctx.stroke();
-        ctx.restore();
-        ctx.restore();
     }
 
-    // ── Sweep trail ───────────────────────────────────────────────────────
-    const sweepStart = spinAngle - 1.1;
+    // Draw the rotating green radius line
     ctx.beginPath();
     ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, R, sweepStart, spinAngle);
-    ctx.closePath();
-    ctx.fillStyle = t.trailColor(0.08);
-    ctx.fill();
-
-    // ── Main sweep line ───────────────────────────────────────────────────
-    const ex = cx + Math.cos(spinAngle) * R;
-    const ey = cy + Math.sin(spinAngle) * R;
-
-    ctx.save();
-    ctx.shadowColor = t.scanLine[0];
-    ctx.shadowBlur  = 6;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(ex, ey);
-    ctx.strokeStyle = t.scanLine[0];
-    ctx.lineWidth   = 2;
+    const lineX = cx + R * Math.cos(spinAngle);
+    const lineY = cy + R * Math.sin(spinAngle);
+    ctx.lineTo(lineX, lineY);
+    ctx.strokeStyle = '#00ff00';
+    ctx.lineWidth = 2;
     ctx.stroke();
-    ctx.restore();
-
-    // Tip dot
-    ctx.beginPath();
-    ctx.arc(ex, ey, 3, 0, Math.PI * 2);
-    ctx.fillStyle = t.scanLine[0];
-    ctx.fill();
 }
-
-// ── requestAnimationFrame draw loop — runs every frame for smooth spin ────
-// The heavier drawRadar() still runs on DRAW_INTERVAL for performance; the
-// rAF loop only redraws the spin overlay in between heavy frames.
-let _rafActive    = true;
-let _lastHeavyTs  = 0;
-
-function _rafTick(ts) {
-    if (!_rafActive) return;
-
-    // Advance spin angle by elapsed time — speed is in rad per 60-fps frame
-    if (_spinLastTs !== null && !isGamePaused && prefs.spinEnabled) {
-        const dtMs  = Math.min(ts - _spinLastTs, 100); // cap at 100ms to avoid jumps
-        const dtFrames = dtMs / (1000 / 60);           // normalise to 60-fps frames
-        spinAngle += prefs.spinSpeed * dtFrames;
-        if (spinAngle > Math.PI * 2) spinAngle -= Math.PI * 2;
-    }
-    _spinLastTs = ts;
-
-    // Run full drawRadar on interval; in between, just overdraw the spin line
-    const now = performance.now();
-    if (now - _lastHeavyTs >= DRAW_INTERVAL && !isDragging) {
-        _lastHeavyTs = now;
-        drawRadar();   // drawRadar calls drawSpinLine() itself
-    } else if (prefs.spinEnabled && !isGamePaused) {
-        // Lightweight overdraw: just repaint the sweep on top without clearing
-        drawSpinLine();
-    }
-
-    requestAnimationFrame(_rafTick);
-}
-requestAnimationFrame(_rafTick);
-
+*/
+// Assign to window.drawSpinLine so the existing drawRadar loop in Section 17 can call it.
+window.drawSpinLine = SweepLine;
 // ═══════════════════════════════════════════════════
 // SECTION 15 — AIRPORT / RUNWAY DRAWING
 // ═══════════════════════════════════════════════════
