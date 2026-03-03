@@ -1,13 +1,19 @@
 // ═══════════════════════════════════════════════════
-// ILS FONT SIZE VARIABLES — edit to resize ILS HUD text
+// ILS & DISPLAY PREFS — adjustable via the settings menu
+// These are kept as a plain object so sliders can mutate them live.
 // ═══════════════════════════════════════════════════
-const ILS_FONT_HEADER     = 12;  // ILS header label font size (px)
-const ILS_FONT_LABEL      = 9;   // ILS small section label font size (px)
-const ILS_FONT_VALUE      = 15;  // ILS main data value font size (px)
-const ILS_FONT_PILL_LABEL = 9;   // ILS deviation pill label font size (px)
-const ILS_FONT_PILL_VALUE = 13;  // ILS deviation pill value font size (px)
-const ILS_FONT_FOOTER     = 10;  // ILS footer text font size (px)
-const ILS_FONT_BANK_VALUE = 11;  // ILS bank angle canvas label font size (px)
+const ilsPrefs = {
+    fontHeader:   12,   // ILS header label font size (px)
+    fontLabel:    9,    // ILS small section label font size (px)
+    fontValue:    15,   // ILS main data value font size (px)
+    fontPillLabel:9,    // ILS deviation pill label font size (px)
+    fontPillValue:13,   // ILS deviation pill value font size (px)
+    fontFooter:   10,   // ILS footer text font size (px)
+    fontBankValue:11,   // ILS bank angle canvas text font size (px)
+};
+// Load persisted ILS prefs
+try { Object.assign(ilsPrefs, JSON.parse(localStorage.getItem('radarIlsPrefs') || '{}')); } catch(e) {}
+function saveIlsPrefs() { localStorage.setItem('radarIlsPrefs', JSON.stringify(ilsPrefs)); }
 
 // ═══════════════════════════════════════════════════
 // SECTION 1 — RADAR PREFERENCES
@@ -26,6 +32,8 @@ const ILS_FONT_BANK_VALUE = 11;  // ILS bank angle canvas label font size (px)
         hideGroundPlayers:  false,   // Hide aircraft detected as on the ground
         showTrail:          false,   // Draw own-aircraft trail on radar
         trailLengthSec:     60,      // Trail history retention (seconds)
+        trailWidth:         2,       // Trail line thickness (pixels)
+        tcasEnabled:        true,    // Show TCAS traffic warning overlay
     };
 
     let prefs;
@@ -1501,15 +1509,35 @@ function createMenu() {
         onCommit: applyPrefs,
     });
 
-    // ── Radar Opacity slider ──────────────────────────
-    addSlider({
-        label:    'Radar Opacity',           // Controls transparency of the radar canvas
-        get:      () => prefs.radarOpacity,
-        set:      v  => { prefs.radarOpacity = v; radarCanvas.style.opacity = v; },
-        fmt:      v  => Math.round(v * 100) + '%',
-        min: 0.1, max: 1.0, step: 0.05,
-        onCommit: savePrefs,
-    });
+    // ── Radar Opacity slider — value is persisted and maintained permanently ─
+    {
+        const row = document.createElement('div');
+        row.style.cssText = `padding:${UI.menuRowPadY-1}px 16px 2px;`;
+        const topRow = document.createElement('div');
+        topRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;';
+        const lbl = document.createElement('span');
+        lbl.dataset.menuRowlbl = '1';
+        lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
+        lbl.textContent = 'Radar Opacity'; // Radar canvas transparency — saved permanently
+        const valSpan = document.createElement('span');
+        valSpan.style.cssText = `color:rgba(0,255,0,0.95);font:bold ${UI.menuRowFont}px ${FONT_MONO};min-width:52px;text-align:right;`;
+        valSpan.textContent = Math.round((prefs.radarOpacity ?? 1) * 100) + '%';
+        topRow.appendChild(lbl); topRow.appendChild(valSpan);
+        const slider = document.createElement('input');
+        slider.type = 'range'; slider.min = 0.1; slider.max = 1.0; slider.step = 0.05;
+        slider.value = prefs.radarOpacity ?? 1;
+        slider.style.cssText = `width:100%;margin:0;accent-color:rgba(0,200,0,0.8);`;
+        // Every movement immediately saves and applies the opacity
+        slider.addEventListener('input', () => {
+            const v = parseFloat(slider.value);
+            prefs.radarOpacity = v;               // Persist to prefs immediately
+            radarCanvas.style.opacity = v;         // Apply to canvas immediately
+            valSpan.textContent = Math.round(v * 100) + '%';
+            savePrefs();                           // Write to localStorage
+        });
+        row.appendChild(topRow); row.appendChild(slider);
+        panel.appendChild(row);
+    }
     addSep();
 
     // ── API Status ────────────────────────────────────
@@ -1560,6 +1588,76 @@ function createMenu() {
     // ── Popup fonts ───────────────────
     addUISlider('Popup Title Font',     'popupTitleFont', 12, 24, 1);
     addUISlider('Popup Body Font',      'popupBodyFont',  11, 20, 1);
+    addSep();
+
+    // ── Trail width ───────────────────
+    addSlider({
+        label:    'Trail Thickness',           // Trail line width in pixels
+        get:      () => prefs.trailWidth,
+        set:      v  => { prefs.trailWidth = v; },
+        fmt:      v  => v + ' px',
+        min: 1, max: 8, step: 0.5,
+        onCommit: savePrefs,
+    });
+    addSep();
+
+    // ── ILS Font sizes ────────────────
+    addSection('ILS Display');
+    function addILSFontSlider(label, key) {
+        addSlider({
+            label,
+            get:  () => ilsPrefs[key],
+            set:  v  => { ilsPrefs[key] = v; },
+            fmt:  v  => v + 'px',
+            min: 7, max: 24, step: 1,
+            onCommit: saveIlsPrefs,   // Persist to localStorage
+        });
+    }
+    addILSFontSlider('ILS Header Font',       'fontHeader');
+    addILSFontSlider('ILS Label Font',         'fontLabel');
+    addILSFontSlider('ILS Value Font',         'fontValue');
+    addILSFontSlider('ILS Pill Label Font',    'fontPillLabel');
+    addILSFontSlider('ILS Pill Value Font',    'fontPillValue');
+    addILSFontSlider('ILS Footer Font',        'fontFooter');
+    addILSFontSlider('ILS Bank Label Font',    'fontBankValue');
+    addSep();
+
+    // ── TCAS ─────────────────────────
+    addSection('TCAS');
+    // TCAS enable toggle
+    {
+        const row = document.createElement('div');
+        row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
+            padding:${UI.menuRowPadY}px 16px;cursor:pointer;transition:background .15s;`;
+        row.onmouseover = () => row.style.background = T().menuRowHover;
+        row.onmouseout  = () => row.style.background = '';
+        const lbl = document.createElement('span');
+        lbl.dataset.menuRowlbl = '1';
+        lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
+        lbl.textContent = 'TCAS Warning';  // Flash TRAFFIC + audio when on collision course
+        const sw  = document.createElement('div');
+        const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
+        sw.style.cssText = `width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
+            border-radius:${UI.menuSwitchH/2}px;position:relative;
+            background:${prefs.tcasEnabled ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
+            border:1px solid rgba(0,255,0,0.3);transition:background .2s;flex-shrink:0;`;
+        const knob = document.createElement('div');
+        knob.style.cssText = `position:absolute;top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+            left:${prefs.tcasEnabled ? knobOn : knobOff}px;
+            width:${UI.menuKnobSize}px;height:${UI.menuKnobSize}px;border-radius:50%;
+            background:${prefs.tcasEnabled ? '#0f0' : '#888'};transition:left .2s,background .2s;`;
+        sw.appendChild(knob); row.appendChild(lbl); row.appendChild(sw);
+        row.onclick = () => {
+            prefs.tcasEnabled = !prefs.tcasEnabled;
+            const tc = T();
+            sw.style.background   = prefs.tcasEnabled ? tc.switchOn  : tc.switchOff;
+            knob.style.left       = prefs.tcasEnabled ? knobOn+'px'  : knobOff+'px';
+            knob.style.background = prefs.tcasEnabled ? tc.knobOn    : tc.knobOff;
+            if (!prefs.tcasEnabled) _stopTCAS();
+            savePrefs();
+        };
+        panel.appendChild(row);
+    }
 
     document.body.appendChild(panel);
     repositionMenu();
@@ -1768,7 +1866,7 @@ document.addEventListener('keydown', (e) => {
         if (mb) mb.style.display = hide ? 'none' : 'flex';
         nearestHUD.style.display = (hide || !settings.showNearestHUD) ? 'none' : 'block';
         ilsHUD.style.display = (hide || !_ilsActive) ? 'none' : 'block';
-        if (hide) { hidePopup(); closeMenu(); }
+        if (hide) { hidePopup(); closeMenu(); _stopTCAS(); }
         localStorage.setItem('radarVisible', !hide);
     }
 });
@@ -1813,7 +1911,7 @@ setInterval(() => {
     try {
         if (window.geofs) isGamePaused = geofs.gui?.pause ?? geofs.pause ?? false;
         const t = T();
-        const o = isGamePaused ? '0.45' : '1';
+        const o = isGamePaused ? '0.45' : String(prefs.radarOpacity ?? 1);
         radarCanvas.style.opacity   = o;
         radarCanvas.style.boxShadow = isGamePaused ? '0 0 10px rgba(255,220,0,0.4)' : t.canvasGlow;
         const rb = document.getElementById('radarRangeBox');
@@ -2165,19 +2263,33 @@ function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpee
     if (rLen < 1) return null;
 
     const rUx = rDx / rLen, rUy = rDy / rLen;
-    // along: positive = player is past threshold (on runway / overshot)
-    // cross: positive = player is RIGHT of centreline
-    const along = pDx * rUx + pDy * rUy;
-    const cross  = pDx * (-rUy) + pDy * rUx;
-    const distToThreshM = -along; // positive when approaching
+    const along = pDx * rUx + pDy * rUy;   // positive = past threshold
+    const cross  = pDx * (-rUy) + pDy * rUx; // positive = right of centreline
+    const distToThreshM = -along;            // positive = still approaching
 
-    // Altitude AGL above field elevation
-    const playerAltAGL = playerAltFt - _ilsAirportElevFt;
+    // ── Read accurate values from geofs.animation.values (matches reference script) ──
+    const av = window.geofs?.animation?.values; // Pre-computed GeoFS flight data
 
-    // Ideal altitude at this point on a 3° glideslope above the threshold
-    const GS_DEG = 3.0;
+    // Altitude AGL — use groundElevationFeet if available (same as reference script)
+    let playerAltAGL;
+    if (av && av.altitude !== undefined && av.groundElevationFeet !== undefined) {
+        // Same method as GeoFS Information Display: altitude - groundElevationFeet + wheel offset
+        const wheelOffsetFt = (() => {
+            try {
+                const cps = geofs.aircraft?.instance?.collisionPoints;
+                if (cps && cps.length >= 2) return cps[cps.length - 2].worldPosition[2] * 3.2808399;
+            } catch(e) {}
+            return 0;
+        })();
+        playerAltAGL = Math.round((av.altitude - av.groundElevationFeet) + wheelOffsetFt);
+    } else {
+        playerAltAGL = playerAltFt - _ilsAirportElevFt; // Fallback: altitude above airport elevation
+    }
+
+    // Ideal altitude at this distance on a 3° glideslope
+    const GS_DEG    = 3.0;
     const idealAltFt = Math.max(0, distToThreshM) * Math.tan(GS_DEG * Math.PI / 180) * 3.28084;
-    const gsErrFt = playerAltAGL - idealAltFt; // positive = above GS
+    const gsErrFt   = playerAltAGL - idealAltFt; // positive = above GS
 
     // Localizer angular error (degrees) — positive = aircraft right of centreline
     const locErrDeg = Math.atan2(cross, Math.max(100, Math.abs(distToThreshM))) * 180 / Math.PI;
@@ -2185,32 +2297,42 @@ function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpee
     // Glideslope angular error (degrees above 3° path)
     const gsErrDeg  = Math.atan2(gsErrFt / 3.28084, Math.max(100, Math.abs(distToThreshM))) * 180 / Math.PI;
 
-    // Vertical speed
-    const vs = computeVS(playerAltFt);
-
-    // Actual descent angle
-    let descentAngle = null;
-    if (vs !== null && isFinite(vs) && playerSpeedKts > 10) {
-        const gsFtMin = playerSpeedKts * 101.269;
-        descentAngle = (-vs / gsFtMin) * (180 / Math.PI) * (Math.PI / 2);
-        // Simpler: atan2(-vs, gsFtMin) but keep in degrees
-        descentAngle = Math.atan2(-vs, gsFtMin) * 180 / Math.PI;
-        descentAngle = Math.round(descentAngle * 10) / 10;
+    // Vertical speed — prefer geofs.animation.values.verticalSpeed (fpm), same as reference script
+    let vs = null;
+    if (av && av.verticalSpeed !== undefined && isFinite(av.verticalSpeed)) {
+        vs = Math.round(av.verticalSpeed); // fpm directly from GeoFS
+    } else {
+        vs = computeVS(playerAltFt);       // Fallback: compute from altitude history
     }
 
-    // Bank angle from GeoFS
+    // Speed — prefer animation.values.kias (knots IAS) or groundSpeed
+    let speedKts = playerSpeedKts;
+    if (av && av.kias !== undefined && isFinite(av.kias) && av.kias > 0) {
+        speedKts = av.kias;
+    } else if (av && av.groundSpeed !== undefined && isFinite(av.groundSpeed)) {
+        speedKts = av.groundSpeed;
+    }
+
+    // Actual descent angle: atan2(-VS_fpm, groundspeed_fpm)
+    let descentAngle = null;
+    if (vs !== null && isFinite(vs) && speedKts > 10) {
+        const gsFtMin  = speedKts * 101.269;          // knots → ft/min
+        descentAngle   = Math.atan2(-vs, gsFtMin) * 180 / Math.PI;
+        descentAngle   = Math.round(descentAngle * 10) / 10;
+    }
+
+    // Bank angle — prefer animation.values roll if available, else animationValue
     let bankDeg = null;
     try {
-        const rawRoll = geofs.aircraft?.instance?.animationValue?.roll ?? null;
+        // geofs.animation.values doesn't expose roll directly; use animationValue.roll
+        const rawRoll = av?.roll ?? geofs.aircraft?.instance?.animationValue?.roll ?? null;
         if (rawRoll !== null && isFinite(rawRoll)) {
-            // GeoFS typically stores roll in radians; convert if |value| < 2π
-            bankDeg = Math.abs(rawRoll) <= 6.28 ? rawRoll * 180 / Math.PI : rawRoll;
+            bankDeg = Math.abs(rawRoll) <= 6.28 ? rawRoll * 180 / Math.PI : rawRoll; // radians → degrees
             bankDeg = Math.round(bankDeg * 10) / 10;
         }
     } catch(e) {}
 
-    // Runway heading (direction you fly to land on this end)
-    const rwHdg = calcBearing(oLat, oLon, tLat, tLon); // facing FROM opposite TO threshold
+    const rwHdg = calcBearing(oLat, oLon, tLat, tLon); // Inbound course to threshold
 
     return {
         locErrDeg,
@@ -2384,7 +2506,7 @@ function drawBankIndicator(bankDeg) {
     bc.fillStyle = 'rgba(255,255,255,0.9)'; bc.fill();
 
     // ── Bank value text ──────────────────────────────
-    bc.font = `bold ${ILS_FONT_BANK_VALUE}px Arial`;
+    bc.font = `bold ${ilsPrefs.fontBankValue}px Arial`;
     bc.textAlign = 'center'; bc.textBaseline = 'bottom';
     bc.fillStyle = bankColor;
     // L = left bank (negative), R = right bank (positive)
@@ -2455,11 +2577,11 @@ function updateILSHUD(ilsData) {
     display:flex; align-items:center; gap:8px;">
     <span style="display:inline-block;width:10px;height:10px;border-radius:50%;
       background:rgba(0,200,255,1);box-shadow:0 0 7px rgba(0,200,255,0.9);flex-shrink:0;"></span>
-    <span style="color:rgba(0,210,255,0.98);font-size:${ILS_FONT_HEADER}px;letter-spacing:1.2px;
+    <span style="color:rgba(0,210,255,0.98);font-size:${ilsPrefs.fontHeader}px;letter-spacing:1.2px;
       text-transform:uppercase;font-weight:bold;flex:1;">ILS  ${rwyLabel}</span>
     <button id="ilsCloseBtn" style="
       background:none; border:1px solid rgba(0,160,230,0.35); color:rgba(0,180,230,0.7);
-      border-radius:4px; cursor:pointer; font-size:${ILS_FONT_FOOTER}px; padding:2px 8px; flex-shrink:0;
+      border-radius:4px; cursor:pointer; font-size:${ilsPrefs.fontFooter}px; padding:2px 8px; flex-shrink:0;
       font-family:${FONT_SANS}; transition:background .15s;
     ">✕ CLOSE</button>
   </div>
@@ -2471,12 +2593,12 @@ function updateILSHUD(ilsData) {
   <!-- LOC / GS deviation pills -->
   <div style="display:flex; gap:8px; padding:6px 14px; border-bottom:1px solid ${t.hudSep};">
     <div style="flex:1; background:rgba(0,20,40,0.7); border-radius:6px; padding:5px 8px; text-align:center;">
-      <div style="color:${t.hudLabel};font-size:${ILS_FONT_PILL_LABEL}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">LOCALIZER</div>
-      <div style="color:${locColor};font-size:${ILS_FONT_PILL_VALUE}px;font-weight:bold;">${locDev}</div>
+      <div style="color:${t.hudLabel};font-size:${ilsPrefs.fontPillLabel}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">LOCALIZER</div>
+      <div style="color:${locColor};font-size:${ilsPrefs.fontPillValue}px;font-weight:bold;">${locDev}</div>
     </div>
     <div style="flex:1; background:rgba(0,20,40,0.7); border-radius:6px; padding:5px 8px; text-align:center;">
-      <div style="color:${t.hudLabel};font-size:${ILS_FONT_PILL_LABEL}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">GLIDESLOPE</div>
-      <div style="color:${gsColor};font-size:${ILS_FONT_PILL_VALUE}px;font-weight:bold;">${gsErrFtStr}</div>
+      <div style="color:${t.hudLabel};font-size:${ilsPrefs.fontPillLabel}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">GLIDESLOPE</div>
+      <div style="color:${gsColor};font-size:${ilsPrefs.fontPillValue}px;font-weight:bold;">${gsErrFtStr}</div>
     </div>
   </div>
 
@@ -2484,33 +2606,33 @@ function updateILSHUD(ilsData) {
   <div style="padding:8px 14px; display:grid; grid-template-columns:1fr 1fr; gap:6px 10px;
     border-bottom:1px solid ${t.hudSep};">
     <div>
-      <div style="color:${t.hudLabel};font-size:${ILS_FONT_LABEL}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">ALT AGL</div>
-      <div style="color:rgba(0,240,255,0.95);font-size:${ILS_FONT_VALUE}px;font-weight:bold">${altStr}</div>
+      <div style="color:${t.hudLabel};font-size:${ilsPrefs.fontLabel}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">ALT AGL</div>
+      <div style="color:rgba(0,240,255,0.95);font-size:${ilsPrefs.fontValue}px;font-weight:bold">${altStr}</div>
     </div>
     <div>
-      <div style="color:${t.hudLabel};font-size:${ILS_FONT_LABEL}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">DISTANCE</div>
-      <div style="color:rgba(255,160,40,0.95);font-size:${ILS_FONT_VALUE}px;font-weight:bold">${distStr}</div>
+      <div style="color:${t.hudLabel};font-size:${ilsPrefs.fontLabel}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">DISTANCE</div>
+      <div style="color:rgba(255,160,40,0.95);font-size:${ilsPrefs.fontValue}px;font-weight:bold">${distStr}</div>
     </div>
     <div>
-      <div style="color:${t.hudLabel};font-size:${ILS_FONT_LABEL}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">VERT SPEED</div>
-      <div style="color:${vsColor};font-size:${ILS_FONT_VALUE}px;font-weight:bold">${vsStr}</div>
+      <div style="color:${t.hudLabel};font-size:${ilsPrefs.fontLabel}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">VERT SPEED</div>
+      <div style="color:${vsColor};font-size:${ilsPrefs.fontValue}px;font-weight:bold">${vsStr}</div>
     </div>
     <div>
-      <div style="color:${t.hudLabel};font-size:${ILS_FONT_LABEL}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">DESCENT °</div>
-      <div style="color:rgba(255,220,80,0.95);font-size:${ILS_FONT_VALUE}px;font-weight:bold">${dAngStr}</div>
+      <div style="color:${t.hudLabel};font-size:${ilsPrefs.fontLabel}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">DESCENT °</div>
+      <div style="color:rgba(255,220,80,0.95);font-size:${ilsPrefs.fontValue}px;font-weight:bold">${dAngStr}</div>
     </div>
   </div>
 
   <!-- Bank indicator -->
   <div style="padding:6px 0 0; border-bottom:1px solid ${t.hudSep};">
-    <div style="color:${t.hudLabel};font-size:${ILS_FONT_LABEL}px;letter-spacing:1px;text-transform:uppercase;text-align:center;margin-bottom:2px">BANK ANGLE</div>
+    <div style="color:${t.hudLabel};font-size:${ilsPrefs.fontLabel}px;letter-spacing:1px;text-transform:uppercase;text-align:center;margin-bottom:2px">BANK ANGLE</div>
     <div id="ilsBankWrap" style="display:flex;justify-content:center;padding:0 0 4px;"></div>
   </div>
 
   <!-- GS info footer -->
   <div style="padding:5px 14px 7px; display:flex; align-items:center; justify-content:space-between;">
-    <span style="color:${t.hudLabel};font-size:${ILS_FONT_FOOTER}px;">3° G/S  ·  Click runway to close ILS</span>
-    <span style="color:${bankColor};font-size:${ILS_FONT_PILL_VALUE}px;font-weight:bold;">${bankStr}</span>
+    <span style="color:${t.hudLabel};font-size:${ilsPrefs.fontFooter}px;">3° G/S  ·  Click runway to close ILS</span>
+    <span style="color:${bankColor};font-size:${ilsPrefs.fontPillValue}px;font-weight:bold;">${bankStr}</span>
   </div>
 </div>`;
 
@@ -2530,8 +2652,189 @@ function updateILSHUD(ilsData) {
 }
 
 // ═══════════════════════════════════════════════════
-// SECTION 13 — COORDINATE HELPERS
+// SECTION 13b — TCAS WARNING SYSTEM
 // ═══════════════════════════════════════════════════
+
+// ── TCAS state ───────────────────────────────────
+let _tcasActive       = false;   // True when a TCAS warning is currently firing
+let _tcasFlashTimer   = null;    // setInterval handle for the flash animation
+let _tcasAudioCooldown = 0;      // Timestamp: don't replay audio before this time
+
+// ── TCAS tuning variables — edit these to adjust sensitivity ─────────────
+const TCAS_LOOKAHEAD_S        = 30;    // Seconds: how far ahead to project each aircraft path
+const TCAS_ALT_BAND_FT        = 500;   // ±feet: max altitude difference to consider a threat
+const TCAS_MIN_ALT_FT         = 200;   // Feet AGL: both aircraft must be above this to warn
+const TCAS_INTERSECT_MARGIN_M = 300;   // Metres: closest approach between paths to trigger
+const TCAS_AUDIO_COOLDOWN_MS  = 15000; // Minimum ms between audio replays
+
+// ── TCAS overlay div ─────────────────────────────
+const tcasOverlay = document.createElement('div');
+tcasOverlay.id = 'radarTCAS';
+tcasOverlay.style.cssText = `
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    pointer-events:none; z-index:2147483640;
+    display:none; align-items:center; justify-content:center;
+`;
+document.body.appendChild(tcasOverlay);
+
+const tcasText = document.createElement('div');
+tcasText.style.cssText = `
+    font-family:Arial, sans-serif; font-size:72px; font-weight:bold;
+    letter-spacing:8px; text-transform:uppercase;
+    color:rgba(255,0,0,0.5); text-shadow:0 0 30px rgba(255,0,0,0.8);
+    user-select:none; pointer-events:none;
+`;
+tcasText.textContent = 'TRAFFIC';
+tcasOverlay.appendChild(tcasText);
+
+// ── TCAS audio (lazy-loaded once) ────────────────
+let _tcasAudio = null;
+function _getTCASAudio() {
+    if (!_tcasAudio) {
+        _tcasAudio = new Audio('https://raw.githubusercontent.com/YK3D/Geo-FS-Radar/main/tcas-traffic-warning.mp3');
+        _tcasAudio.volume = 1.0;
+    }
+    return _tcasAudio;
+}
+
+function _playTCASAudio() {
+    const now = Date.now();
+    if (now < _tcasAudioCooldown) return; // Respect cooldown
+    _tcasAudioCooldown = now + TCAS_AUDIO_COOLDOWN_MS;
+    try {
+        const audio = _getTCASAudio();
+        audio.currentTime = 0;
+        audio.play().catch(() => {}); // Ignore autoplay blocks
+    } catch(e) {}
+}
+
+function _startTCAS() {
+    if (_tcasActive) return;
+    _tcasActive = true;
+    tcasOverlay.style.display = 'flex';
+    _playTCASAudio();
+    let _flashOn = true;
+    _tcasFlashTimer = setInterval(() => {
+        _flashOn = !_flashOn;
+        tcasText.style.opacity = _flashOn ? '1' : '0';
+    }, 400); // Flash every 400 ms
+}
+
+function _stopTCAS() {
+    if (!_tcasActive) return;
+    _tcasActive = false;
+    tcasOverlay.style.display = 'none';
+    if (_tcasFlashTimer) { clearInterval(_tcasFlashTimer); _tcasFlashTimer = null; }
+}
+
+// ── Closest-point-of-approach between two line segments (metres) ─────────
+// Segments: (p1x,p1y)→(p2x,p2y) and (p3x,p3y)→(p4x,p4y) in flat XY metres.
+// Returns the minimum distance between any point on segment 1 and any point on segment 2.
+function _segmentMinDist(p1x, p1y, p2x, p2y, p3x, p3y, p4x, p4y) {
+    const d1x = p2x-p1x, d1y = p2y-p1y;
+    const d2x = p4x-p3x, d2y = p4y-p3y;
+    const rx  = p1x-p3x, ry  = p1y-p3y;
+    const a   = d1x*d1x + d1y*d1y;
+    const e   = d2x*d2x + d2y*d2y;
+    const f   = d2x*rx  + d2y*ry;
+    let s, t;
+    if (a < 1e-10 && e < 1e-10) return Math.hypot(rx, ry);
+    if (a < 1e-10) { s = 0; t = Math.max(0, Math.min(1, f / e)); }
+    else {
+        const c = d1x*rx + d1y*ry;
+        if (e < 1e-10) { t = 0; s = Math.max(0, Math.min(1, -c / a)); }
+        else {
+            const b = d1x*d2x + d1y*d2y;
+            const denom = a*e - b*b;
+            s = denom !== 0 ? Math.max(0, Math.min(1, (b*f - c*e) / denom)) : 0;
+            t = (f + b*s) / e;
+            if      (t < 0) { t = 0; s = Math.max(0, Math.min(1, -c / a)); }
+            else if (t > 1) { t = 1; s = Math.max(0, Math.min(1, (b - c) / a)); }
+        }
+    }
+    const cx = (p1x + d1x*s) - (p3x + d2x*t);
+    const cy = (p1y + d1y*s) - (p3y + d2y*t);
+    return Math.hypot(cx, cy);
+}
+
+// Store my TCAS projected path endpoint for radar canvas drawing each frame
+let _tcasMyEndX = 0, _tcasMyEndY = 0, _tcasHasPath = false;
+
+// ── TCAS: strict heading-vector intersection check ───────────────────────
+// EXACT logic:
+//   My vector   = line from MY position, extending (mySpeed × 30s) metres on my heading.
+//   Their vector = line from THEIR position, extending (theirSpeed × 30s) metres on their heading.
+//   ALARM fires ONLY when those two line segments intersect (or pass within TCAS_INTERSECT_MARGIN_M).
+//   No other criteria (closing speed, future separation, etc.) — pure vector geometry.
+function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic) {
+    if (!prefs.tcasEnabled) { _stopTCAS(); _tcasHasPath = false; return; }
+
+    // Must be airborne
+    let myAGL = myAltFt;
+    try {
+        const av = window.geofs?.animation?.values;
+        if (av?.groundElevationFeet !== undefined) myAGL = av.altitude - av.groundElevationFeet;
+    } catch(e) {}
+    if (myAGL < TCAS_MIN_ALT_FT) { _stopTCAS(); _tcasHasPath = false; return; }
+
+    // Must be moving to have a meaningful vector
+    const mySpeedMs = (mySpeedKts || 0) * 0.514444;
+    if (mySpeedMs < 10) { _stopTCAS(); _tcasHasPath = false; return; }
+
+    // My 30-second vector in flat-earth metres (east=X, north=Y)
+    const myHdgRad   = myHdg * Math.PI / 180;
+    const myPathDist = mySpeedMs * TCAS_LOOKAHEAD_S;
+    _tcasMyEndX  = myPathDist * Math.sin(myHdgRad);
+    _tcasMyEndY  = myPathDist * Math.cos(myHdgRad);
+    _tcasHasPath = true;
+
+    let threat = false;
+
+    for (const ac of traffic) {
+        if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) continue;
+
+        // Both must be airborne
+        const acAltFt = isFinite(parseFloat(ac.al)) ? parseFloat(ac.al)
+            : (ac.co.length >= 3 && isFinite(ac.co[2]) ? parseFloat(ac.co[2]) * 3.28084 : null);
+        if (acAltFt === null || acAltFt < TCAS_MIN_ALT_FT) continue;
+
+        // Altitude band — both within ±TCAS_ALT_BAND_FT
+        if (Math.abs(myAltFt - acAltFt) > TCAS_ALT_BAND_FT) continue;
+
+        // Traffic must have a known heading and be moving
+        const acH = isFinite(parseFloat(ac.h)) ? parseFloat(ac.h) : null;
+        if (acH === null) continue;
+        const acS = isFinite(parseFloat(ac.s)) ? parseFloat(ac.s)
+            : (typeof ac._computedSpd === 'number' ? ac._computedSpd : 0);
+        const acSpeedMs = acS * 0.514444;
+        if (acSpeedMs < 10) continue; // Stationary — no vector, skip
+
+        // Traffic position in my local tangent plane (metres east/north from me)
+        const [acOffX, acOffY] = latLonToMeters(myLat, myLon, ac.co[0], ac.co[1]);
+
+        // Their 30-second vector endpoint
+        const acHdgRad  = acH * Math.PI / 180;
+        const acPathDist = acSpeedMs * TCAS_LOOKAHEAD_S;
+        const acEndX    = acOffX + acPathDist * Math.sin(acHdgRad);
+        const acEndY    = acOffY + acPathDist * Math.cos(acHdgRad);
+
+        // ── Strict intersection: do the two vector SEGMENTS intersect? ──
+        // Use _segmentMinDist — the two segments intersect when their min distance ≈ 0.
+        // We use TCAS_INTERSECT_MARGIN_M as the intersection tolerance (in metres).
+        const cpa = _segmentMinDist(
+            0, 0, _tcasMyEndX, _tcasMyEndY,   // My segment
+            acOffX, acOffY, acEndX, acEndY     // Their segment
+        );
+
+        if (cpa <= TCAS_INTERSECT_MARGIN_M) {
+            threat = true;
+            break;
+        }
+    }
+
+    if (threat) _startTCAS();
+    else _stopTCAS();
+}
 
 function latLonToMeters(lat1, lon1, lat2, lon2) {
     const R    = 6371000;
@@ -2902,7 +3205,7 @@ function drawRadar() {
             const [sx1, sy1] = worldToCanvas(dx1, dy1, cx, cy, rotRad);
             const [sx2, sy2] = worldToCanvas(dx2, dy2, cx, cy, rotRad);
             ctx.strokeStyle = T().trailColor(alpha); // Use theme trail colour
-            ctx.lineWidth   = 2;
+            ctx.lineWidth   = prefs.trailWidth || 2;  // Trail thickness from prefs
             ctx.beginPath();
             ctx.moveTo(sx1, sy1);
             ctx.lineTo(sx2, sy2);
@@ -3001,6 +3304,18 @@ function drawRadar() {
 
     ctx.restore(); // end circle clip
 
+    // ── TCAS collision check ───────────────────────
+    if (hasPos && !isGamePaused && settings.showTraffic) {
+        let mySpeedKts = 0;
+        try {
+            const av = geofs.animation?.values;
+            mySpeedKts = av?.groundSpeed ?? av?.kias ?? 0;
+        } catch(e) {}
+        checkTCAS(playerLat, playerLon, playerAltFt, playerHeading, mySpeedKts, aircraftListCache);
+    } else {
+        _stopTCAS();
+    }
+
     // ── Player callsign tag ───────────────────────
     let _playerTagBottomY = cy + UI.playerTriBaseOff + UI.playerTriTip + 13;
     if (settings.showMyCallsign && displayCallsign) {
@@ -3027,6 +3342,55 @@ function drawRadar() {
 
     // ── Player triangle — always on top ───────────
     drawPlayerTriangle(cx, cy, playerHeading, isGamePaused);
+
+    // ── TCAS projected path line — starts at nose of player triangle ─────
+    // The line represents: where will I be in TCAS_LOOKAHEAD_S seconds at current speed/heading?
+    // Origin = tip of player triangle (UI.playerTriTip px ahead of centre in heading direction).
+    if (_tcasHasPath && prefs.tcasEnabled && hasPos && !isGamePaused) {
+        const scale  = (radarSize / 2) / radarRange; // px per metre on canvas
+
+        // In North-up mode: everything is rotated by playerHeading on screen.
+        // In Track-up mode: player triangle always points up (angleRad=0), map rotates.
+        // The triangle tip always renders at (0, -UI.playerTriTip) in its local rotated frame.
+        // We need the tip in canvas space, then project forward along the heading screen-direction.
+
+        const isNorthUp   = settings.orientMode === 'north';
+        // Screen angle of "forward" = heading angle when north-up, or straight up (0) when track-up
+        const fwdAngle    = isNorthUp ? (playerHeading * Math.PI / 180) : 0;
+        const cosFwd = Math.cos(fwdAngle), sinFwd = Math.sin(fwdAngle);
+
+        // Tip of triangle in canvas coords
+        const tipX = cx + sinFwd *  UI.playerTriTip;
+        const tipY = cy - cosFwd *  UI.playerTriTip;
+
+        // Project the 30-second path from the tip.
+        // _tcasMyEndX/Y are in flat-earth metres (east/north).  Convert to canvas px.
+        // For north-up: east→right, north→up (standard).
+        // For track-up: the map is rotated by -playerHeading, so east/north must be rotated the same way.
+        const pathEast  = _tcasMyEndX;  // metres east
+        const pathNorth = _tcasMyEndY;  // metres north
+        // Rotate into screen space: apply the same -rotRad the blip loop uses
+        const cosR  = Math.cos(-rotRad), sinR = Math.sin(-rotRad);
+        const scrEast  =  pathEast * cosR + pathNorth * sinR;  // screen-right component
+        const scrNorth = -pathEast * sinR + pathNorth * cosR;  // screen-up component
+
+        // End point in canvas coords (starting from centre cx,cy then add tip offset)
+        const ex = cx + scrEast  * scale + sinFwd * UI.playerTriTip;
+        const ey = cy - scrNorth * scale - cosFwd * UI.playerTriTip;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(tipX, tipY);
+        ctx.lineTo(ex, ey);
+        ctx.setLineDash([7, 5]);
+        ctx.lineWidth   = 1.5;
+        ctx.strokeStyle = _tcasActive
+            ? 'rgba(255,60,60,0.65)'    // Red-tinted when alarm firing
+            : 'rgba(255,190,0,0.30)';   // Faint amber when clear
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
 
     // ── Update ILS HUD if active ──────────────────
     if (_ilsActive && hasPos && !isGamePaused) {
