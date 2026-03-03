@@ -125,7 +125,7 @@ const UI = {
     ringLabelFont:       15,
 
     // ── Compass cardinal letters ──────────────────────────────────────────
-    compassFont:         30,
+    compassFont:         50,
     compassHdgFont:      14,
 
     // ── Own-aircraft triangle ─────────────────────────────────────────────
@@ -1374,6 +1374,253 @@ function createMenu() {
         onCommit: applyPrefs,
     });
 
+// ── Spin Speed + enable toggle ────────────────────────────────────────
+{
+    const spinEnRow = document.createElement('div');
+    spinEnRow.dataset.menuRow = '_spinEnabled';
+    spinEnRow.style.cssText = `
+        display:flex; align-items:center; justify-content:space-between;
+        padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;
+    `;
+    spinEnRow.onmouseover = () => spinEnRow.style.background = T().menuRowHover;
+    spinEnRow.onmouseout  = () => spinEnRow.style.background = '';
+    const spinEnLbl = document.createElement('span');
+    spinEnLbl.dataset.menuRowlbl = '1';
+    spinEnLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
+    spinEnLbl.textContent = 'Sweep Line';
+    const spinEnSw = document.createElement('div');
+    const spinEnKnobOff = 3, spinEnKnobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
+    spinEnSw.style.cssText = `
+        width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
+        border-radius:${UI.menuSwitchH/2}px; position:relative;
+        background:${prefs.spinEnabled ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
+        border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;
+    `;
+    const spinEnKnob = document.createElement('div');
+    spinEnKnob.style.cssText = `
+        position:absolute; top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+        left:${prefs.spinEnabled ? spinEnKnobOn : spinEnKnobOff}px;
+        width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%;
+        background:${prefs.spinEnabled ? '#0f0' : '#888'};
+        transition:left .2s, background .2s;
+    `;
+    spinEnSw.appendChild(spinEnKnob);
+    spinEnRow.appendChild(spinEnLbl);
+    spinEnRow.appendChild(spinEnSw);
+    spinEnRow.onclick = () => {
+        prefs.spinEnabled = !prefs.spinEnabled;
+        const t2 = T();
+        spinEnSw.style.background   = prefs.spinEnabled ? t2.switchOn  : t2.switchOff;
+        spinEnKnob.style.left       = prefs.spinEnabled ? spinEnKnobOn + 'px' : spinEnKnobOff + 'px';
+        spinEnKnob.style.background = prefs.spinEnabled ? t2.knobOn : t2.knobOff;
+        savePrefs();
+        if (prefs.spinEnabled) startSpinAnimation(); else stopSpinAnimation();
+    };
+    panel.appendChild(spinEnRow);
+
+    // Sweep shadow toggle
+    {
+        const shadowRow = document.createElement('div');
+        shadowRow.style.cssText = `
+            display:flex; align-items:center; justify-content:space-between;
+            padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;
+        `;
+        shadowRow.onmouseover = () => shadowRow.style.background = T().menuRowHover;
+        shadowRow.onmouseout  = () => shadowRow.style.background = '';
+
+        const shadowLbl = document.createElement('span');
+        shadowLbl.dataset.menuRowlbl = '1';
+        shadowLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
+        shadowLbl.textContent = 'Sweep Shadow';
+
+        const shadowSw = document.createElement('div');
+        const shadowKnobOff = 3, shadowKnobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
+        shadowSw.style.cssText = `
+            width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
+            border-radius:${UI.menuSwitchH/2}px; position:relative;
+            background:${prefs.spinShadow ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
+            border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;
+        `;
+
+        const shadowKnob = document.createElement('div');
+        shadowKnob.style.cssText = `
+            position:absolute; top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+            left:${prefs.spinShadow ? shadowKnobOn : shadowKnobOff}px;
+            width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%;
+            background:${prefs.spinShadow ? '#0f0' : '#888'};
+            transition:left .2s, background .2s;
+        `;
+
+        shadowSw.appendChild(shadowKnob);
+        shadowRow.appendChild(shadowLbl);
+        shadowRow.appendChild(shadowSw);
+
+        shadowRow.onclick = () => {
+            prefs.spinShadow = !prefs.spinShadow;
+            const t2 = T();
+            shadowSw.style.background   = prefs.spinShadow ? t2.switchOn  : t2.switchOff;
+            shadowKnob.style.left       = prefs.spinShadow ? shadowKnobOn + 'px' : shadowKnobOff + 'px';
+            shadowKnob.style.background = prefs.spinShadow ? t2.knobOn : t2.knobOff;
+            savePrefs();
+            if (prefs.spinEnabled) updateShadowSetting();
+        };
+
+        panel.appendChild(shadowRow);
+    }
+
+    addPrefRow({
+        label: 'Spin Speed',
+        get: () => prefs.spinSpeed,
+        set: v => { prefs.spinSpeed = Math.round(v * 1000) / 1000; },
+        fmt: v => v.toFixed(3) + ' rad/frame',
+        min: 0.001, max: 0.05, step: 0.001,
+        onCommit: () => {
+            savePrefs();
+            // Speed will be used directly in animation
+        }
+    });
+}
+
+// Spin animation variables
+let spinAnimationFrame = null;
+let spinAngle = 0;
+let lastDrawTime = 0;
+const TARGET_FPS = 10;
+const FRAME_TIME = 1000 / TARGET_FPS;
+
+function startSpinAnimation() {
+    if (spinAnimationFrame) cancelAnimationFrame(spinAnimationFrame);
+    spinAnimationFrame = requestAnimationFrame(animateSpin);
+}
+
+function stopSpinAnimation() {
+    if (spinAnimationFrame) {
+        cancelAnimationFrame(spinAnimationFrame);
+        spinAnimationFrame = null;
+    }
+    // Redraw without the spin line
+    redrawBaseGraphics();
+}
+
+function animateSpin(currentTime) {
+    if (!prefs.spinEnabled || isGamePaused) {
+        spinAnimationFrame = requestAnimationFrame(animateSpin);
+        return;
+    }
+
+    // Control frame rate for consistent animation
+    if (currentTime - lastDrawTime >= FRAME_TIME) {
+        // Update angle using prefs.spinSpeed directly
+        spinAngle += prefs.spinSpeed;
+        if (spinAngle > Math.PI * 2) spinAngle -= Math.PI * 2;
+
+        // Draw the frame
+        drawFullFrame();
+        lastDrawTime = currentTime;
+    }
+
+    spinAnimationFrame = requestAnimationFrame(animateSpin);
+}
+
+function drawFullFrame() {
+    // Clear the radar area only (not the entire canvas if there's UI)
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(radarSize/2, radarSize/2, radarSize/2, 0, Math.PI*2);
+    ctx.clip();
+    ctx.clearRect(0, 0, radarSize, radarSize);
+    ctx.restore();
+
+    // Draw base radar graphics first
+    if (typeof drawRadarBase === 'function') {
+        drawRadarBase();
+    }
+
+    // Draw the spin line with current angle
+    drawSpinLine();
+}
+
+function drawSpinLine() {
+    if (isGamePaused) return;
+
+    const cx = radarSize/2, cy = radarSize/2;
+    const R  = radarSize/2 - 10;
+    const t  = T();
+
+    const ex = cx + Math.cos(spinAngle) * R;
+    const ey = cy + Math.sin(spinAngle) * R;
+
+    const sweepStart = spinAngle - 1.1;
+
+    // Draw sweep trail
+    const lg = ctx.createLinearGradient(cx, cy, ex, ey);
+    lg.addColorStop(0, t.scanLine[0]);
+    lg.addColorStop(1, 'transparent');
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, R, sweepStart, spinAngle);
+    ctx.closePath();
+    ctx.fillStyle = t.trailColor(0.08);
+    ctx.fill();
+
+    // Draw shadow if enabled
+    if (prefs.spinShadow) {
+        ctx.save();
+        ctx.shadowColor = 'rgba(0, 255, 0, 0.8)';
+        ctx.shadowBlur = 15;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+
+        // Draw line with shadow
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(ex, ey);
+        ctx.strokeStyle = t.scanLine[0];
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // Draw endpoint with shadow
+        ctx.beginPath();
+        ctx.arc(ex, ey, 4, 0, Math.PI*2);
+        ctx.fillStyle = t.scanLine[0];
+        ctx.fill();
+        ctx.restore();
+    }
+
+    // Draw main line (without shadow to prevent double shadow)
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(ex, ey);
+    ctx.strokeStyle = t.scanLine[0];
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Draw main endpoint (without shadow)
+    ctx.beginPath();
+    ctx.arc(ex, ey, 3, 0, Math.PI*2);
+    ctx.fillStyle = t.scanLine[0];
+    ctx.fill();
+}
+
+function updateShadowSetting() {
+    // Just redraw current frame with new shadow setting
+    if (prefs.spinEnabled && !isGamePaused) {
+        drawFullFrame();
+    }
+}
+
+function redrawBaseGraphics() {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(radarSize/2, radarSize/2, radarSize/2, 0, Math.PI*2);
+    ctx.clip();
+    ctx.clearRect(0, 0, radarSize, radarSize);
+    ctx.restore();
+
+    if (typeof drawRadarBase === 'function') {
+        drawRadarBase();
+    }
+}
 
     // ── API Status ────────────────────────────────────────────────────────
     addSep();
@@ -2085,6 +2332,125 @@ function worldToCanvas(dx, dy, cx, cy, rotRad) {
     ];
 }
 
+// ═══════════════════════════════════════════════════
+// SECTION 14 — SPIN LINE
+// Angle advances based on real elapsed time (ms since last frame) so the
+// sweep speed is constant regardless of draw rate or fetch delays.
+// ═══════════════════════════════════════════════════
+
+let spinAngle    = 0;
+let _spinLastTs  = null;   // performance.now() of last rAF tick
+
+function drawSpinLine() {
+    if (!prefs.spinEnabled) return;
+
+    const cx = radarSize / 2, cy = radarSize / 2;
+    const R  = radarSize / 2 - 10;
+    const t  = T();
+
+    // ── Shadow pass (drawn first, so the bright line sits on top) ─────────
+    if (prefs.spinShadow) {
+        const shadowOffset = 0.35;                      // rad behind the line
+        const shadowAngle  = spinAngle - shadowOffset;
+        const sx = cx + Math.cos(shadowAngle) * R;
+        const sy = cy + Math.sin(shadowAngle) * R;
+
+        // Wide, very faint glow arc
+        const lgShadow = ctx.createConicalGradient
+            ? null                                       // future API; skip for now
+            : null;
+
+        // Radial wedge — same technique as the sweep trail but dimmer & wider
+        const arcStart = shadowAngle - 0.6;
+        ctx.save();
+        ctx.globalAlpha = 0.07;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, R, arcStart, shadowAngle);
+        ctx.closePath();
+        ctx.fillStyle = settings.nightMode
+            ? 'rgba(255,100,30,0.9)'
+            : 'rgba(0,255,0,0.9)';
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Thin shadow line
+        ctx.save();
+        ctx.globalAlpha = 0.25;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(sx, sy);
+        ctx.strokeStyle = settings.nightMode ? 'rgba(255,120,40,0.6)' : 'rgba(0,255,80,0.6)';
+        ctx.lineWidth   = 3;
+        ctx.shadowColor = settings.nightMode ? 'rgba(255,100,20,0.4)' : 'rgba(0,255,0,0.4)';
+        ctx.shadowBlur  = 8;
+        ctx.stroke();
+        ctx.restore();
+        ctx.restore();
+    }
+
+    // ── Sweep trail ───────────────────────────────────────────────────────
+    const sweepStart = spinAngle - 1.1;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, R, sweepStart, spinAngle);
+    ctx.closePath();
+    ctx.fillStyle = t.trailColor(0.08);
+    ctx.fill();
+
+    // ── Main sweep line ───────────────────────────────────────────────────
+    const ex = cx + Math.cos(spinAngle) * R;
+    const ey = cy + Math.sin(spinAngle) * R;
+
+    ctx.save();
+    ctx.shadowColor = t.scanLine[0];
+    ctx.shadowBlur  = 6;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(ex, ey);
+    ctx.strokeStyle = t.scanLine[0];
+    ctx.lineWidth   = 2;
+    ctx.stroke();
+    ctx.restore();
+
+    // Tip dot
+    ctx.beginPath();
+    ctx.arc(ex, ey, 3, 0, Math.PI * 2);
+    ctx.fillStyle = t.scanLine[0];
+    ctx.fill();
+}
+
+// ── requestAnimationFrame draw loop — runs every frame for smooth spin ────
+// The heavier drawRadar() still runs on DRAW_INTERVAL for performance; the
+// rAF loop only redraws the spin overlay in between heavy frames.
+let _rafActive    = true;
+let _lastHeavyTs  = 0;
+
+function _rafTick(ts) {
+    if (!_rafActive) return;
+
+    // Advance spin angle by elapsed time — speed is in rad per 60-fps frame
+    if (_spinLastTs !== null && !isGamePaused && prefs.spinEnabled) {
+        const dtMs  = Math.min(ts - _spinLastTs, 100); // cap at 100ms to avoid jumps
+        const dtFrames = dtMs / (1000 / 60);           // normalise to 60-fps frames
+        spinAngle += prefs.spinSpeed * dtFrames;
+        if (spinAngle > Math.PI * 2) spinAngle -= Math.PI * 2;
+    }
+    _spinLastTs = ts;
+
+    // Run full drawRadar on interval; in between, just overdraw the spin line
+    const now = performance.now();
+    if (now - _lastHeavyTs >= DRAW_INTERVAL && !isDragging) {
+        _lastHeavyTs = now;
+        drawRadar();   // drawRadar calls drawSpinLine() itself
+    } else if (prefs.spinEnabled && !isGamePaused) {
+        // Lightweight overdraw: just repaint the sweep on top without clearing
+        drawSpinLine();
+    }
+
+    requestAnimationFrame(_rafTick);
+}
+requestAnimationFrame(_rafTick);
 
 // ═══════════════════════════════════════════════════
 // SECTION 15 — AIRPORT / RUNWAY DRAWING
