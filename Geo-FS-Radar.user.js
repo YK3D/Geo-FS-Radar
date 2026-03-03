@@ -125,7 +125,7 @@ const UI = {
     ringLabelFont:       15,
 
     // ── Compass cardinal letters ──────────────────────────────────────────
-    compassFont:         2,
+    compassFont:         30,
     compassHdgFont:      14,
 
     // ── Own-aircraft triangle ─────────────────────────────────────────────
