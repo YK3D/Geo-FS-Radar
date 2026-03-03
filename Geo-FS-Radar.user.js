@@ -1,13 +1,4 @@
-// ==UserScript==
-// @name         GeoFS-Radar
-// @namespace    http://tampermonkey.net/
-// @version      10.00
-// @description  GeoFS Radar with ILS Approach System
-// @author       YK3D
-// @match        https://www.geo-fs.com/geofs.php?v=3.9
-// @icon         https://www.google.com/s2/favicons?sz=64&domain=geo-fs.com
-// @grant        none
-// ==/UserScript==
+
 
 // ═══════════════════════════════════════════════════
 // ILS FONT SIZE VARIABLES — edit to resize ILS HUD text
