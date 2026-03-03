@@ -1,3 +1,4 @@
+
 // ═══════════════════════════════════════════════════
 // ILS & DISPLAY PREFS — adjustable via the settings menu
 // These are kept as a plain object so sliders can mutate them live.
@@ -34,6 +35,12 @@ function saveIlsPrefs() { localStorage.setItem('radarIlsPrefs', JSON.stringify(i
         trailLengthSec:     60,      // Trail history retention (seconds)
         trailWidth:         2,       // Trail line thickness (pixels)
         tcasEnabled:        true,    // Show TCAS traffic warning overlay
+        tcasAudioEnabled:   true,    // Play audio with TCAS warning
+        tcasLookaheadS:     30,      // Seconds: how far ahead to project each path
+        tcasAltBandFt:      200,     // ±feet altitude band for threat detection
+        tcasMinAltFt:       200,     // Feet AGL: both aircraft must be above this
+        tcasMarginM:        300,     // Metres: intersection tolerance
+        tcasAudioCooldownMs:10000,   // Minimum ms between audio replays
     };
 
     let prefs;
@@ -1659,6 +1666,51 @@ function createMenu() {
         panel.appendChild(row);
     }
 
+    // ── TCAS Audio toggle ─────────────────────────
+    addToggle('TCAS Audio', 'tcasAudioEnabled');
+
+    // ── TCAS tuning sliders ───────────────────────
+    addSlider({
+        label: 'Lookahead Time',                    // How far ahead (seconds) to project each path
+        get:   () => prefs.tcasLookaheadS,
+        set:   v  => { prefs.tcasLookaheadS = v; },
+        fmt:   v  => v + ' s',
+        min: 5, max: 120, step: 5,
+        onCommit: savePrefs,
+    });
+    addSlider({
+        label: 'Altitude Band',                     // ±feet altitude difference to consider a threat
+        get:   () => prefs.tcasAltBandFt,
+        set:   v  => { prefs.tcasAltBandFt = v; },
+        fmt:   v  => '±' + v + ' ft',
+        min: 50, max: 2000, step: 50,
+        onCommit: savePrefs,
+    });
+    addSlider({
+        label: 'Min Altitude (AGL)',                // Both aircraft must be above this to warn
+        get:   () => prefs.tcasMinAltFt,
+        set:   v  => { prefs.tcasMinAltFt = v; },
+        fmt:   v  => v + ' ft',
+        min: 0, max: 2000, step: 50,
+        onCommit: savePrefs,
+    });
+    addSlider({
+        label: 'Intersection Margin',               // How close (metres) paths must cross to trigger
+        get:   () => prefs.tcasMarginM,
+        set:   v  => { prefs.tcasMarginM = v; },
+        fmt:   v  => v + ' m',
+        min: 50, max: 2000, step: 50,
+        onCommit: savePrefs,
+    });
+    addSlider({
+        label: 'Audio Cooldown',                    // Minimum seconds between audio replays
+        get:   () => prefs.tcasAudioCooldownMs / 1000,
+        set:   v  => { prefs.tcasAudioCooldownMs = v * 1000; },
+        fmt:   v  => v + ' s',
+        min: 1, max: 60, step: 1,
+        onCommit: savePrefs,
+    });
+
     document.body.appendChild(panel);
     repositionMenu();
 }
@@ -2660,12 +2712,14 @@ let _tcasActive       = false;   // True when a TCAS warning is currently firing
 let _tcasFlashTimer   = null;    // setInterval handle for the flash animation
 let _tcasAudioCooldown = 0;      // Timestamp: don't replay audio before this time
 
-// ── TCAS tuning variables — edit these to adjust sensitivity ─────────────
-const TCAS_LOOKAHEAD_S        = 30;    // Seconds: how far ahead to project each aircraft path
-const TCAS_ALT_BAND_FT        = 500;   // ±feet: max altitude difference to consider a threat
-const TCAS_MIN_ALT_FT         = 200;   // Feet AGL: both aircraft must be above this to warn
-const TCAS_INTERSECT_MARGIN_M = 300;   // Metres: closest approach between paths to trigger
-const TCAS_AUDIO_COOLDOWN_MS  = 15000; // Minimum ms between audio replays
+// ── TCAS tuning — all configurable via settings menu sliders ─────────────
+// Values are stored in prefs and accessed as prefs.tcasLookaheadS etc.
+// Defaults live in _PREF_DEFAULTS above.
+function _tcasLookahead()  { return prefs.tcasLookaheadS     || 30;    }
+function _tcasAltBand()    { return prefs.tcasAltBandFt       || 200;   }
+function _tcasMinAlt()     { return prefs.tcasMinAltFt        || 200;   }
+function _tcasMargin()     { return prefs.tcasMarginM         || 300;   }
+function _tcasCooldown()   { return prefs.tcasAudioCooldownMs || 10000; }
 
 // ── TCAS overlay div ─────────────────────────────
 const tcasOverlay = document.createElement('div');
@@ -2698,13 +2752,14 @@ function _getTCASAudio() {
 }
 
 function _playTCASAudio() {
+    if (!prefs.tcasAudioEnabled) return;          // Audio disabled in settings
     const now = Date.now();
-    if (now < _tcasAudioCooldown) return; // Respect cooldown
-    _tcasAudioCooldown = now + TCAS_AUDIO_COOLDOWN_MS;
+    if (now < _tcasAudioCooldown) return;         // Still within cooldown window
+    _tcasAudioCooldown = now + _tcasCooldown();
     try {
         const audio = _getTCASAudio();
         audio.currentTime = 0;
-        audio.play().catch(() => {}); // Ignore autoplay blocks
+        audio.play().catch(() => {});
     } catch(e) {}
 }
 
@@ -2764,7 +2819,7 @@ let _tcasMyEndX = 0, _tcasMyEndY = 0, _tcasHasPath = false;
 // EXACT logic:
 //   My vector   = line from MY position, extending (mySpeed × 30s) metres on my heading.
 //   Their vector = line from THEIR position, extending (theirSpeed × 30s) metres on their heading.
-//   ALARM fires ONLY when those two line segments intersect (or pass within TCAS_INTERSECT_MARGIN_M).
+//   ALARM fires ONLY when those two line segments intersect (or pass within _tcasMargin() metres).
 //   No other criteria (closing speed, future separation, etc.) — pure vector geometry.
 function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic) {
     if (!prefs.tcasEnabled) { _stopTCAS(); _tcasHasPath = false; return; }
@@ -2775,7 +2830,7 @@ function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic) {
         const av = window.geofs?.animation?.values;
         if (av?.groundElevationFeet !== undefined) myAGL = av.altitude - av.groundElevationFeet;
     } catch(e) {}
-    if (myAGL < TCAS_MIN_ALT_FT) { _stopTCAS(); _tcasHasPath = false; return; }
+    if (myAGL < _tcasMinAlt()) { _stopTCAS(); _tcasHasPath = false; return; }
 
     // Must be moving to have a meaningful vector
     const mySpeedMs = (mySpeedKts || 0) * 0.514444;
@@ -2783,7 +2838,7 @@ function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic) {
 
     // My 30-second vector in flat-earth metres (east=X, north=Y)
     const myHdgRad   = myHdg * Math.PI / 180;
-    const myPathDist = mySpeedMs * TCAS_LOOKAHEAD_S;
+    const myPathDist = mySpeedMs * _tcasLookahead();
     _tcasMyEndX  = myPathDist * Math.sin(myHdgRad);
     _tcasMyEndY  = myPathDist * Math.cos(myHdgRad);
     _tcasHasPath = true;
@@ -2796,10 +2851,10 @@ function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic) {
         // Both must be airborne
         const acAltFt = isFinite(parseFloat(ac.al)) ? parseFloat(ac.al)
             : (ac.co.length >= 3 && isFinite(ac.co[2]) ? parseFloat(ac.co[2]) * 3.28084 : null);
-        if (acAltFt === null || acAltFt < TCAS_MIN_ALT_FT) continue;
+        if (acAltFt === null || acAltFt < _tcasMinAlt()) continue;
 
         // Altitude band — both within ±TCAS_ALT_BAND_FT
-        if (Math.abs(myAltFt - acAltFt) > TCAS_ALT_BAND_FT) continue;
+        if (Math.abs(myAltFt - acAltFt) > _tcasAltBand()) continue;
 
         // Traffic must have a known heading and be moving
         const acH = isFinite(parseFloat(ac.h)) ? parseFloat(ac.h) : null;
@@ -2814,19 +2869,19 @@ function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic) {
 
         // Their 30-second vector endpoint
         const acHdgRad  = acH * Math.PI / 180;
-        const acPathDist = acSpeedMs * TCAS_LOOKAHEAD_S;
+        const acPathDist = acSpeedMs * _tcasLookahead();
         const acEndX    = acOffX + acPathDist * Math.sin(acHdgRad);
         const acEndY    = acOffY + acPathDist * Math.cos(acHdgRad);
 
         // ── Strict intersection: do the two vector SEGMENTS intersect? ──
         // Use _segmentMinDist — the two segments intersect when their min distance ≈ 0.
-        // We use TCAS_INTERSECT_MARGIN_M as the intersection tolerance (in metres).
+        // Intersection tolerance from prefs (metres)
         const cpa = _segmentMinDist(
             0, 0, _tcasMyEndX, _tcasMyEndY,   // My segment
             acOffX, acOffY, acEndX, acEndY     // Their segment
         );
 
-        if (cpa <= TCAS_INTERSECT_MARGIN_M) {
+        if (cpa <= _tcasMargin()) {
             threat = true;
             break;
         }
@@ -3344,7 +3399,7 @@ function drawRadar() {
     drawPlayerTriangle(cx, cy, playerHeading, isGamePaused);
 
     // ── TCAS projected path line — starts at nose of player triangle ─────
-    // The line represents: where will I be in TCAS_LOOKAHEAD_S seconds at current speed/heading?
+    // The line represents: where will I be in _tcasLookahead() seconds at current speed/heading?
     // Origin = tip of player triangle (UI.playerTriTip px ahead of centre in heading direction).
     if (_tcasHasPath && prefs.tcasEnabled && hasPos && !isGamePaused) {
         const scale  = (radarSize / 2) / radarRange; // px per metre on canvas
