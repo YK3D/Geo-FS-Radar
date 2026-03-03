@@ -1,8 +1,17 @@
+// ==UserScript==
+// @name         GeoFS-Radar
+// @namespace    http://tampermonkey.net/
+// @version      9.00
+// @description  GeoFS Radar with ILS Approach System
+// @author       YK3D
+// @match        https://www.geo-fs.com/geofs.php?v=3.9
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=geo-fs.com
+// @grant        none
+// ==/UserScript==
+
+
 // ═══════════════════════════════════════════════════
 // SECTION 1 — RADAR PREFERENCES
-// These values are editable via the in-game Radar Preferences menu and are
-// persisted to localStorage automatically. Hard limits are enforced in the
-// menu; editing these defaults only affects the first-ever load.
 // ═══════════════════════════════════════════════════
 
     const _PREF_DEFAULTS = {
@@ -12,9 +21,6 @@
         maxRangeKm:    50,
         scrollIncKm:   0.5,
         fetchDelay:    250,
-        spinSpeed:     0.03,   // Speed of rotation (rad/frame)
-        spinEnabled:   true,
-        spinShadow:    true,   // Shadow toggle
     };
 
     let prefs;
@@ -28,7 +34,6 @@
         localStorage.setItem('radarPrefs', JSON.stringify(prefs));
     }
 
-// ── Helper: compute canvas px from current prefs ─────────────────────────
 function _pxFromPrefs() {
     if (prefs.radarSizeUnit === '%') {
         return Math.max(150, Math.min(900,
@@ -38,15 +43,12 @@ function _pxFromPrefs() {
     return prefs.radarSizePx;
 }
 
-// ── Runtime aliases — the rest of the code reads these ───────────────────
-let radarSize    = _pxFromPrefs();
-let MIN_RANGE    = prefs.minRangeKm  * 1000;  // converted to metres
-let MAX_RANGE    = prefs.maxRangeKm  * 1000;
-let SCROLL_INC   = prefs.scrollIncKm * 1000;
+let radarSize        = _pxFromPrefs();
+let MIN_RANGE        = prefs.minRangeKm  * 1000;
+let MAX_RANGE        = prefs.maxRangeKm  * 1000;
+let SCROLL_INC       = prefs.scrollIncKm * 1000;
 let FETCH_DELAY_BASE = prefs.fetchDelay;
-let SPIN_SPEED   = prefs.spinSpeed;
 
-// ── applyPrefs — call after any prefs mutation ────────────────────────────
 function applyPrefs() {
     savePrefs();
     radarSize        = _pxFromPrefs();
@@ -54,7 +56,6 @@ function applyPrefs() {
     MAX_RANGE        = prefs.maxRangeKm  * 1000;
     SCROLL_INC       = prefs.scrollIncKm * 1000;
     FETCH_DELAY_BASE = prefs.fetchDelay;
-    SPIN_SPEED       = prefs.spinSpeed;
 
     radarCanvas.width  = radarSize;
     radarCanvas.height = radarSize;
@@ -67,82 +68,61 @@ function applyPrefs() {
     applyTheme();
 }
 
-// ── Helper: format radar size for display ────────────────────────────────
 function _fmtRadarSize() {
     if (prefs.radarSizeUnit === '%') return prefs.radarSizePct + '%';
     return prefs.radarSizePx + ' px';
 }
 
 // ═══════════════════════════════════════════════════
-// SECTION 1b — TIMING & INTERVALS (fixed, not user-editable)
+// SECTION 1b — TIMING & INTERVALS
 // ═══════════════════════════════════════════════════
 
-const FETCH_DELAY_MAX     =  800;
-const FETCH_DELAY_INITIAL =   500;
-const FETCH_SPEED_DT_MIN  =   0.5;
-const FETCH_SPEED_DT_MAX  =  30;
+const FETCH_DELAY_MAX        =  800;
+const FETCH_DELAY_INITIAL    =  500;
+const FETCH_SPEED_DT_MIN     =  0.5;
+const FETCH_SPEED_DT_MAX     =  30;
 const AIRPORT_FETCH_INITIAL  =  2000;
-const AIRPORT_REFETCH        = 300000;
-const DRAW_INTERVAL          =   120;
-const PAUSE_POLL_INTERVAL    =   500;
+const AIRPORT_REFETCH        =  300000;
+const DRAW_INTERVAL          =  120;
+const PAUSE_POLL_INTERVAL    =  500;
 const REPOSITION_INTERVAL    =  1000;
-const MENU_INFO_UPDATE_INTERVAL =  1000;
-const HUD_UPDATE_INTERVAL       =   500;
-const INIT_DELAY             =   300;
-const DRAG_REPOSITION_DELAY  =   120;
+const MENU_INFO_UPDATE_INTERVAL = 1000;
+const HUD_UPDATE_INTERVAL    =  500;
+const INIT_DELAY             =  300;
+const DRAG_REPOSITION_DELAY  =  120;
 
 // ═══════════════════════════════════════════════════
 // SECTION 1c — FONT FAMILIES
-// Change these strings to globally swap typefaces.
 // ═══════════════════════════════════════════════════
 
-const FONT_SANS   = 'Arial, sans-serif';   // UI panels, menu, labels
-const FONT_MONO   = '"Courier New", Courier, monospace'; // HUD, popup data
-const FONT_CANVAS = 'Arial';               // Canvas 2D ctx.font strings
+const FONT_SANS   = 'Arial, sans-serif';
+const FONT_MONO   = '"Courier New", Courier, monospace';
+const FONT_CANVAS = 'Arial';
 
 // ═══════════════════════════════════════════════════
 // SECTION 1d — UI CONFIGURATION
-// All sizes are logical CSS / canvas pixels.
 // ═══════════════════════════════════════════════════
 
 const UI = {
-
-    // ── Other-aircraft blip — dot mode ───────────────────────────────────
     blipDotR:            5,
     blipDotRActive:      8,
-
-    // ── Other-aircraft blip — triangle mode ──────────────────────────────
     blipTriTip:          11,
     blipTriBase:         6,
-
-    // ── Blip label tags ───────────────────────────────────────────────────
     blipLabelFont:       11,
     blipLabelRowH:       18,
     blipLabelPadX:       4,
-
-    // ── Range rings ───────────────────────────────────────────────────────
     ringLineW:           6,
     ringLabelFont:       15,
-
-    // ── Compass cardinal letters ──────────────────────────────────────────
-    compassFont:         50,
+    compassFont:         30,
     compassHdgFont:      14,
-
-    // ── Own-aircraft triangle ─────────────────────────────────────────────
     playerTriTip:        15,
     playerTriBase:       8,
     playerTriBaseOff:    8,
-
-    // ── Own-aircraft labels ───────────────────────────────────────────────
     playerCsFont:        15,
     playerDistFont:      14,
-
-    // ── Range display box ─────────────────────────────────────────────────
     rangeBoxW:           130,
     rangeBoxH:           54,
     rangeBoxFont:        20,
-
-    // ── Settings menu panel ───────────────────────────────────────────────
     menuW:               280,
     menuTitleFont:       15,
     menuSectionFont:     13,
@@ -153,28 +133,18 @@ const UI = {
     menuKnobSize:        14,
     menuRadioFont:       12,
     menuInfoFont:        14,
-
-    // ── Click-to-inspect popup ────────────────────────────────────────────
     popupTitleFont:      18,
     popupBodyFont:       17,
-    popupAltDeltaFont:   15,  // altitude delta span inside popup (was popupBodyFont-2)
-
-    // ── TCAS velocity vectors ─────────────────────────────────────────────
+    popupAltDeltaFont:   15,
     vectorLineW:         1.5,
-
-    // ── Nearest Traffic / Tracking HUD ───────────────────────────────────
-    hudHeaderLabelFont:  13,  // "NEARBY TRAFFIC" / "TRACKING" header text
-    hudSectionLabelFont: 17,  // section row labels (Callsign, Aircraft, Distance…)
-    hudCallsignFont:     18,  // callsign value
-    hudDataFont:         15,  // grid data values (bearing, altitude, speed, heading)
-    hudAltDeltaFont:     12,  // altitude delta indicator (▲/▼)
-    hudIsolateLabelFont: 14,  // "Isolate aircraft" toggle label
-    hudStopBtnFont:      15,  // "STOP TRACKING" button
-
-    // ── Airport label drawn on canvas ─────────────────────────────────────
-    airportLabelFont:    10,  // airport / ICAO name text
-
-    // ── Miscellaneous ─────────────────────────────────────────────────────
+    hudHeaderLabelFont:  13,
+    hudSectionLabelFont: 17,
+    hudCallsignFont:     18,
+    hudDataFont:         15,
+    hudAltDeltaFont:     12,
+    hudIsolateLabelFont: 14,
+    hudStopBtnFont:      15,
+    airportLabelFont:    10,
     pausedFont:          22,
     gridLineW:           2,
 };
@@ -187,7 +157,6 @@ let _lastValidLat   = null;
 let _lastValidLon   = null;
 let _lastValidAltFt = 0;
 
-// ── Settings ─────────────────────────────────────────
 const settings = {
     showRings:          true,
     showRingLabels:     true,
@@ -232,7 +201,6 @@ const THEMES = {
         ringLabel:     'rgba(0, 255, 0, 0.7)',
         grid:          'rgba(0, 255, 0, 0.15)',
         compass:       'rgba(0, 255, 0, 0.75)',
-        scanLine:      ['rgba(0,255,0,0.8)', 'rgba(0,255,0,0.3)'],
         trailColor:    (a) => `rgba(0,255,0,${a})`,
         playerFill:    'rgba(0, 255, 0, 0.9)',
         playerLabel:   'rgba(0, 255, 0, 0.9)',
@@ -297,7 +265,6 @@ const THEMES = {
         ringLabel:     'rgba(255, 80, 80, 0.85)',
         grid:          'rgba(220, 30, 30, 0.25)',
         compass:       'rgba(255, 70, 70, 0.9)',
-        scanLine:      ['rgba(255,50,50,0.9)', 'rgba(200,30,30,0.3)'],
         trailColor:    (a) => `rgba(220,40,40,${a})`,
         playerFill:    'rgba(255, 90, 90, 0.95)',
         playerLabel:   'rgba(255, 90, 90, 0.95)',
@@ -591,8 +558,14 @@ function _hudDistBrg(myData, ac) {
 }
 
 function updateNearestHUD(nearest, myData) {
-    const t = T();
+    // ILS takes priority — hide nearest HUD while ILS is active
+    if (_ilsActive) {
+        nearestHUD.style.display = 'none';
+        _hudNearestData = null;
+        return;
+    }
 
+    const t = T();
     const displayAc  = _trackedAc || nearest;
     const isTracking = !!_trackedAc;
 
@@ -607,7 +580,6 @@ function updateNearestHUD(nearest, myData) {
     nearestHUD.style.pointerEvents = isTracking ? 'auto' : 'none';
 
     const cs  = displayAc.cs && displayAc.cs !== 'Foo' ? displayAc.cs : `Foo #${displayAc.id || '???'}`;
-
     const { distStr, brgStr } = _hudDistBrg(myData, displayAc);
 
     const nearAl = (() => {
@@ -647,61 +619,40 @@ function updateNearestHUD(nearest, myData) {
     const isolateKnobLeft = isolateChecked ? (UI.menuSwitchW - UI.menuKnobSize - 3) : 3;
 
     const isolateRow = isTracking ? `
-  <div style="
-    padding:5px 14px 6px;
-    border-top:1px solid ${t.hudSep};
-    display:flex; align-items:center; justify-content:space-between;
-    cursor:pointer;
-  " id="radarIsolateRow">
+  <div style="padding:5px 14px 6px;border-top:1px solid ${t.hudSep};
+    display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
+    id="radarIsolateRow">
     <span style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont}px;letter-spacing:0.5px;">Isolate aircraft</span>
-    <div id="radarIsolateSw" style="
-      width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
-      border-radius:${UI.menuSwitchH/2}px; position:relative;
-      background:${isolateSwBg}; border:1px solid ${t.switchBorder};
-      transition:background .2s; flex-shrink:0;
-    ">
-      <div id="radarIsolateKnob" style="
-        position:absolute; top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
-        left:${isolateKnobLeft}px;
-        width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px;
-        border-radius:50%; background:${isolateKnobBg};
-        transition:left .2s, background .2s;
-      "></div>
+    <div id="radarIsolateSw" style="width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
+      border-radius:${UI.menuSwitchH/2}px;position:relative;background:${isolateSwBg};
+      border:1px solid ${t.switchBorder};transition:background .2s;flex-shrink:0;">
+      <div id="radarIsolateKnob" style="position:absolute;top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+        left:${isolateKnobLeft}px;width:${UI.menuKnobSize}px;height:${UI.menuKnobSize}px;
+        border-radius:50%;background:${isolateKnobBg};transition:left .2s,background .2s;"></div>
     </div>
   </div>` : '';
 
     const stopBtn = isTracking ? `
   <div style="padding:4px 14px 8px;">
-    <button id="radarStopTrackBtn" style="
-      width:100%; padding:6px 0;
-      background:${t.hudBg}; border:1px solid ${t.hudBorder};
-      border-radius:6px; color:${t.hudLabel};
-      font:bold ${UI.hudStopBtnFont}px ${FONT_SANS}; letter-spacing:1px;
-      cursor:pointer; transition:background .15s;
-    ">✕  STOP TRACKING</button>
+    <button id="radarStopTrackBtn" style="width:100%;padding:6px 0;
+      background:${t.hudBg};border:1px solid ${t.hudBorder};border-radius:6px;
+      color:${t.hudLabel};font:bold ${UI.hudStopBtnFont}px ${FONT_SANS};
+      letter-spacing:1px;cursor:pointer;transition:background .15s;">✕  STOP TRACKING</button>
   </div>` : '';
 
     nearestHUD.innerHTML = `
-<div style="
-    background:${t.hudBg};
-    border:1.5px solid ${trackBorder};
-    border-radius:10px; overflow:hidden;
-    box-shadow:0 4px 20px rgba(0,0,0,0.75)${trackGlow};
-    font-family:${FONT_MONO};
-">
-  <div style="padding:9px 14px 7px; border-bottom:1px solid ${t.hudSep};
-    display:flex; align-items:center; gap:8px;">
+<div style="background:${t.hudBg};border:1.5px solid ${trackBorder};border-radius:10px;overflow:hidden;
+  box-shadow:0 4px 20px rgba(0,0,0,0.75)${trackGlow};font-family:${FONT_MONO};">
+  <div style="padding:9px 14px 7px;border-bottom:1px solid ${t.hudSep};display:flex;align-items:center;gap:8px;">
     <span style="display:inline-block;width:10px;height:10px;border-radius:50%;
       background:${headerDot};box-shadow:0 0 6px ${headerDot};flex-shrink:0;"></span>
     <span style="color:${headerColor};font-size:${UI.hudHeaderLabelFont}px;letter-spacing:1.5px;
       text-transform:uppercase;font-weight:bold;">${headerLabel}</span>
   </div>
-
   <div style="padding:8px 14px 6px;border-bottom:1px solid ${t.hudSep};">
     <div style="color:${t.hudLabel};font-size:${UI.hudSectionLabelFont}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Callsign</div>
     <div style="color:${t.hudValue};font-size:${UI.hudCallsignFont}px;font-weight:bold;letter-spacing:1px">${cs}</div>
   </div>
-
   <div style="padding:8px 14px 8px;display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;">
     <div>
       <div style="color:${t.hudLabel};font-size:${UI.hudSectionLabelFont}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Distance</div>
@@ -737,7 +688,6 @@ function updateNearestHUD(nearest, myData) {
             updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
         };
     }
-
     const stopEl = document.getElementById('radarStopTrackBtn');
     if (stopEl) {
         stopEl.onmouseover = () => stopEl.style.background = T().hudBorder;
@@ -751,7 +701,7 @@ function repositionNearestHUD() {
     const rt = parseInt(radarCanvas.style.top)  || 0;
     nearestHUD.style.left = (rl + radarSize + 12) + 'px';
     nearestHUD.style.top  = rt + 'px';
-
+    repositionILSHUD();
     repositionMenu();
 }
 
@@ -867,26 +817,19 @@ function createMenu() {
     `;
     btn.onmouseover = () => btn.style.background = T().menuBtnBgHov;
     btn.onmouseout  = () => btn.style.background = T().menuBtnBg;
-    btn.onclick = (e) => {
-        e.stopPropagation();
-        toggleMenu();
-    };
+    btn.onclick = (e) => { e.stopPropagation(); toggleMenu(); };
     document.body.appendChild(btn);
 
     const panel = document.createElement('div');
     panel.id = 'radarMenuPanel';
     panel.style.cssText = `
         position:fixed; width:${UI.menuW}px;
-        background:rgba(0,12,0,0.97);
-        border:1.5px solid rgba(0,255,0,0.35);
+        background:rgba(0,12,0,0.97); border:1.5px solid rgba(0,255,0,0.35);
         border-radius:12px; padding:12px 0 10px;
         z-index:2147483646; display:none;
         box-shadow:0 4px 28px rgba(0,0,0,0.75);
-        font-family:${FONT_SANS};
-        user-select:none;
-        height:600px;
-        overflow-y:auto;
-        overflow-x:hidden;
+        font-family:${FONT_SANS}; user-select:none;
+        height:600px; overflow-y:auto; overflow-x:hidden;
         scrollbar-width:thin;
         scrollbar-color:rgba(0,200,0,0.4) rgba(0,30,0,0.5);
     `;
@@ -905,10 +848,8 @@ function createMenu() {
     function addSection(label) {
         const s = document.createElement('div');
         s.dataset.menuSection = '1';
-        s.style.cssText = `
-            color:rgba(0,255,0,0.5); font:bold ${UI.menuSectionFont}px ${FONT_SANS};
-            padding:8px 16px 3px; letter-spacing:1.5px; text-transform:uppercase;
-        `;
+        s.style.cssText = `color:rgba(0,255,0,0.5);font:bold ${UI.menuSectionFont}px ${FONT_SANS};
+            padding:8px 16px 3px;letter-spacing:1.5px;text-transform:uppercase;`;
         s.textContent = label;
         panel.appendChild(s);
     }
@@ -916,39 +857,29 @@ function createMenu() {
     function addToggle(label, key, onChange) {
         const row = document.createElement('div');
         row.dataset.menuRow = key;
-        row.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;
-        `;
+        row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
+            padding:${UI.menuRowPadY}px 16px;cursor:pointer;transition:background .15s;`;
         row.onmouseover = () => row.style.background = T().menuRowHover;
         row.onmouseout  = () => row.style.background = '';
-
         const lbl = document.createElement('span');
         lbl.dataset.menuRowlbl = '1';
-        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
+        lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
         lbl.textContent = label;
-
         const sw = document.createElement('div');
         sw.dataset.menuSw = key;
-        sw.style.cssText = `
-            width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
-            border-radius:${UI.menuSwitchH/2}px; position:relative;
+        sw.style.cssText = `width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
+            border-radius:${UI.menuSwitchH/2}px;position:relative;
             background:${settings[key] ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
-            border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;
-        `;
+            border:1px solid rgba(0,255,0,0.3);transition:background .2s;flex-shrink:0;`;
         const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
         const knob = document.createElement('div');
         knob.dataset.menuKnob = key;
-        knob.style.cssText = `
-            position:absolute; top:${(UI.menuSwitchH - UI.menuKnobSize)/2}px;
+        knob.style.cssText = `position:absolute;top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
             left:${settings[key] ? knobOn : knobOff}px;
-            width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%;
-            background:${settings[key] ? '#0f0' : '#888'};
-            transition:left .2s, background .2s;
-        `;
+            width:${UI.menuKnobSize}px;height:${UI.menuKnobSize}px;border-radius:50%;
+            background:${settings[key] ? '#0f0' : '#888'};transition:left .2s,background .2s;`;
         sw.appendChild(knob);
         row.appendChild(lbl); row.appendChild(sw);
-
         row.onclick = () => {
             settings[key] = !settings[key];
             const t = T();
@@ -965,31 +896,25 @@ function createMenu() {
 
     function addRadio(label, key, opt1, opt2, label1, label2) {
         const row = document.createElement('div');
-        row.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding:${UI.menuRowPadY}px 16px;
-        `;
+        row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
+            padding:${UI.menuRowPadY}px 16px;`;
         const lbl = document.createElement('span');
         lbl.dataset.menuRowlbl = '1';
-        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
+        lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};flex:1;`;
         lbl.textContent = label;
-
         const wrap = document.createElement('div');
-        wrap.style.cssText = 'display:flex; gap:5px;';
-
+        wrap.style.cssText = 'display:flex;gap:5px;';
         [opt1, opt2].forEach((opt, i) => {
             const b = document.createElement('button');
             b.id = `radarRadio_${key}_${opt}`;
             b.dataset.radioKey = key;
             b.dataset.radioOpt = opt;
             b.textContent = [label1, label2][i];
-            b.style.cssText = `
-                padding:4px 10px; font:bold ${UI.menuRadioFont}px ${FONT_SANS};
-                border-radius:5px; cursor:pointer;
-                border:1px solid rgba(0,255,0,0.3); transition:all .15s;
+            b.style.cssText = `padding:4px 10px;font:bold ${UI.menuRadioFont}px ${FONT_SANS};
+                border-radius:5px;cursor:pointer;border:1px solid rgba(0,255,0,0.3);
+                transition:all .15s;
                 background:${settings[key]===opt ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)'};
-                color:${settings[key]===opt ? '#0f0' : 'rgba(150,200,150,0.7)'};
-            `;
+                color:${settings[key]===opt ? '#0f0' : 'rgba(150,200,150,0.7)'};`;
             b.onclick = () => {
                 settings[key] = opt;
                 const t = T();
@@ -1004,7 +929,6 @@ function createMenu() {
             };
             wrap.appendChild(b);
         });
-
         row.appendChild(lbl); row.appendChild(wrap);
         panel.appendChild(row);
     }
@@ -1012,21 +936,21 @@ function createMenu() {
     function addSep() {
         const s = document.createElement('div');
         s.dataset.menuSep = '1';
-        s.style.cssText = 'border-top:1px solid rgba(0,255,0,0.1); margin:4px 0;';
+        s.style.cssText = 'border-top:1px solid rgba(0,255,0,0.1);margin:4px 0;';
         panel.appendChild(s);
     }
 
     function addInfoRow(label, idSuffix) {
         const row = document.createElement('div');
-        row.style.cssText = `display:flex; align-items:center; justify-content:space-between; padding:5px 16px;`;
+        row.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:5px 16px;`;
         const lbl = document.createElement('span');
         lbl.dataset.menuInfolbl = '1';
-        lbl.style.cssText = `color:rgba(150,200,150,0.7); font:${UI.menuInfoFont}px ${FONT_SANS};`;
+        lbl.style.cssText = `color:rgba(150,200,150,0.7);font:${UI.menuInfoFont}px ${FONT_SANS};`;
         lbl.textContent = label;
         const val = document.createElement('span');
         val.id = `radarInfo_${idSuffix}`;
         val.dataset.menuInfoval = '1';
-        val.style.cssText = `color:rgba(0,255,0,0.9); font:bold ${UI.menuInfoFont}px ${FONT_MONO}; text-align:right; max-width:155px; word-break:break-all;`;
+        val.style.cssText = `color:rgba(0,255,0,0.9);font:bold ${UI.menuInfoFont}px ${FONT_MONO};text-align:right;max-width:155px;word-break:break-all;`;
         val.textContent = '—';
         row.appendChild(lbl); row.appendChild(val);
         panel.appendChild(row);
@@ -1038,597 +962,185 @@ function createMenu() {
         const val = document.createElement('span');
         val.id = 'radarInfo_apistatus';
         val.dataset.statusOk = 'true';
-        val.style.cssText = `color:rgba(0,200,0,0.8); font:${UI.menuInfoFont - 1}px ${FONT_MONO}; word-break:break-all;`;
+        val.style.cssText = `color:rgba(0,200,0,0.8);font:${UI.menuInfoFont-1}px ${FONT_MONO};word-break:break-all;`;
         val.textContent = 'Waiting for data…';
         row.appendChild(val);
         panel.appendChild(row);
     }
 
-    // ── Display ──────────────────────────────────────────────────────────
-    addSection('Display');
-    addToggle('Night Mode',             'nightMode',        () => applyTheme());
-    addRadio ('Orientation',            'orientMode',       'north', 'track', 'N↑', 'TRK↑');
-    addToggle('Player Triangle',        'showPlayerTriangle');
-    addToggle('Range Rings',            'showRings');
-    addToggle('Ring Labels',            'showRingLabels');
-
-    addSep();
-
-    // ── Traffic ───────────────────────────────────────────────────────────
-    addSection('Traffic');
-    addToggle('Show Traffic',           'showTraffic');
-    addToggle('Traffic Triangles',      'showBlipTriangle');
-    addToggle('Callsign',               'showCallsign');
-    addToggle('Altitude',               'showAltitude');
-    addToggle('Speed',                  'showSpeed');
-    addToggle('Distance',               'showBlipDist');
-    addToggle('Heading Vectors',        'showVectors');
-    addToggle('Tracking / Nearby Traffic', 'showNearestHUD', (v) => {
-        if (!v) nearestHUD.style.display = 'none';
-    });
-
-    addSep();
-
-    // ── Map ───────────────────────────────────────────────────────────────
-    addSection('Map');
-    addToggle('Airports & Runways',     'showAirports');
-
-    addSep();
-
-    // ── My Aircraft ───────────────────────────────────────────────────────
-    addSection('My Aircraft');
-    addInfoRow('Callsign', 'callsign');
-    addInfoRow('Position', 'position');
-    addToggle('Show My Callsign',       'showMyCallsign');
-
-    addSep();
-
-    // ── Preference stepper row ────────────────────────────────────────────
-    // Renders a label + value display with −/+ buttons.
-    // opts: { label, get, set, fmt, min, max, step, onCommit }
-    // Manual keyboard input is activated by clicking the value display.
     function addPrefRow(opts) {
-        const { label, get, set, fmt, min, max, step, onCommit, placeholder } = opts;
-        const t = T();
-
+        const { label, get, set, fmt, min, max, step, onCommit } = opts;
         const row = document.createElement('div');
-        row.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding:${UI.menuRowPadY - 1}px 16px; gap:6px;
-        `;
-
+        row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
+            padding:${UI.menuRowPadY-1}px 16px;gap:6px;`;
         const lbl = document.createElement('span');
         lbl.dataset.menuRowlbl = '1';
-        lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1; min-width:0;`;
+        lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};flex:1;min-width:0;`;
         lbl.textContent = label;
-
-        // Value display / inline input wrapper
         const valWrap = document.createElement('div');
-        valWrap.style.cssText = `position:relative; flex-shrink:0;`;
-
+        valWrap.style.cssText = `position:relative;flex-shrink:0;`;
         const valSpan = document.createElement('span');
-        valSpan.style.cssText = `
-            display:inline-block; min-width:64px; text-align:center;
-            color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
-            background:rgba(0,40,0,0.6); border:1px solid rgba(0,255,0,0.3);
-            border-radius:5px; padding:2px 6px; cursor:text;
-            transition:border-color .15s;
-        `;
+        valSpan.style.cssText = `display:inline-block;min-width:64px;text-align:center;
+            color:rgba(0,255,0,0.95);font:bold ${UI.menuRowFont}px ${FONT_MONO};
+            background:rgba(0,40,0,0.6);border:1px solid rgba(0,255,0,0.3);
+            border-radius:5px;padding:2px 6px;cursor:text;transition:border-color .15s;`;
         valSpan.textContent = fmt(get());
         valSpan.title = 'Click to type a value';
-
-        // Inline input (hidden by default)
         const valInput = document.createElement('input');
         valInput.type = 'number';
-        valInput.style.cssText = `
-            display:none; width:64px; text-align:center;
-            color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
-            background:rgba(0,40,0,0.85); border:1px solid rgba(0,255,0,0.7);
-            border-radius:5px; padding:2px 4px; outline:none;
-            -moz-appearance:textfield;
-        `;
-        valInput.min  = min;
-        valInput.max  = max;
-        valInput.step = step;
-
+        valInput.style.cssText = `display:none;width:64px;text-align:center;
+            color:rgba(0,255,0,0.95);font:bold ${UI.menuRowFont}px ${FONT_MONO};
+            background:rgba(0,40,0,0.85);border:1px solid rgba(0,255,0,0.7);
+            border-radius:5px;padding:2px 4px;outline:none;-moz-appearance:textfield;`;
+        valInput.min = min; valInput.max = max; valInput.step = step;
         function commitInput() {
             let v = parseFloat(valInput.value);
             if (!isFinite(v)) v = get();
-            v = Math.max(min, Math.min(max, v));
-            // Round to nearest step
-            v = Math.round(v / step) * step;
+            v = Math.max(min, Math.min(max, Math.round(v / step) * step));
             set(v);
             valSpan.textContent = fmt(get());
             valInput.style.display = 'none';
-            valSpan.style.display  = 'inline-block';
+            valSpan.style.display = 'inline-block';
             if (onCommit) onCommit();
         }
-
         valSpan.addEventListener('click', () => {
             valInput.value = get();
-            valSpan.style.display  = 'none';
+            valSpan.style.display = 'none';
             valInput.style.display = 'inline-block';
-            valInput.focus();
-            valInput.select();
+            valInput.focus(); valInput.select();
         });
-        valInput.addEventListener('blur',    commitInput);
+        valInput.addEventListener('blur', commitInput);
         valInput.addEventListener('keydown', e => {
             if (e.key === 'Enter') { e.preventDefault(); commitInput(); }
-            if (e.key === 'Escape') {
-                valInput.style.display = 'none';
-                valSpan.style.display  = 'inline-block';
-            }
+            if (e.key === 'Escape') { valInput.style.display = 'none'; valSpan.style.display = 'inline-block'; }
         });
-
-        valWrap.appendChild(valSpan);
-        valWrap.appendChild(valInput);
-
-        // Button helper
-        function makeBtn(label) {
+        valWrap.appendChild(valSpan); valWrap.appendChild(valInput);
+        function makeBtn(lbl) {
             const b = document.createElement('button');
-            b.textContent = label;
-            b.style.cssText = `
-                width:26px; height:26px; border-radius:5px; flex-shrink:0;
-                background:rgba(0,60,0,0.7); color:rgba(0,255,0,0.9);
-                border:1px solid rgba(0,255,0,0.3); font:bold 15px ${FONT_SANS};
-                cursor:pointer; display:flex; align-items:center; justify-content:center;
-                transition:background .12s; line-height:1;
-            `;
+            b.textContent = lbl;
+            b.style.cssText = `width:26px;height:26px;border-radius:5px;flex-shrink:0;
+                background:rgba(0,60,0,0.7);color:rgba(0,255,0,0.9);
+                border:1px solid rgba(0,255,0,0.3);font:bold 15px ${FONT_SANS};
+                cursor:pointer;display:flex;align-items:center;justify-content:center;
+                transition:background .12s;line-height:1;`;
             b.onmouseover = () => b.style.background = 'rgba(0,100,0,0.8)';
             b.onmouseout  = () => b.style.background = 'rgba(0,60,0,0.7)';
             return b;
         }
-
         const btnMinus = makeBtn('−');
         const btnPlus  = makeBtn('+');
-
-        btnMinus.onclick = () => {
-            const v = Math.max(min, get() - step);
-            set(v);
-            valSpan.textContent = fmt(get());
-            if (onCommit) onCommit();
-        };
-        btnPlus.onclick = () => {
-            const v = Math.min(max, get() + step);
-            set(v);
-            valSpan.textContent = fmt(get());
-            if (onCommit) onCommit();
-        };
-
-        row.appendChild(lbl);
-        row.appendChild(btnMinus);
-        row.appendChild(valWrap);
-        row.appendChild(btnPlus);
-        if (placeholder) {
-            placeholder.replaceWith(row);
-        } else {
-            panel.appendChild(row);
-        }
+        btnMinus.onclick = () => { const v = Math.max(min, get()-step); set(v); valSpan.textContent = fmt(get()); if (onCommit) onCommit(); };
+        btnPlus.onclick  = () => { const v = Math.min(max, get()+step); set(v); valSpan.textContent = fmt(get()); if (onCommit) onCommit(); };
+        row.appendChild(lbl); row.appendChild(btnMinus); row.appendChild(valWrap); row.appendChild(btnPlus);
+        panel.appendChild(row);
         return { row, valSpan, valInput };
     }
 
-    // ── Radar Preferences ────────────────────────────────────────────────
+    // ── Display ──────────────────────────────────────
+    addSection('Display');
+    addToggle('Night Mode',               'nightMode',        () => applyTheme());
+    addRadio ('Orientation',              'orientMode',       'north', 'track', 'N↑', 'TRK↑');
+    addToggle('Player Triangle',          'showPlayerTriangle');
+    addToggle('Range Rings',              'showRings');
+    addToggle('Ring Labels',              'showRingLabels');
     addSep();
+
+    // ── Traffic ───────────────────────────────────────
+    addSection('Traffic');
+    addToggle('Show Traffic',             'showTraffic');
+    addToggle('Traffic Triangles',        'showBlipTriangle');
+    addToggle('Callsign',                 'showCallsign');
+    addToggle('Altitude',                 'showAltitude');
+    addToggle('Speed',                    'showSpeed');
+    addToggle('Distance',                 'showBlipDist');
+    addToggle('Heading Vectors',          'showVectors');
+    addToggle('Tracking / Nearby Traffic','showNearestHUD', (v) => {
+        if (!v) nearestHUD.style.display = 'none';
+    });
+    addSep();
+
+    // ── Map ───────────────────────────────────────────
+    addSection('Map');
+    addToggle('Airports & Runways',       'showAirports');
+    addSep();
+
+    // ── My Aircraft ───────────────────────────────────
+    addSection('My Aircraft');
+    addInfoRow('Callsign', 'callsign');
+    addInfoRow('Position', 'position');
+    addToggle('Show My Callsign',         'showMyCallsign');
+    addSep();
+
+    // ── Radar Preferences ────────────────────────────
     addSection('Radar Preferences');
 
-// ── Radar Size ───────────────────────────────────────────────────────
-{
-    const row = document.createElement('div');
-    row.style.cssText = `
-        display:flex; align-items:center; justify-content:space-between;
-        padding:${UI.menuRowPadY - 1}px 16px; gap:6px;
-    `;
-
-    // Label
-    const lbl = document.createElement('span');
-    lbl.dataset.menuRowlbl = '1';
-    lbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS}; flex:1;`;
-    lbl.textContent = 'Radar Size';
-
-    // Minus button
-    const btnMinus = document.createElement('button');
-    btnMinus.textContent = '−';
-    btnMinus.style.cssText = `
-        width:26px; height:26px; border-radius:5px; flex-shrink:0;
-        background:rgba(0,60,0,0.7); color:rgba(0,255,0,0.9);
-        border:1px solid rgba(0,255,0,0.3); font:bold 15px ${FONT_SANS};
-        cursor:pointer; display:flex; align-items:center; justify-content:center;
-        transition:background .12s; line-height:1;
-    `;
-    btnMinus.onmouseover = () => btnMinus.style.background = 'rgba(0,100,0,0.8)';
-    btnMinus.onmouseout  = () => btnMinus.style.background = 'rgba(0,60,0,0.7)';
-
-    // Value display
-    const valSpan = document.createElement('span');
-    valSpan.style.cssText = `
-        display:inline-block; min-width:64px; text-align:center;
-        color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
-        background:rgba(0,40,0,0.6); border:1px solid rgba(0,255,0,0.3);
-        border-radius:5px; padding:2px 6px; cursor:pointer;
-    `;
-
-    function updateDisplay() {
-        valSpan.textContent = prefs.radarSizePx + ' px';
-    }
-    updateDisplay();
-
-    // Plus button
-    const btnPlus = document.createElement('button');
-    btnPlus.textContent = '+';
-    btnPlus.style.cssText = btnMinus.style.cssText; // Same style as minus
-
-    // Button click handlers
-    btnMinus.onclick = () => {
-        let v = prefs.radarSizePx - 10;
-        v = Math.max(150, Math.min(900, v));
-        v = Math.round(v / 10) * 10;
-        prefs.radarSizePx = v;
-        updateDisplay();
-        applyPrefs();
-        savePrefs();
-    };
-
-    btnPlus.onclick = () => {
-        let v = prefs.radarSizePx + 10;
-        v = Math.max(150, Math.min(900, v));
-        v = Math.round(v / 10) * 10;
-        prefs.radarSizePx = v;
-        updateDisplay();
-        applyPrefs();
-        savePrefs();
-    };
-
-    // Click on value to edit
-    valSpan.addEventListener('click', () => {
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.value = prefs.radarSizePx;
-        input.min = 150;
-        input.max = 900;
-        input.step = 10;
-        input.style.cssText = `
-            width:64px; text-align:center;
-            color:rgba(0,255,0,0.95); font:bold ${UI.menuRowFont}px ${FONT_MONO};
-            background:rgba(0,40,0,0.85); border:1px solid rgba(0,255,0,0.7);
-            border-radius:5px; padding:2px 4px; outline:none;
-            -moz-appearance:textfield;
-        `;
-
-        valSpan.style.display = 'none';
-        valSpan.parentNode.insertBefore(input, valSpan.nextSibling);
-
-        function commitInput() {
-            let v = parseInt(input.value);
-            if (!isFinite(v)) v = prefs.radarSizePx;
-            v = Math.max(150, Math.min(900, v));
-            v = Math.round(v / 10) * 10;
-            v = Math.max(150, Math.min(900, v));
-            prefs.radarSizePx = v;
-            updateDisplay();
-            applyPrefs();
-            savePrefs();
-            input.remove();
-            valSpan.style.display = 'inline-block';
-        }
-
-        input.addEventListener('blur', commitInput);
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                commitInput();
-            }
-            if (e.key === 'Escape') {
-                input.remove();
-                valSpan.style.display = 'inline-block';
-            }
-        });
-        input.focus();
-        input.select();
-    });
-
-    // Assemble row
-    row.appendChild(lbl);
-    row.appendChild(btnMinus);
-    row.appendChild(valSpan);
-    row.appendChild(btnPlus);
-
-    panel.appendChild(row);
-}
-    // ── Min Range (stored/displayed/input in km) ──────────────────────────
-    addPrefRow({
-        label: 'Min Range',
-        get:  () => prefs.minRangeKm,
-        set:  v  => { prefs.minRangeKm = v; },
-        fmt:  v  => v.toFixed(1) + ' km',
-        min: 0.5, max: 10, step: 0.5,
-        onCommit: applyPrefs,
-    });
-
-    // ── Max Range (km) ────────────────────────────────────────────────────
-    addPrefRow({
-        label: 'Max Range',
-        get:  () => prefs.maxRangeKm,
-        set:  v  => { prefs.maxRangeKm = v; },
-        fmt:  v  => v.toFixed(0) + ' km',
-        min: 1, max: 100, step: 1,
-        onCommit: applyPrefs,
-    });
-
-    // ── Scroll Step (km) ──────────────────────────────────────────────────
-    addPrefRow({
-        label: 'Scroll Step',
-        get:  () => prefs.scrollIncKm,
-        set:  v  => { prefs.scrollIncKm = v; },
-        fmt:  v  => v.toFixed(1) + ' km',
-        min: 0.5, max: 10, step: 0.5,
-        onCommit: applyPrefs,
-    });
-
-    // ── Update Delay ─────────────────────────────────────────────────────
-    addPrefRow({
-        label: 'Update Delay',
-        get: () => prefs.fetchDelay,
-        set: v => { prefs.fetchDelay = v; },
-        fmt: v => v + ' ms',
-        min: 50, max: 1000, step: 50,
-        onCommit: applyPrefs,
-    });
-
-// ── Spin Speed + enable toggle ────────────────────────────────────────
-{
-    const spinEnRow = document.createElement('div');
-    spinEnRow.dataset.menuRow = '_spinEnabled';
-    spinEnRow.style.cssText = `
-        display:flex; align-items:center; justify-content:space-between;
-        padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;
-    `;
-    spinEnRow.onmouseover = () => spinEnRow.style.background = T().menuRowHover;
-    spinEnRow.onmouseout  = () => spinEnRow.style.background = '';
-    const spinEnLbl = document.createElement('span');
-    spinEnLbl.dataset.menuRowlbl = '1';
-    spinEnLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
-    spinEnLbl.textContent = 'Sweep Line';
-    const spinEnSw = document.createElement('div');
-    const spinEnKnobOff = 3, spinEnKnobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
-    spinEnSw.style.cssText = `
-        width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
-        border-radius:${UI.menuSwitchH/2}px; position:relative;
-        background:${prefs.spinEnabled ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
-        border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;
-    `;
-    const spinEnKnob = document.createElement('div');
-    spinEnKnob.style.cssText = `
-        position:absolute; top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
-        left:${prefs.spinEnabled ? spinEnKnobOn : spinEnKnobOff}px;
-        width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%;
-        background:${prefs.spinEnabled ? '#0f0' : '#888'};
-        transition:left .2s, background .2s;
-    `;
-    spinEnSw.appendChild(spinEnKnob);
-    spinEnRow.appendChild(spinEnLbl);
-    spinEnRow.appendChild(spinEnSw);
-    spinEnRow.onclick = () => {
-        prefs.spinEnabled = !prefs.spinEnabled;
-        const t2 = T();
-        spinEnSw.style.background   = prefs.spinEnabled ? t2.switchOn  : t2.switchOff;
-        spinEnKnob.style.left       = prefs.spinEnabled ? spinEnKnobOn + 'px' : spinEnKnobOff + 'px';
-        spinEnKnob.style.background = prefs.spinEnabled ? t2.knobOn : t2.knobOff;
-        savePrefs();
-        if (prefs.spinEnabled) startSpinAnimation(); else stopSpinAnimation();
-    };
-    panel.appendChild(spinEnRow);
-
-    // Sweep shadow toggle
+    // Radar Size row
     {
-        const shadowRow = document.createElement('div');
-        shadowRow.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding:${UI.menuRowPadY}px 16px; cursor:pointer; transition:background .15s;
-        `;
-        shadowRow.onmouseover = () => shadowRow.style.background = T().menuRowHover;
-        shadowRow.onmouseout  = () => shadowRow.style.background = '';
-
-        const shadowLbl = document.createElement('span');
-        shadowLbl.dataset.menuRowlbl = '1';
-        shadowLbl.style.cssText = `color:rgba(200,255,200,0.9); font:${UI.menuRowFont}px ${FONT_SANS};`;
-        shadowLbl.textContent = 'Sweep Shadow';
-
-        const shadowSw = document.createElement('div');
-        const shadowKnobOff = 3, shadowKnobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
-        shadowSw.style.cssText = `
-            width:${UI.menuSwitchW}px; height:${UI.menuSwitchH}px;
-            border-radius:${UI.menuSwitchH/2}px; position:relative;
-            background:${prefs.spinShadow ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
-            border:1px solid rgba(0,255,0,0.3); transition:background .2s; flex-shrink:0;
-        `;
-
-        const shadowKnob = document.createElement('div');
-        shadowKnob.style.cssText = `
-            position:absolute; top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
-            left:${prefs.spinShadow ? shadowKnobOn : shadowKnobOff}px;
-            width:${UI.menuKnobSize}px; height:${UI.menuKnobSize}px; border-radius:50%;
-            background:${prefs.spinShadow ? '#0f0' : '#888'};
-            transition:left .2s, background .2s;
-        `;
-
-        shadowSw.appendChild(shadowKnob);
-        shadowRow.appendChild(shadowLbl);
-        shadowRow.appendChild(shadowSw);
-
-        shadowRow.onclick = () => {
-            prefs.spinShadow = !prefs.spinShadow;
-            const t2 = T();
-            shadowSw.style.background   = prefs.spinShadow ? t2.switchOn  : t2.switchOff;
-            shadowKnob.style.left       = prefs.spinShadow ? shadowKnobOn + 'px' : shadowKnobOff + 'px';
-            shadowKnob.style.background = prefs.spinShadow ? t2.knobOn : t2.knobOff;
-            savePrefs();
-            if (prefs.spinEnabled) updateShadowSetting();
-        };
-
-        panel.appendChild(shadowRow);
+        const row = document.createElement('div');
+        row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
+            padding:${UI.menuRowPadY-1}px 16px;gap:6px;`;
+        const lbl = document.createElement('span');
+        lbl.dataset.menuRowlbl = '1';
+        lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};flex:1;`;
+        lbl.textContent = 'Radar Size';
+        const btnMinus = document.createElement('button');
+        btnMinus.textContent = '−';
+        btnMinus.style.cssText = `width:26px;height:26px;border-radius:5px;flex-shrink:0;
+            background:rgba(0,60,0,0.7);color:rgba(0,255,0,0.9);border:1px solid rgba(0,255,0,0.3);
+            font:bold 15px ${FONT_SANS};cursor:pointer;display:flex;align-items:center;
+            justify-content:center;transition:background .12s;line-height:1;`;
+        btnMinus.onmouseover = () => btnMinus.style.background = 'rgba(0,100,0,0.8)';
+        btnMinus.onmouseout  = () => btnMinus.style.background = 'rgba(0,60,0,0.7)';
+        const valSpan = document.createElement('span');
+        valSpan.style.cssText = `display:inline-block;min-width:64px;text-align:center;
+            color:rgba(0,255,0,0.95);font:bold ${UI.menuRowFont}px ${FONT_MONO};
+            background:rgba(0,40,0,0.6);border:1px solid rgba(0,255,0,0.3);
+            border-radius:5px;padding:2px 6px;cursor:pointer;`;
+        function updateDisplay() { valSpan.textContent = prefs.radarSizePx + ' px'; }
+        updateDisplay();
+        const btnPlus = document.createElement('button');
+        btnPlus.textContent = '+';
+        btnPlus.style.cssText = btnMinus.style.cssText;
+        btnPlus.onmouseover = () => btnPlus.style.background = 'rgba(0,100,0,0.8)';
+        btnPlus.onmouseout  = () => btnPlus.style.background = 'rgba(0,60,0,0.7)';
+        btnMinus.onclick = () => { prefs.radarSizePx = Math.max(150,Math.min(900,Math.round((prefs.radarSizePx-10)/10)*10)); updateDisplay(); applyPrefs(); };
+        btnPlus.onclick  = () => { prefs.radarSizePx = Math.max(150,Math.min(900,Math.round((prefs.radarSizePx+10)/10)*10)); updateDisplay(); applyPrefs(); };
+        valSpan.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type='number'; input.value=prefs.radarSizePx; input.min=150; input.max=900; input.step=10;
+            input.style.cssText = `width:64px;text-align:center;color:rgba(0,255,0,0.95);
+                font:bold ${UI.menuRowFont}px ${FONT_MONO};background:rgba(0,40,0,0.85);
+                border:1px solid rgba(0,255,0,0.7);border-radius:5px;padding:2px 4px;outline:none;`;
+            valSpan.style.display = 'none';
+            valSpan.parentNode.insertBefore(input, valSpan.nextSibling);
+            function commitInput() {
+                let v = parseInt(input.value);
+                if (!isFinite(v)) v = prefs.radarSizePx;
+                prefs.radarSizePx = Math.max(150,Math.min(900,Math.round(v/10)*10));
+                updateDisplay(); applyPrefs(); input.remove(); valSpan.style.display='inline-block';
+            }
+            input.addEventListener('blur', commitInput);
+            input.addEventListener('keydown', e => {
+                if (e.key==='Enter') { e.preventDefault(); commitInput(); }
+                if (e.key==='Escape') { input.remove(); valSpan.style.display='inline-block'; }
+            });
+            input.focus(); input.select();
+        });
+        row.appendChild(lbl); row.appendChild(btnMinus); row.appendChild(valSpan); row.appendChild(btnPlus);
+        panel.appendChild(row);
     }
 
-    addPrefRow({
-        label: 'Spin Speed',
-        get: () => prefs.spinSpeed,
-        set: v => { prefs.spinSpeed = Math.round(v * 1000) / 1000; },
-        fmt: v => v.toFixed(3) + ' rad/frame',
-        min: 0.001, max: 0.05, step: 0.001,
-        onCommit: () => {
-            savePrefs();
-            // Speed will be used directly in animation
-        }
-    });
-}
+    addPrefRow({ label:'Min Range',     get:()=>prefs.minRangeKm,  set:v=>{prefs.minRangeKm=v;},  fmt:v=>v.toFixed(1)+' km', min:0.5,max:10,step:0.5, onCommit:applyPrefs });
+    addPrefRow({ label:'Max Range',     get:()=>prefs.maxRangeKm,  set:v=>{prefs.maxRangeKm=v;},  fmt:v=>v.toFixed(0)+' km', min:1,max:100,step:1,   onCommit:applyPrefs });
+    addPrefRow({ label:'Scroll Step',   get:()=>prefs.scrollIncKm, set:v=>{prefs.scrollIncKm=v;}, fmt:v=>v.toFixed(1)+' km', min:0.5,max:10,step:0.5, onCommit:applyPrefs });
+    addPrefRow({ label:'Update Delay',  get:()=>prefs.fetchDelay,  set:v=>{prefs.fetchDelay=v;},  fmt:v=>v+' ms',            min:50,max:1000,step:50,  onCommit:applyPrefs });
 
-// Spin animation variables
-let spinAnimationFrame = null;
-let spinAngle = 0;
-let lastDrawTime = 0;
-const TARGET_FPS = 10;
-const FRAME_TIME = 1000 / TARGET_FPS;
-
-function startSpinAnimation() {
-    if (spinAnimationFrame) cancelAnimationFrame(spinAnimationFrame);
-    spinAnimationFrame = requestAnimationFrame(animateSpin);
-}
-
-function stopSpinAnimation() {
-    if (spinAnimationFrame) {
-        cancelAnimationFrame(spinAnimationFrame);
-        spinAnimationFrame = null;
-    }
-    // Redraw without the spin line
-    redrawBaseGraphics();
-}
-
-function animateSpin(currentTime) {
-    if (!prefs.spinEnabled || isGamePaused) {
-        spinAnimationFrame = requestAnimationFrame(animateSpin);
-        return;
-    }
-
-    // Control frame rate for consistent animation
-    if (currentTime - lastDrawTime >= FRAME_TIME) {
-        // Update angle using prefs.spinSpeed directly
-        spinAngle += prefs.spinSpeed;
-        if (spinAngle > Math.PI * 2) spinAngle -= Math.PI * 2;
-
-        // Draw the frame
-        drawFullFrame();
-        lastDrawTime = currentTime;
-    }
-
-    spinAnimationFrame = requestAnimationFrame(animateSpin);
-}
-
-function drawFullFrame() {
-    // Clear the radar area only (not the entire canvas if there's UI)
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(radarSize/2, radarSize/2, radarSize/2, 0, Math.PI*2);
-    ctx.clip();
-    ctx.clearRect(0, 0, radarSize, radarSize);
-    ctx.restore();
-
-    // Draw base radar graphics first
-    if (typeof drawRadarBase === 'function') {
-        drawRadarBase();
-    }
-
-    // Draw the spin line with current angle
-    drawSpinLine();
-}
-
-function drawSpinLine() {
-    if (isGamePaused) return;
-
-    const cx = radarSize/2, cy = radarSize/2;
-    const R  = radarSize/2 - 10;
-    const t  = T();
-
-    const ex = cx + Math.cos(spinAngle) * R;
-    const ey = cy + Math.sin(spinAngle) * R;
-
-    const sweepStart = spinAngle - 1.1;
-
-    // Draw sweep trail
-    const lg = ctx.createLinearGradient(cx, cy, ex, ey);
-    lg.addColorStop(0, t.scanLine[0]);
-    lg.addColorStop(1, 'transparent');
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, R, sweepStart, spinAngle);
-    ctx.closePath();
-    ctx.fillStyle = t.trailColor(0.08);
-    ctx.fill();
-
-    // Draw shadow if enabled
-    if (prefs.spinShadow) {
-        ctx.save();
-        ctx.shadowColor = 'rgba(0, 255, 0, 0.8)';
-        ctx.shadowBlur = 15;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-
-        // Draw line with shadow
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(ex, ey);
-        ctx.strokeStyle = t.scanLine[0];
-        ctx.lineWidth = 3;
-        ctx.stroke();
-
-        // Draw endpoint with shadow
-        ctx.beginPath();
-        ctx.arc(ex, ey, 4, 0, Math.PI*2);
-        ctx.fillStyle = t.scanLine[0];
-        ctx.fill();
-        ctx.restore();
-    }
-
-    // Draw main line (without shadow to prevent double shadow)
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(ex, ey);
-    ctx.strokeStyle = t.scanLine[0];
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Draw main endpoint (without shadow)
-    ctx.beginPath();
-    ctx.arc(ex, ey, 3, 0, Math.PI*2);
-    ctx.fillStyle = t.scanLine[0];
-    ctx.fill();
-}
-
-function updateShadowSetting() {
-    // Just redraw current frame with new shadow setting
-    if (prefs.spinEnabled && !isGamePaused) {
-        drawFullFrame();
-    }
-}
-
-function redrawBaseGraphics() {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(radarSize/2, radarSize/2, radarSize/2, 0, Math.PI*2);
-    ctx.clip();
-    ctx.clearRect(0, 0, radarSize, radarSize);
-    ctx.restore();
-
-    if (typeof drawRadarBase === 'function') {
-        drawRadarBase();
-    }
-}
-
-    // ── API Status ────────────────────────────────────────────────────────
+    // ── API Status ────────────────────────────────────
     addSep();
     addSection('API Status');
     addStatusRow();
 
     document.body.appendChild(panel);
-
     repositionMenu();
 }
 
@@ -1636,77 +1148,49 @@ function repositionMenu() {
     const btn = document.getElementById('radarMenuBtn');
     const panel = document.getElementById('radarMenuPanel');
     if (!btn || !panel) return;
-
     const rl = parseInt(radarCanvas.style.left) || 5;
     const rt = parseInt(radarCanvas.style.top) || 0;
     const menuFullHeight = 600;
-    const buttonSize = 40;
     const spacing = 5;
-    const bottomMargin = 60;
     const windowHeight = window.innerHeight;
-
     btn.style.left = (rl + radarSize + spacing) + 'px';
-    btn.style.top = rt + 'px';
-
-    const panelTop = rt + buttonSize + spacing;
+    btn.style.top  = rt + 'px';
+    const panelTop = rt + 40 + spacing;
     panel.style.top = panelTop + 'px';
-
-    const maxAllowedHeight = windowHeight - panelTop - bottomMargin;
+    const maxAllowedHeight = windowHeight - panelTop - 60;
     const panelHeight = Math.min(menuFullHeight, maxAllowedHeight);
     panel.style.height = panelHeight + 'px';
     panel.style.left = (rl + radarSize + spacing) + 'px';
-
     const panelRight = parseInt(panel.style.left) + UI.menuW;
-    if (panelRight > window.innerWidth) {
-        panel.style.left = (window.innerWidth - UI.menuW - spacing) + 'px';
-    }
-
-    const isTruncated = panelHeight < menuFullHeight;
-    panel.style.borderBottom = isTruncated ? '2px solid rgba(255,200,0,0.5)' : '1.5px solid rgba(0,255,0,0.35)';
+    if (panelRight > window.innerWidth) panel.style.left = (window.innerWidth - UI.menuW - spacing) + 'px';
+    panel.style.borderBottom = panelHeight < menuFullHeight
+        ? '2px solid rgba(255,200,0,0.5)' : '1.5px solid rgba(0,255,0,0.35)';
 }
 
 function updateMenuInfoCallsign(cs, lat, lon) {
-    const csEl = document.getElementById('radarInfo_callsign');
+    const csEl  = document.getElementById('radarInfo_callsign');
     const posEl = document.getElementById('radarInfo_position');
     if (csEl) csEl.textContent = cs || '—';
     if (posEl && lat != null) {
         const latStr = Math.abs(lat).toFixed(3) + (lat >= 0 ? '°N' : '°S');
         const lonStr = Math.abs(lon).toFixed(3) + (lon >= 0 ? '°E' : '°W');
         posEl.textContent = `${latStr} ${lonStr}`;
-    } else if (posEl) {
-        posEl.textContent = '—';
-    }
+    } else if (posEl) posEl.textContent = '—';
 }
 
 function updateApiStatus(msg, ok) {
     const el = document.getElementById('radarInfo_apistatus');
     if (!el) return;
-    el.textContent       = msg;
-    el.dataset.statusOk  = ok ? 'true' : 'false';
+    el.textContent      = msg;
+    el.dataset.statusOk = ok ? 'true' : 'false';
     el.style.color = ok ? T().menuStatus : 'rgba(255,120,60,0.95)';
 }
 
 function toggleMenu() { menuOpen ? closeMenu() : openMenu(); }
+function openMenu()  { menuOpen=true; const p=document.getElementById('radarMenuPanel'); if(p){p.style.display='block'; repositionMenu();} }
+function closeMenu() { menuOpen=false; const p=document.getElementById('radarMenuPanel'); if(p) p.style.display='none'; }
 
-function openMenu() {
-    menuOpen = true;
-    const p = document.getElementById('radarMenuPanel');
-    if (p) {
-        p.style.display = 'block';
-        repositionMenu();
-    }
-}
-
-function closeMenu() {
-    menuOpen = false;
-    const p = document.getElementById('radarMenuPanel');
-    if (p) p.style.display = 'none';
-}
-
-window.addEventListener('resize', () => {
-    repositionMenu();
-    repositionNearestHUD();
-});
+window.addEventListener('resize', () => { repositionMenu(); repositionNearestHUD(); });
 
 // ═══════════════════════════════════════════════════
 // SECTION 6 — BLIP POPUP
@@ -1719,11 +1203,11 @@ function createPopupEl() {
     const p = document.createElement('div');
     p.id = 'radarPopup';
     p.style.cssText = `
-        position:fixed; min-width:210px;
-        background:rgba(0,12,0,0.97); border:1.5px solid rgba(0,255,0,0.5);
-        border-radius:10px; padding:11px 15px;
-        z-index:2147483647; pointer-events:none; display:none;
-        font-family:${FONT_MONO}; font-size:${UI.popupBodyFont}px;
+        position:fixed;min-width:210px;
+        background:rgba(0,12,0,0.97);border:1.5px solid rgba(0,255,0,0.5);
+        border-radius:10px;padding:11px 15px;
+        z-index:2147483647;pointer-events:none;display:none;
+        font-family:${FONT_MONO};font-size:${UI.popupBodyFont}px;
         box-shadow:0 3px 20px rgba(0,0,0,0.88);
     `;
     document.body.appendChild(p);
@@ -1732,82 +1216,72 @@ function createPopupEl() {
 
 function showPopup(ac, distance, screenX, screenY, myData) {
     if (!popup) popup = createPopupEl();
-
     const cs   = ac.cs || 'UNKNOWN';
-    const hdg = ac.h != null ? fmtHdg(ac.h) : 'N/A';
+    const hdg  = ac.h != null ? fmtHdg(ac.h) : 'N/A';
     const _rawAlt = (() => {
         const v = parseFloat(ac.al);
         if (isFinite(v)) return v;
-        if (ac.co && ac.co.length >= 3) {
-            const vCo = parseFloat(ac.co[2]);
-            if (isFinite(vCo)) return vCo * 3.28084;
-        }
+        if (ac.co && ac.co.length >= 3) { const vCo = parseFloat(ac.co[2]); if (isFinite(vCo)) return vCo * 3.28084; }
         return null;
     })();
     const altStr = _rawAlt !== null ? (fmtAlt(_rawAlt) ?? '–') : '–';
-    const _rawSpd = isFinite(parseFloat(ac.s))
-        ? parseFloat(ac.s)
+    const _rawSpd = isFinite(parseFloat(ac.s)) ? parseFloat(ac.s)
         : (typeof ac._computedSpd === 'number' && isFinite(ac._computedSpd) ? ac._computedSpd : null);
     const spdStr = _rawSpd !== null ? (fmtSpd(_rawSpd) ?? '–') : '–';
-
-    let brgStr = '—', nmStr = '—';
+    let brgStr='—', nmStr='—';
     if (myData && ac.co) {
         const nm  = calcDistNm(myData.lat, myData.lon, ac.co[0], ac.co[1]);
         const brg = calcBearing(myData.lat, myData.lon, ac.co[0], ac.co[1]);
-        nmStr  = fmtDist(nm);
+        nmStr = fmtDist(nm);
         brgStr = `${Math.round(brg).toString().padStart(3,'0')}° ${bearingCompass(brg)}`;
     }
-
     let altDelta = '';
-    const acAl = _rawAlt;
-    if (myData && acAl !== null) {
-        const d = Math.round(acAl - myData.altFt);
+    if (myData && _rawAlt !== null) {
+        const d = Math.round(_rawAlt - myData.altFt);
         const sign = d >= 0 ? '▲+' : '▼';
         const col  = d > 0 ? '#88ff88' : '#ff8888';
         altDelta = ` <span style="color:${col};font-size:${UI.popupAltDeltaFont}px">${sign}${Math.abs(d).toLocaleString()} ft</span>`;
     }
-
     popup.innerHTML = `
         <div style="color:#0f0;font-weight:bold;font-size:${UI.popupTitleFont}px;margin-bottom:7px;
-             border-bottom:1px solid rgba(0,255,0,0.2);padding-bottom:5px;
-             letter-spacing:1px">${cs}</div>
+             border-bottom:1px solid rgba(0,255,0,0.2);padding-bottom:5px;letter-spacing:1px">${cs}</div>
         <div style="display:grid;grid-template-columns:78px 1fr;gap:4px 10px;
              color:rgba(200,255,200,0.9);line-height:1.8;font-size:${UI.popupBodyFont}px">
-            <span style="color:rgba(0,200,0,0.6)">Distance</span>
-            <span style="color:rgba(255,160,40,0.95)">${nmStr}</span>
-            <span style="color:rgba(0,200,0,0.6)">Bearing</span>
-            <span style="color:rgba(180,255,180,0.9)">${brgStr}</span>
-            <span style="color:rgba(0,200,0,0.6)">Altitude</span>
-            <span style="color:rgba(0,240,255,0.95)">${altStr}${altDelta}</span>
-            <span style="color:rgba(0,200,0,0.6)">Speed GS</span>
-            <span style="color:rgba(255,220,80,0.95)">${spdStr}</span>
-            <span style="color:rgba(0,200,0,0.6)">Heading</span>
-            <span style="color:rgba(180,255,180,0.9)">${hdg}</span>
+            <span style="color:rgba(0,200,0,0.6)">Distance</span><span style="color:rgba(255,160,40,0.95)">${nmStr}</span>
+            <span style="color:rgba(0,200,0,0.6)">Bearing</span><span style="color:rgba(180,255,180,0.9)">${brgStr}</span>
+            <span style="color:rgba(0,200,0,0.6)">Altitude</span><span style="color:rgba(0,240,255,0.95)">${altStr}${altDelta}</span>
+            <span style="color:rgba(0,200,0,0.6)">Speed GS</span><span style="color:rgba(255,220,80,0.95)">${spdStr}</span>
+            <span style="color:rgba(0,200,0,0.6)">Heading</span><span style="color:rgba(180,255,180,0.9)">${hdg}</span>
         </div>`;
-
     const rl = parseInt(radarCanvas.style.left) || 0;
     const rt = parseInt(radarCanvas.style.top)  || 0;
-    let px = rl + screenX + 14;
-    let py = rt + screenY - 20;
+    let px = rl + screenX + 14, py = rt + screenY - 20;
     if (px + 200 > window.innerWidth)  px = rl + screenX - 205;
     if (py + 160 > window.innerHeight) py = rt + screenY - 160;
-
     popup.style.left    = px + 'px';
     popup.style.top     = py + 'px';
     popup.style.display = 'block';
 }
 
-function hidePopup() {
-    if (popup) popup.style.display = 'none';
-}
+function hidePopup() { if (popup) popup.style.display = 'none'; }
 
 let activePopupCs = null;
+
+// ── Point-to-segment distance (for runway click detection) ────────────────
+function distToSegment(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const lenSq = dx*dx + dy*dy;
+    if (lenSq === 0) return Math.hypot(px-x1, py-y1);
+    const t = Math.max(0, Math.min(1, ((px-x1)*dx + (py-y1)*dy) / lenSq));
+    return Math.hypot(px - (x1+t*dx), py - (y1+t*dy));
+}
 
 radarCanvas.addEventListener('click', (e) => {
     const rect = radarCanvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
 
+    // ── Blip detection (aircraft) ──────────────────
     let closest = null, closestDist = 12;
     lastBlipPositions.forEach(b => {
         const d = Math.hypot(mx - b.x, my - b.y);
@@ -1817,21 +1291,37 @@ radarCanvas.addEventListener('click', (e) => {
     if (closest) {
         const isSameBlip = _trackedId && _trackedId === closest.ac.id;
         if (isSameBlip) {
-            hidePopup();
-            stopTracking();
+            hidePopup(); stopTracking();
         } else {
-            activePopupCs   = closest.ac.cs;
-            _trackedAc      = closest.ac;
-            _trackedId      = closest.ac.id;
-            _lastHudUpdate  = 0;
-            _lastNearestCs  = null;
+            activePopupCs  = closest.ac.cs;
+            _trackedAc     = closest.ac;
+            _trackedId     = closest.ac.id;
+            _lastHudUpdate = 0;
+            _lastNearestCs = null;
             updateNearestHUD(closest.ac, closest.myData);
             hidePopup();
         }
-    } else {
-        hidePopup();
-        stopTracking();
+        return;
     }
+
+    // ── Runway detection (ILS activation) ─────────
+    let closestRwy = null, closestRwyDist = 14;
+    _lastRunwayPositions.forEach(r => {
+        const d = distToSegment(mx, my, r.x1, r.y1, r.x2, r.y2);
+        if (d < closestRwyDist) { closestRwyDist = d; closestRwy = r; }
+    });
+
+    if (closestRwy) {
+        if (_ilsActive && _ilsRunway === closestRwy.rwyData) {
+            deactivateILS();
+        } else {
+            activateILS(closestRwy.rwyData, closestRwy.airportICAO);
+        }
+        return;
+    }
+
+    hidePopup();
+    stopTracking();
 });
 
 // ═══════════════════════════════════════════════════
@@ -1844,10 +1334,11 @@ document.addEventListener('keydown', (e) => {
         const val  = hide ? 'none' : 'block';
         radarCanvas.style.display = val;
         const rb = document.getElementById('radarRangeBox');
-        if (rb)  rb.style.display = hide ? 'none' : 'flex';
+        if (rb) rb.style.display = hide ? 'none' : 'flex';
         const mb = document.getElementById('radarMenuBtn');
-        if (mb)  mb.style.display = hide ? 'none' : 'flex';
+        if (mb) mb.style.display = hide ? 'none' : 'flex';
         nearestHUD.style.display = (hide || !settings.showNearestHUD) ? 'none' : 'block';
+        ilsHUD.style.display = (hide || !_ilsActive) ? 'none' : 'block';
         if (hide) { hidePopup(); closeMenu(); }
         localStorage.setItem('radarVisible', !hide);
     }
@@ -1875,20 +1366,11 @@ function detectCallsign() {
     try {
         if (window.geofs) {
             const fromAircraft = geofs.aircraft?.instance?.callsign;
-            if (fromAircraft && fromAircraft !== 'Foo' && fromAircraft.length > 0) {
-                window._radarMyCallsign = fromAircraft;
-                return fromAircraft;
-            }
+            if (fromAircraft && fromAircraft !== 'Foo' && fromAircraft.length > 0) { window._radarMyCallsign = fromAircraft; return fromAircraft; }
             const fromRecord = geofs.userRecord?.callsign;
-            if (fromRecord && fromRecord !== 'Foo' && fromRecord.length > 0) {
-                window._radarMyCallsign = fromRecord;
-                return fromRecord;
-            }
+            if (fromRecord && fromRecord !== 'Foo' && fromRecord.length > 0) { window._radarMyCallsign = fromRecord; return fromRecord; }
             const fromLogin = geofs.userRecord?.login;
-            if (fromLogin && fromLogin.length > 0) {
-                window._radarMyCallsign = fromLogin;
-                return fromLogin;
-            }
+            if (fromLogin && fromLogin.length > 0) { window._radarMyCallsign = fromLogin; return fromLogin; }
         }
     } catch(e) {}
     return window._radarMyCallsign || null;
@@ -1900,73 +1382,38 @@ function detectCallsign() {
 
 setInterval(() => {
     try {
-        if (window.geofs) {
-            isGamePaused = geofs.gui?.pause ?? geofs.pause ?? false;
-        }
+        if (window.geofs) isGamePaused = geofs.gui?.pause ?? geofs.pause ?? false;
         const t = T();
-        const pauseOpacity = '0.45';
-
-        // ── Canvas ────────────────────────────────────────────────────────
-        radarCanvas.style.opacity   = isGamePaused ? pauseOpacity : '1';
-        radarCanvas.style.boxShadow = isGamePaused
-            ? '0 0 10px rgba(255,220,0,0.4)'
-            : t.canvasGlow;
-
-        // ── Range box ─────────────────────────────────────────────────────
+        const o = isGamePaused ? '0.45' : '1';
+        radarCanvas.style.opacity   = o;
+        radarCanvas.style.boxShadow = isGamePaused ? '0 0 10px rgba(255,220,0,0.4)' : t.canvasGlow;
         const rb = document.getElementById('radarRangeBox');
-        if (rb) rb.style.opacity = isGamePaused ? pauseOpacity : '1';
-
-        // ── Menu button ───────────────────────────────────────────────────
+        if (rb) rb.style.opacity = o;
         const mb = document.getElementById('radarMenuBtn');
-        if (mb) mb.style.opacity = isGamePaused ? pauseOpacity : '1';
-
-        // ── Settings panel ────────────────────────────────────────────────
+        if (mb) mb.style.opacity = o;
         const mp = document.getElementById('radarMenuPanel');
-        if (mp) mp.style.opacity = isGamePaused ? pauseOpacity : '1';
-
-        // ── HUD ───────────────────────────────────────────────────────────
-        nearestHUD.style.opacity = isGamePaused ? pauseOpacity : '1';
-
+        if (mp) mp.style.opacity = o;
+        nearestHUD.style.opacity = o;
+        ilsHUD.style.opacity = o;
     } catch(e) {}
 }, PAUSE_POLL_INTERVAL);
 
 let aircraftListCache = [];
-const prevAcData = new Map();  // used by internal source speed-delta
+const prevAcData = new Map();
 
 function normalizeAc(raw) {
     const ac = Object.assign({}, raw);
-    if (ac.h == null && Array.isArray(ac.co) && ac.co.length > 3) {
-        const v = parseFloat(ac.co[3]);
-        if (isFinite(v)) ac.h = v;
-    }
-    if (ac.al == null && Array.isArray(ac.co) && ac.co.length > 2) {
-        const v = parseFloat(ac.co[2]);
-        if (isFinite(v)) ac.al = v * 3.28084;
-    }
-    if (ac.s == null && ac.st && ac.st.as != null) {
-        const v = parseFloat(ac.st.as);
-        if (isFinite(v)) ac.s = v;
-    }
+    if (ac.h == null && Array.isArray(ac.co) && ac.co.length > 3) { const v=parseFloat(ac.co[3]); if(isFinite(v)) ac.h=v; }
+    if (ac.al == null && Array.isArray(ac.co) && ac.co.length > 2) { const v=parseFloat(ac.co[2]); if(isFinite(v)) ac.al=v*3.28084; }
+    if (ac.s == null && ac.st && ac.st.as != null) { const v=parseFloat(ac.st.as); if(isFinite(v)) ac.s=v; }
     return ac;
 }
 
 // ═══════════════════════════════════════════════════
 // SECTION 11 — MULTIPLAYER DATA SOURCE
-//
-// Priority 1 — Internal (geofs.multiplayer live cache)
-//   GeoFS already maintains a real-time player list via its own WebSocket.
-//   Reading from it directly costs zero HTTP requests and has zero rate-limit
-//   risk. We probe several known property paths on geofs.multiplayer and
-//   normalise whichever one returns valid player objects.
-//
-// Priority 2 — REST fallback (mps.geo-fs.com/map)
-//   Used only when the internal cache is unavailable (e.g. multiplayer is
-//   disabled in the options, or GeoFS hasn't finished initialising yet).
-//   Retains full exponential backoff to handle HTTP 429 responses.
 // ═══════════════════════════════════════════════════
 
-// ── Shared speed-delta helper (used by both sources) ─────────────────────
-const prevAcData_rest = new Map(); // separate history map for REST path
+const prevAcData_rest = new Map();
 
 function _applySpeedDelta(ac, prevMap, now) {
     if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
@@ -1977,229 +1424,127 @@ function _applySpeedDelta(ac, prevMap, now) {
         if (dt > FETCH_SPEED_DT_MIN && dt <= FETCH_SPEED_DT_MAX) {
             const dLat = (ac.co[0] - prev.lat) * Math.PI / 180;
             const dLon = (ac.co[1] - prev.lon) * Math.PI / 180;
-            const R    = 6371000;
-            const a    = Math.sin(dLat/2)**2
-                       + Math.cos(prev.lat * Math.PI/180)
-                       * Math.cos(ac.co[0]  * Math.PI/180)
-                       * Math.sin(dLon/2)**2;
-            const distM   = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const R = 6371000;
+            const a = Math.sin(dLat/2)**2 + Math.cos(prev.lat*Math.PI/180)*Math.cos(ac.co[0]*Math.PI/180)*Math.sin(dLon/2)**2;
+            const distM  = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
             const speedKt = (distM / dt) / 0.514444;
             if (ac.s == null && speedKt <= 3000) ac._computedSpd = speedKt;
-            else if (ac.s == null && typeof prev._computedSpd === 'number') {
-                ac._computedSpd = prev._computedSpd;
-            }
+            else if (ac.s == null && typeof prev._computedSpd === 'number') ac._computedSpd = prev._computedSpd;
         } else if (ac.s == null && typeof prev._computedSpd === 'number') {
             ac._computedSpd = prev._computedSpd;
         }
     }
-    prevMap.set(id, {
-        lat: ac.co[0], lon: ac.co[1], time: now,
-        ...(typeof ac._computedSpd === 'number' && { _computedSpd: ac._computedSpd }),
-    });
+    prevMap.set(id, { lat:ac.co[0], lon:ac.co[1], time:now, ...(typeof ac._computedSpd==='number' && {_computedSpd:ac._computedSpd}) });
 }
-
-// ── Internal source — reads geofs.multiplayer directly ───────────────────
-// GeoFS stores other players in its multiplayer module. The exact property
-// path has varied across versions; we try all known paths in order.
-// Each player entry in the internal cache uses a different shape from the
-// REST API: position is in `llaLocation[]`, heading in `animationValue`,
-// speed in `animationValue.speed` etc.  `_normalizeInternal` converts this
-// to the same `co[]` / `h` / `s` shape that the rest of the radar expects.
 
 function _normalizeInternal(raw) {
     if (!raw) return null;
     try {
         const ac = {};
-
-        // ── Session / callsign identity ──────────────────────────────────
         ac.id = raw.id ?? raw.userId ?? raw.sessionId ?? null;
         ac.cs = raw.callsign ?? raw.cs ?? null;
-
-        // ── Aircraft type ID ─────────────────────────────────────────────
         ac.ac = raw.aircraftIndex ?? raw.ac ?? raw.aircraftId ?? null;
-
-        // ── Position — try llaLocation first, then co[] ──────────────────
         if (Array.isArray(raw.llaLocation) && raw.llaLocation.length >= 2) {
-            const lat = parseFloat(raw.llaLocation[0]);
-            const lon = parseFloat(raw.llaLocation[1]);
-            const alt = parseFloat(raw.llaLocation[2]);
+            const lat = parseFloat(raw.llaLocation[0]), lon = parseFloat(raw.llaLocation[1]), alt = parseFloat(raw.llaLocation[2]);
             if (!isFinite(lat) || !isFinite(lon)) return null;
-            // co[2] in the REST API is metres; llaLocation[2] is also metres
             ac.co = [lat, lon, isFinite(alt) ? alt : 0];
-            if (isFinite(alt)) ac.al = alt * 3.28084; // feet
+            if (isFinite(alt)) ac.al = alt * 3.28084;
         } else if (Array.isArray(raw.co) && raw.co.length >= 2) {
             ac.co = raw.co;
-        } else {
-            return null; // no position — skip
-        }
-
-        // ── Heading ──────────────────────────────────────────────────────
-        const hdg = raw.animationValue?.heading360
-                 ?? raw.animationValue?.heading
-                 ?? raw.heading
-                 ?? (Array.isArray(raw.co) && raw.co[3] != null ? raw.co[3] : null)
-                 ?? raw.h
-                 ?? null;
+        } else return null;
+        const hdg = raw.animationValue?.heading360 ?? raw.animationValue?.heading ?? raw.heading ?? (Array.isArray(raw.co) && raw.co[3]!=null ? raw.co[3] : null) ?? raw.h ?? null;
         if (hdg != null && isFinite(parseFloat(hdg))) ac.h = parseFloat(hdg);
-
-        // ── Altitude (feet) — override if not set above ───────────────────
-        if (ac.al == null) {
-            const altFt = raw.animationValue?.altitude ?? raw.altitude ?? null;
-            if (altFt != null && isFinite(parseFloat(altFt))) ac.al = parseFloat(altFt);
-        }
-
-        // ── Speed (knots) ─────────────────────────────────────────────────
-        const spd = raw.animationValue?.speed           // kts in animation
-                 ?? raw.animationValue?.kias
-                 ?? raw.st?.as
-                 ?? raw.s
-                 ?? null;
+        if (ac.al == null) { const altFt = raw.animationValue?.altitude ?? raw.altitude ?? null; if (altFt!=null && isFinite(parseFloat(altFt))) ac.al=parseFloat(altFt); }
+        const spd = raw.animationValue?.speed ?? raw.animationValue?.kias ?? raw.st?.as ?? raw.s ?? null;
         if (spd != null && isFinite(parseFloat(spd))) ac.s = parseFloat(spd);
-
         return ac;
-    } catch(e) {
-        return null;
-    }
+    } catch(e) { return null; }
 }
 
-// Returns an array of normalised aircraft objects from the internal GeoFS
-// multiplayer cache, or null if no suitable data was found.
 function _readInternalMultiplayer() {
     try {
         const mp = window.geofs?.multiplayer;
         if (!mp) return null;
-
-        // Candidate property paths, tried in order
-        const candidates = [
-            mp._users,      // common in 3.x builds
-            mp.users,
-            mp._clients,
-            mp.clients,
-            mp._otherAircraft,
-            mp.otherAircraft,
-            mp._aircraft,
-        ];
-
+        const candidates = [mp._users, mp.users, mp._clients, mp.clients, mp._otherAircraft, mp.otherAircraft, mp._aircraft];
         for (const raw of candidates) {
             if (!raw) continue;
-
             let list;
-            if (raw instanceof Map) {
-                list = Array.from(raw.values());
-            } else if (Array.isArray(raw)) {
-                list = raw;
-            } else if (typeof raw === 'object') {
-                list = Object.values(raw);
-            } else {
-                continue;
-            }
-
+            if (raw instanceof Map) list = Array.from(raw.values());
+            else if (Array.isArray(raw)) list = raw;
+            else if (typeof raw === 'object') list = Object.values(raw);
+            else continue;
             if (!list.length) continue;
-
-            // Quick sanity-check: does the first item look like a player?
             const sample = list[0];
             const hasPos = Array.isArray(sample?.llaLocation) || Array.isArray(sample?.co);
             if (!hasPos) continue;
-
-            // Normalise and filter out bad entries
-            const now  = Date.now();
+            const now = Date.now();
             const acList = [];
-            list.forEach(raw => {
-                const ac = _normalizeInternal(raw);
-                if (!ac) return;
-                _applySpeedDelta(ac, prevAcData, now);
-                acList.push(ac);
-            });
-
+            list.forEach(raw => { const ac=_normalizeInternal(raw); if(!ac) return; _applySpeedDelta(ac,prevAcData,now); acList.push(ac); });
             if (acList.length > 0) return acList;
         }
     } catch(e) {}
     return null;
 }
 
-// ── Internal polling loop ─────────────────────────────────────────────────
-// Runs at the draw-interval cadence so blips update every frame.
 let _internalSourceActive = false;
 let _internalConsecutiveFails = 0;
-const INTERNAL_FAIL_THRESHOLD = 10; // give up on internal after N misses
+const INTERNAL_FAIL_THRESHOLD = 10;
 
 function _tickInternalSource() {
     if (isGamePaused) return;
     const result = _readInternalMultiplayer();
     if (result !== null) {
-        aircraftListCache       = result;
-        _internalSourceActive   = true;
+        aircraftListCache = result;
+        _internalSourceActive = true;
         _internalConsecutiveFails = 0;
         updateApiStatus(`Internal — ${result.length} aircraft (real-time)`, true);
     } else {
         _internalConsecutiveFails++;
         if (_internalSourceActive && _internalConsecutiveFails >= INTERNAL_FAIL_THRESHOLD) {
-            // Internal source has gone away — restart REST fallback
             _internalSourceActive = false;
             updateApiStatus('Internal unavailable — switching to REST…', false);
             scheduleFetch(FETCH_DELAY_BASE);
         }
     }
 }
-
 setInterval(_tickInternalSource, DRAW_INTERVAL);
 
-// ── REST fallback — polls mps.geo-fs.com/map when internal is unavailable ─
 let _fetchConsecutiveErrors = 0;
 let _fetchDelay = FETCH_DELAY_BASE;
 const FETCH_MIN = FETCH_DELAY_BASE;
 const FETCH_MAX = FETCH_DELAY_MAX;
 let _fetchTimer = null;
 
-function scheduleFetch(delay) {
-    if (_fetchTimer) clearTimeout(_fetchTimer);
-    _fetchTimer = setTimeout(doFetch, delay);
-}
+function scheduleFetch(delay) { if (_fetchTimer) clearTimeout(_fetchTimer); _fetchTimer = setTimeout(doFetch, delay); }
 
 async function doFetch() {
-    // Skip REST entirely while the internal source is healthy
-    if (_internalSourceActive) {
-        scheduleFetch(2000); // check again in 2 s in case internal drops
-        return;
-    }
-
+    if (_internalSourceActive) { scheduleFetch(2000); return; }
     if (!isGamePaused) {
         try {
             const res = await fetch('https://mps.geo-fs.com/map');
-
             if (res.status === 429) {
-                _fetchDelay = Math.min(_fetchDelay * 2, FETCH_MAX);
+                _fetchDelay = Math.min(_fetchDelay*2, FETCH_MAX);
                 _fetchConsecutiveErrors++;
                 updateApiStatus(`429 Rate limited — retrying in ${_fetchDelay/1000}s (×${_fetchConsecutiveErrors})`, false);
-                scheduleFetch(_fetchDelay);
-                return;
+                scheduleFetch(_fetchDelay); return;
             }
-
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
             const data  = await res.json();
             const now   = Date.now();
             const users = (data.users || []).map(normalizeAc);
-
-            users.forEach(ac => {
-                _applySpeedDelta(ac, prevAcData_rest, now);
-            });
-
-            aircraftListCache       = users;
+            users.forEach(ac => _applySpeedDelta(ac, prevAcData_rest, now));
+            aircraftListCache = users;
             _fetchConsecutiveErrors = 0;
             _fetchDelay = Math.max(FETCH_MIN, _fetchDelay * 0.75);
             updateApiStatus(`REST — ${users.length} aircraft`, true);
-
         } catch(e) {
             _fetchConsecutiveErrors++;
-            _fetchDelay = Math.min(_fetchDelay * 1.5, FETCH_MAX);
+            _fetchDelay = Math.min(_fetchDelay*1.5, FETCH_MAX);
             updateApiStatus(`Error (×${_fetchConsecutiveErrors}): ${e.message}`, false);
         }
     }
     scheduleFetch(_fetchDelay);
 }
-
-// Kick off the initial REST fetch (internal source will suppress it once ready)
 scheduleFetch(FETCH_DELAY_INITIAL);
 
 // ═══════════════════════════════════════════════════
@@ -2211,9 +1556,7 @@ let airportCache = [];
 let lastAirportFetch = 0;
 
 function runwayEndpointsFromCenter(lat, lon, hdgDeg, lenM) {
-    const R    = 6371000;
-    const half = (lenM || 1800) / 2;
-    const hRad = hdgDeg * Math.PI / 180;
+    const R = 6371000, half = (lenM || 1800) / 2, hRad = hdgDeg * Math.PI / 180;
     const dLat = ((half * Math.cos(hRad)) / R) * (180 / Math.PI);
     const dLon = ((half * Math.sin(hRad)) / R) * (180 / Math.PI) / Math.cos(lat * Math.PI / 180);
     return { lat1: lat-dLat, lon1: lon-dLon, lat2: lat+dLat, lon2: lon+dLon };
@@ -2236,46 +1579,35 @@ async function fetchAirportData() {
             }
             const hdrs = parseLine(lines[0]);
             return lines.slice(1).map(l => {
-                const flds = parseLine(l);
-                const o = {};
+                const flds = parseLine(l), o = {};
                 hdrs.forEach((h,i) => o[h] = flds[i]||'');
                 return o;
             });
         }
-
         const [ar, rr] = await Promise.all([
             fetch('https://davidmegginson.github.io/ourairports-data/airports.csv'),
             fetch('https://davidmegginson.github.io/ourairports-data/runways.csv')
         ]);
         if (!ar.ok || !rr.ok) return;
-
         const [aCSV, rCSV] = await Promise.all([ar.text(), rr.text()]);
         const airportRows  = parseCSV(aCSV);
         const runwayRows   = parseCSV(rCSV);
 
         const rwByIdent = {};
         runwayRows.forEach(row => {
-            const id   = row['airport_ident']; if (!id) return;
-            const lat1 = parseFloat(row['le_latitude_deg']);
-            const lon1 = parseFloat(row['le_longitude_deg']);
-            const lat2 = parseFloat(row['he_latitude_deg']);
-            const lon2 = parseFloat(row['he_longitude_deg']);
+            const id = row['airport_ident']; if (!id) return;
+            const lat1=parseFloat(row['le_latitude_deg']), lon1=parseFloat(row['le_longitude_deg']);
+            const lat2=parseFloat(row['he_latitude_deg']), lon2=parseFloat(row['he_longitude_deg']);
             const lenM = parseFloat(row['length_ft']) * 0.3048;
             const name = [row['le_ident'], row['he_ident']].filter(Boolean).join('/');
             if (!rwByIdent[id]) rwByIdent[id] = [];
             if (isFinite(lat1)&&isFinite(lon1)&&isFinite(lat2)&&isFinite(lon2)) {
                 rwByIdent[id].push({ lat1,lon1,lat2,lon2, name, length: isFinite(lenM)?lenM:1800 });
             } else if (isFinite(lat1)&&isFinite(lon1)) {
-                const hdg = parseFloat(row['le_heading_degT']);
-                const len = isFinite(lenM) ? lenM : 1800;
+                const hdg = parseFloat(row['le_heading_degT']), len = isFinite(lenM)?lenM:1800;
                 if (isFinite(hdg)) {
                     const R=6371000, hR=hdg*Math.PI/180;
-                    rwByIdent[id].push({
-                        lat1, lon1,
-                        lat2: lat1 + ((len/R)*Math.cos(hR))*(180/Math.PI),
-                        lon2: lon1 + ((len/R)*Math.sin(hR))*(180/Math.PI)/Math.cos(lat1*Math.PI/180),
-                        name, length: len
-                    });
+                    rwByIdent[id].push({ lat1, lon1, lat2:lat1+((len/R)*Math.cos(hR))*(180/Math.PI), lon2:lon1+((len/R)*Math.sin(hR))*(180/Math.PI)/Math.cos(lat1*Math.PI/180), name, length:len });
                 }
             }
         });
@@ -2283,11 +1615,11 @@ async function fetchAirportData() {
         runwayCache  = [];
         airportCache = [];
         airportRows.forEach(row => {
-            const lat = parseFloat(row['latitude_deg']);
-            const lon = parseFloat(row['longitude_deg']);
+            const lat = parseFloat(row['latitude_deg']), lon = parseFloat(row['longitude_deg']);
             if (!isFinite(lat)||!isFinite(lon)) return;
             const icao = row['ident'] || row['gps_code'] || 'UNKN';
-            airportCache.push({ icao, name: row['name']||icao, lat, lon });
+            const elevFt = parseFloat(row['elevation_ft']) || 0; // ← airport elevation for ILS AGL
+            airportCache.push({ icao, name: row['name']||icao, lat, lon, elevFt });
             const rwys = rwByIdent[row['ident']] || [];
             if (rwys.length === 0) {
                 const ns = runwayEndpointsFromCenter(lat,lon,  0, 1800);
@@ -2308,6 +1640,461 @@ async function fetchAirportData() {
 
 setTimeout(fetchAirportData, AIRPORT_FETCH_INITIAL);
 setInterval(fetchAirportData, AIRPORT_REFETCH);
+
+// ═══════════════════════════════════════════════════
+// ILS SYSTEM
+// ═══════════════════════════════════════════════════
+
+// ── State ─────────────────────────────────────────
+let _ilsRunway        = null;   // {lat1,lon1,lat2,lon2,name,airport,length}
+let _ilsAirportICAO   = null;
+let _ilsAirportElevFt = 0;
+let _ilsActive        = false;
+let _vsHistory        = [];
+let _lastRunwayPositions = [];  // [{x1,y1,x2,y2,rwyData,airportICAO}] for click detection
+
+// ── ILS HUD element ───────────────────────────────
+const ilsHUD = document.createElement('div');
+ilsHUD.id = 'radarILSHUD';
+ilsHUD.style.cssText = `
+    position:fixed; z-index:2147483646; display:none;
+    pointer-events:auto; font-family:${FONT_MONO};
+`;
+document.body.appendChild(ilsHUD);
+
+// ── CDI canvas (reused, not re-created each frame) ─
+const ilsCDICanvas = document.createElement('canvas');
+ilsCDICanvas.width  = 200;
+ilsCDICanvas.height = 200;
+const ilsCtx2 = ilsCDICanvas.getContext('2d');
+
+// ── Activate / Deactivate ─────────────────────────
+function activateILS(rwy, airportICAO) {
+    _ilsRunway       = rwy;
+    _ilsAirportICAO  = airportICAO;
+    const ap = airportCache.find(a => a.icao === airportICAO);
+    _ilsAirportElevFt = ap?.elevFt ?? 0;
+    _ilsActive = true;
+    _vsHistory = [];
+    nearestHUD.style.display = 'none';
+    ilsHUD.style.display = 'block';
+    repositionILSHUD();
+    updateILSHUD(null); // render immediately with placeholder data
+}
+
+function deactivateILS() {
+    _ilsActive  = false;
+    _ilsRunway  = null;
+    ilsHUD.style.display = 'none';
+    // Restore nearest HUD if enabled
+    updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+}
+
+function repositionILSHUD() {
+    const rl = parseInt(radarCanvas.style.left) || 5;
+    const rt = parseInt(radarCanvas.style.top)  || 0;
+    ilsHUD.style.left = (rl + radarSize + 12) + 'px';
+    ilsHUD.style.top  = rt + 'px';
+}
+
+// ── Vertical speed calculator ─────────────────────
+function computeVS(altFt) {
+    const now = Date.now();
+    _vsHistory.push({ altFt, time: now });
+    _vsHistory = _vsHistory.filter(h => now - h.time < 8000);
+    if (_vsHistory.length < 2) return null;
+    const oldest = _vsHistory[0];
+    const dt = (now - oldest.time) / 60000; // minutes
+    if (dt < 0.005) return null;
+    return Math.round((altFt - oldest.altFt) / dt); // fpm
+}
+
+// ── Determine which runway threshold to use ───────
+// Returns {tLat, tLon, oLat, oLon} where t = touchdown end, o = opposite
+function getApproachThreshold(playerLat, playerLon, playerHdg, rwy) {
+    const brg1 = calcBearing(playerLat, playerLon, rwy.lat1, rwy.lon1);
+    const brg2 = calcBearing(playerLat, playerLon, rwy.lat2, rwy.lon2);
+    const diff1 = Math.abs(((playerHdg - brg1 + 540) % 360) - 180);
+    const diff2 = Math.abs(((playerHdg - brg2 + 540) % 360) - 180);
+    return diff1 < diff2
+        ? { tLat: rwy.lat1, tLon: rwy.lon1, oLat: rwy.lat2, oLon: rwy.lon2 }
+        : { tLat: rwy.lat2, tLon: rwy.lon2, oLat: rwy.lat1, oLon: rwy.lon1 };
+}
+
+// ── Compute all ILS parameters ────────────────────
+function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpeedKts) {
+    if (!_ilsRunway) return null;
+
+    const { tLat, tLon, oLat, oLon } = getApproachThreshold(playerLat, playerLon, playerHdg, _ilsRunway);
+
+    // Convert to metres from threshold
+    const [pDx, pDy] = latLonToMeters(tLat, tLon, playerLat, playerLon);
+    const [rDx, rDy] = latLonToMeters(tLat, tLon, oLat, oLon);
+    const rLen = Math.hypot(rDx, rDy);
+    if (rLen < 1) return null;
+
+    const rUx = rDx / rLen, rUy = rDy / rLen;
+    // along: positive = player is past threshold (on runway / overshot)
+    // cross: positive = player is RIGHT of centreline
+    const along = pDx * rUx + pDy * rUy;
+    const cross  = pDx * (-rUy) + pDy * rUx;
+    const distToThreshM = -along; // positive when approaching
+
+    // Altitude AGL above field elevation
+    const playerAltAGL = playerAltFt - _ilsAirportElevFt;
+
+    // Ideal altitude at this point on a 3° glideslope above the threshold
+    const GS_DEG = 3.0;
+    const idealAltFt = Math.max(0, distToThreshM) * Math.tan(GS_DEG * Math.PI / 180) * 3.28084;
+    const gsErrFt = playerAltAGL - idealAltFt; // positive = above GS
+
+    // Localizer angular error (degrees) — positive = aircraft right of centreline
+    const locErrDeg = Math.atan2(cross, Math.max(100, Math.abs(distToThreshM))) * 180 / Math.PI;
+
+    // Glideslope angular error (degrees above 3° path)
+    const gsErrDeg  = Math.atan2(gsErrFt / 3.28084, Math.max(100, Math.abs(distToThreshM))) * 180 / Math.PI;
+
+    // Vertical speed
+    const vs = computeVS(playerAltFt);
+
+    // Actual descent angle
+    let descentAngle = null;
+    if (vs !== null && isFinite(vs) && playerSpeedKts > 10) {
+        const gsFtMin = playerSpeedKts * 101.269;
+        descentAngle = (-vs / gsFtMin) * (180 / Math.PI) * (Math.PI / 2);
+        // Simpler: atan2(-vs, gsFtMin) but keep in degrees
+        descentAngle = Math.atan2(-vs, gsFtMin) * 180 / Math.PI;
+        descentAngle = Math.round(descentAngle * 10) / 10;
+    }
+
+    // Bank angle from GeoFS
+    let bankDeg = null;
+    try {
+        const rawRoll = geofs.aircraft?.instance?.animationValue?.roll ?? null;
+        if (rawRoll !== null && isFinite(rawRoll)) {
+            // GeoFS typically stores roll in radians; convert if |value| < 2π
+            bankDeg = Math.abs(rawRoll) <= 6.28 ? rawRoll * 180 / Math.PI : rawRoll;
+            bankDeg = Math.round(bankDeg * 10) / 10;
+        }
+    } catch(e) {}
+
+    // Runway heading (direction you fly to land on this end)
+    const rwHdg = calcBearing(oLat, oLon, tLat, tLon); // facing FROM opposite TO threshold
+
+    return {
+        locErrDeg,
+        gsErrDeg,
+        gsErrFt:        Math.round(gsErrFt),
+        distToThreshNm: distToThreshM / 1852,
+        distToThreshM,
+        altAGL:         Math.round(playerAltAGL),
+        vs,
+        descentAngle,
+        bankDeg,
+        rwHdg:          Math.round(((rwHdg % 360) + 360) % 360),
+        runwayName:     _ilsRunway.name || 'RWY',
+        airportICAO:    _ilsAirportICAO,
+        onGround:       distToThreshM < 50 && Math.abs(along) < rLen + 50,
+    };
+}
+
+// ── Draw CDI instrument onto ilsCDICanvas ─────────
+function drawCDIInstrument(locErrDeg, gsErrDeg) {
+    const W = 200, H = 200, cx = W / 2, cy = H / 2;
+    const DOT_SPACING = 30;   // px between reference dots
+    const LOC_FS = 2.5;       // degrees for full-scale localizer deflection
+    const GS_FS  = 0.7;       // degrees for full-scale glideslope deflection
+    const MAX_PX = DOT_SPACING * 2; // 2 dots = full scale pixel offset
+
+    const c = ilsCtx2;
+    c.clearRect(0, 0, W, H);
+
+    // ── Background ──────────────────────────────────
+    c.beginPath(); c.arc(cx, cy, W / 2 - 1, 0, Math.PI * 2);
+    c.fillStyle = 'rgba(0,6,12,0.97)'; c.fill();
+    c.strokeStyle = 'rgba(0,160,230,0.7)'; c.lineWidth = 2; c.stroke();
+
+    // ── Dashed crosshair guides ──────────────────────
+    c.save();
+    c.beginPath(); c.arc(cx, cy, W/2 - 3, 0, Math.PI*2); c.clip();
+    c.strokeStyle = 'rgba(0,80,120,0.5)'; c.lineWidth = 1;
+    c.setLineDash([4, 5]);
+    c.beginPath();
+    c.moveTo(cx, 18); c.lineTo(cx, H - 18);
+    c.moveTo(18, cy); c.lineTo(W - 18, cy);
+    c.stroke();
+    c.setLineDash([]);
+    c.restore();
+
+    // ── Reference dots (localizer = horizontal axis) ─
+    [-2, -1, 1, 2].forEach(i => {
+        c.beginPath(); c.arc(cx + i * DOT_SPACING, cy, 4.5, 0, Math.PI * 2);
+        c.fillStyle = 'rgba(0,130,180,0.75)'; c.fill();
+    });
+
+    // ── Reference dots (glideslope = vertical axis) ──
+    [-2, -1, 1, 2].forEach(i => {
+        c.beginPath(); c.arc(cx, cy + i * DOT_SPACING, 4.5, 0, Math.PI * 2);
+        c.fillStyle = 'rgba(0,130,180,0.75)'; c.fill();
+    });
+
+    // ── Compute needle deviations in pixels ──────────
+    // LOC needle moves LEFT when aircraft is RIGHT of course
+    const locPx = Math.max(-MAX_PX * 1.6, Math.min(MAX_PX * 1.6,
+        -(locErrDeg / LOC_FS) * MAX_PX));
+    // GS needle moves DOWN when aircraft is ABOVE glideslope
+    const gsPx  = Math.max(-MAX_PX * 1.6, Math.min(MAX_PX * 1.6,
+        (gsErrDeg / GS_FS) * MAX_PX));
+
+    // Dot scale (0 = centred, 2 = full scale)
+    const locDots = Math.abs(locErrDeg) / LOC_FS * 2;
+    const gsDots  = Math.abs(gsErrDeg)  / GS_FS  * 2;
+
+    // Colour: green ≤1 dot, yellow ≤2, red >2
+    function needleColor(dots) {
+        if (dots < 1.0) return '#00ffaa';
+        if (dots < 2.0) return '#ffcc00';
+        return '#ff4444';
+    }
+    const locColor = needleColor(locDots);
+    const gsColor  = needleColor(gsDots);
+
+    // Clip to instrument circle
+    c.save();
+    c.beginPath(); c.arc(cx, cy, W/2 - 5, 0, Math.PI*2); c.clip();
+
+    // ── Localizer needle (vertical bar) ──────────────
+    c.strokeStyle = locColor; c.lineWidth = 5;
+    c.shadowColor = locColor; c.shadowBlur  = 10;
+    c.beginPath();
+    c.moveTo(cx + locPx, 16); c.lineTo(cx + locPx, H - 16);
+    c.stroke();
+    c.shadowBlur = 0;
+
+    // ── Glideslope needle (horizontal bar) ───────────
+    c.strokeStyle = gsColor; c.lineWidth = 5;
+    c.shadowColor = gsColor; c.shadowBlur  = 10;
+    c.beginPath();
+    c.moveTo(16, cy + gsPx); c.lineTo(W - 16, cy + gsPx);
+    c.stroke();
+    c.shadowBlur = 0;
+
+    c.restore();
+
+    // ── Centre fixed target ring ─────────────────────
+    c.strokeStyle = 'rgba(255,255,255,0.9)'; c.lineWidth = 2;
+    c.beginPath(); c.arc(cx, cy, 10, 0, Math.PI * 2); c.stroke();
+    c.beginPath();
+    c.moveTo(cx - 16, cy); c.lineTo(cx - 12, cy);
+    c.moveTo(cx + 12, cy); c.lineTo(cx + 16, cy);
+    c.moveTo(cx, cy - 16); c.lineTo(cx, cy - 12);
+    c.moveTo(cx, cy + 12); c.lineTo(cx, cy + 16);
+    c.stroke();
+
+    // ── Labels ───────────────────────────────────────
+    c.font = 'bold 10px Arial';
+    c.textAlign = 'left'; c.textBaseline = 'middle';
+    c.fillStyle = 'rgba(0,160,210,0.8)';
+    c.fillText('LOC', 6, cy - 5);
+    c.textAlign = 'center'; c.textBaseline = 'top';
+    c.fillText('G/S', cx + 6, 5);
+}
+
+// ── Bank angle arc indicator (separate small canvas) ─
+function drawBankIndicator(bankDeg) {
+    const W = 200, H = 44, cx = W / 2, cy = H - 4;
+    const R = 60;
+
+    const c = ilsCtx2;
+    // Draw into a separate offscreen to overlay on the HUD
+    // We'll just draw it inline after the CDI canvas using HTML
+
+    // Actually we'll embed this as a second canvas in the HUD
+    // This function draws onto ilsBankCanvas defined after
+    const bc = ilsBankCtx;
+    bc.clearRect(0, 0, W, H);
+
+    // Arc background
+    bc.strokeStyle = 'rgba(0,80,120,0.4)'; bc.lineWidth = 2;
+    bc.beginPath();
+    bc.arc(cx, cy, R, Math.PI, 2 * Math.PI);
+    bc.stroke();
+
+    // Tick marks at 0°, ±10°, ±20°, ±30°, ±45°
+    [-45, -30, -20, -10, 0, 10, 20, 30, 45].forEach(deg => {
+        const rad = ((deg - 90) * Math.PI / 180) + Math.PI;
+        // Remap: 0° bank = top of arc (π/2 from arc start)
+        const angle = Math.PI + (deg / 90) * (Math.PI / 2);
+        const isMain = deg % 30 === 0;
+        const innerR = R - (isMain ? 10 : 6);
+        bc.strokeStyle = isMain ? 'rgba(0,160,210,0.7)' : 'rgba(0,100,150,0.5)';
+        bc.lineWidth = isMain ? 2 : 1;
+        bc.beginPath();
+        bc.moveTo(cx + Math.cos(angle) * R, cy + Math.sin(angle) * R);
+        bc.lineTo(cx + Math.cos(angle) * innerR, cy + Math.sin(angle) * innerR);
+        bc.stroke();
+    });
+
+    // Bank needle
+    const clampedBank = Math.max(-45, Math.min(45, bankDeg || 0));
+    const needleAngle = Math.PI + (clampedBank / 90) * (Math.PI / 2);
+    const bankColor = Math.abs(clampedBank) < 15 ? '#00ffaa' : Math.abs(clampedBank) < 30 ? '#ffcc00' : '#ff4444';
+    bc.strokeStyle = bankColor; bc.lineWidth = 3;
+    bc.shadowColor = bankColor; bc.shadowBlur = 8;
+    bc.beginPath();
+    bc.moveTo(cx, cy);
+    bc.lineTo(cx + Math.cos(needleAngle) * (R - 4), cy + Math.sin(needleAngle) * (R - 4));
+    bc.stroke();
+    bc.shadowBlur = 0;
+
+    // Centre dot
+    bc.beginPath(); bc.arc(cx, cy, 4, 0, Math.PI * 2);
+    bc.fillStyle = 'rgba(255,255,255,0.9)'; bc.fill();
+
+    // Bank value label
+    bc.font = 'bold 11px Arial';
+    bc.textAlign = 'center'; bc.textBaseline = 'bottom';
+    bc.fillStyle = bankColor;
+    bc.fillText((clampedBank >= 0 ? 'R' : 'L') + Math.abs(clampedBank).toFixed(1) + '°', cx, H - 0);
+}
+
+// Bank indicator canvas
+const ilsBankCanvas = document.createElement('canvas');
+ilsBankCanvas.width  = 200;
+ilsBankCanvas.height = 44;
+const ilsBankCtx = ilsBankCanvas.getContext('2d');
+
+// ── Build / refresh the ILS HUD ───────────────────
+let _ilsHUDBuilt = false;
+
+function updateILSHUD(ilsData) {
+    if (!_ilsActive) { ilsHUD.style.display = 'none'; return; }
+    ilsHUD.style.display = 'block';
+
+    const t = T();
+    const rwyLabel = ilsData ? `${ilsData.runwayName}  ${ilsData.airportICAO}  HDG ${String(ilsData.rwHdg).padStart(3,'0')}°` : (_ilsRunway?.name ?? '—');
+
+    const locErrDeg = ilsData?.locErrDeg ?? 0;
+    const gsErrDeg  = ilsData?.gsErrDeg  ?? 0;
+
+    // Draw CDI instrument
+    drawCDIInstrument(locErrDeg, gsErrDeg);
+    // Draw bank indicator
+    drawBankIndicator(ilsData?.bankDeg ?? 0);
+
+    // Localizer / GS deviation colours for text
+    const locDots = Math.abs(locErrDeg) / 2.5 * 2;
+    const gsDots  = Math.abs(gsErrDeg)  / 0.7 * 2;
+    function dotColor(dots) { return dots < 1 ? 'rgba(0,255,170,0.95)' : dots < 2 ? 'rgba(255,204,0,0.95)' : 'rgba(255,68,68,0.95)'; }
+    const locColor = dotColor(locDots);
+    const gsColor  = dotColor(gsDots);
+
+    const distStr = ilsData
+        ? (ilsData.distToThreshNm > 0 ? ilsData.distToThreshNm.toFixed(1) + ' NM' : 'ON RUNWAY')
+        : '—';
+    const altStr  = ilsData ? ilsData.altAGL.toLocaleString() + ' ft' : '—';
+    const vsRaw   = ilsData?.vs;
+    const vsStr   = vsRaw != null ? (vsRaw > 0 ? '+' : '') + vsRaw + ' fpm' : '—';
+    const vsColor = vsRaw != null && vsRaw < 0 ? 'rgba(80,255,140,0.95)' : 'rgba(255,120,120,0.95)';
+    const dAngStr = ilsData?.descentAngle != null ? ilsData.descentAngle + '°' : '—';
+    const bankVal = ilsData?.bankDeg;
+    const bankStr = bankVal != null ? (bankVal >= 0 ? 'R ' : 'L ') + Math.abs(bankVal) + '°' : '—';
+    const bankColor = bankVal != null ? (Math.abs(bankVal) < 15 ? 'rgba(0,255,170,0.95)' : Math.abs(bankVal) < 30 ? 'rgba(255,204,0,0.95)' : 'rgba(255,68,68,0.95)') : 'rgba(180,255,180,0.9)';
+    const gsErrFtStr = ilsData
+        ? (ilsData.gsErrFt >= 0 ? '+' + ilsData.gsErrFt : ilsData.gsErrFt) + ' ft  ' + (ilsData.gsErrFt > 0 ? 'ABOVE' : ilsData.gsErrFt < 0 ? 'BELOW' : 'ON GS')
+        : '—';
+
+    // Localizer deviation description
+    const locDev = ilsData
+        ? (Math.abs(locErrDeg) < 0.1 ? 'ON LOC' : (locErrDeg > 0 ? 'RIGHT' : 'LEFT') + ' ' + locDots.toFixed(1) + ' dots')
+        : '—';
+
+    ilsHUD.innerHTML = `
+<div style="
+    background:${t.hudBg};
+    border:1.5px solid rgba(0,160,230,0.55);
+    border-radius:10px; overflow:hidden;
+    box-shadow:0 4px 22px rgba(0,0,0,0.8), 0 0 16px rgba(0,120,200,0.12);
+    font-family:${FONT_MONO}; min-width:230px;
+">
+  <!-- Header -->
+  <div style="padding:9px 14px 7px; border-bottom:1px solid ${t.hudSep};
+    display:flex; align-items:center; gap:8px;">
+    <span style="display:inline-block;width:10px;height:10px;border-radius:50%;
+      background:rgba(0,200,255,1);box-shadow:0 0 7px rgba(0,200,255,0.9);flex-shrink:0;"></span>
+    <span style="color:rgba(0,210,255,0.98);font-size:12px;letter-spacing:1.2px;
+      text-transform:uppercase;font-weight:bold;flex:1;">ILS  ${rwyLabel}</span>
+    <button id="ilsCloseBtn" style="
+      background:none; border:1px solid rgba(0,160,230,0.35); color:rgba(0,180,230,0.7);
+      border-radius:4px; cursor:pointer; font-size:11px; padding:2px 8px; flex-shrink:0;
+      font-family:${FONT_SANS}; transition:background .15s;
+    ">✕ CLOSE</button>
+  </div>
+
+  <!-- CDI instrument -->
+  <div id="ilsCDIWrap" style="display:flex;justify-content:center;padding:10px 0 4px;
+    border-bottom:1px solid ${t.hudSep};"></div>
+
+  <!-- LOC / GS deviation pills -->
+  <div style="display:flex; gap:8px; padding:6px 14px; border-bottom:1px solid ${t.hudSep};">
+    <div style="flex:1; background:rgba(0,20,40,0.7); border-radius:6px; padding:5px 8px; text-align:center;">
+      <div style="color:${t.hudLabel};font-size:9px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">LOCALIZER</div>
+      <div style="color:${locColor};font-size:13px;font-weight:bold;">${locDev}</div>
+    </div>
+    <div style="flex:1; background:rgba(0,20,40,0.7); border-radius:6px; padding:5px 8px; text-align:center;">
+      <div style="color:${t.hudLabel};font-size:9px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">GLIDESLOPE</div>
+      <div style="color:${gsColor};font-size:13px;font-weight:bold;">${gsErrFtStr}</div>
+    </div>
+  </div>
+
+  <!-- Data grid -->
+  <div style="padding:8px 14px; display:grid; grid-template-columns:1fr 1fr; gap:6px 10px;
+    border-bottom:1px solid ${t.hudSep};">
+    <div>
+      <div style="color:${t.hudLabel};font-size:10px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">ALT AGL</div>
+      <div style="color:rgba(0,240,255,0.95);font-size:15px;font-weight:bold">${altStr}</div>
+    </div>
+    <div>
+      <div style="color:${t.hudLabel};font-size:10px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">DISTANCE</div>
+      <div style="color:rgba(255,160,40,0.95);font-size:15px;font-weight:bold">${distStr}</div>
+    </div>
+    <div>
+      <div style="color:${t.hudLabel};font-size:10px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">VERT SPEED</div>
+      <div style="color:${vsColor};font-size:15px;font-weight:bold">${vsStr}</div>
+    </div>
+    <div>
+      <div style="color:${t.hudLabel};font-size:10px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">DESCENT °</div>
+      <div style="color:rgba(255,220,80,0.95);font-size:15px;font-weight:bold">${dAngStr}</div>
+    </div>
+  </div>
+
+  <!-- Bank indicator -->
+  <div style="padding:6px 0 0; border-bottom:1px solid ${t.hudSep};">
+    <div style="color:${t.hudLabel};font-size:9px;letter-spacing:1px;text-transform:uppercase;text-align:center;margin-bottom:2px">BANK ANGLE</div>
+    <div id="ilsBankWrap" style="display:flex;justify-content:center;padding:0 0 4px;"></div>
+  </div>
+
+  <!-- GS info footer -->
+  <div style="padding:5px 14px 7px; display:flex; align-items:center; justify-content:space-between;">
+    <span style="color:${t.hudLabel};font-size:10px;">3° G/S  ·  Click runway to close ILS</span>
+    <span style="color:${bankColor};font-size:13px;font-weight:bold;">${bankStr}</span>
+  </div>
+</div>`;
+
+    // Inject the canvases
+    const cdiWrap  = document.getElementById('ilsCDIWrap');
+    if (cdiWrap)  cdiWrap.appendChild(ilsCDICanvas);
+    const bankWrap = document.getElementById('ilsBankWrap');
+    if (bankWrap) bankWrap.appendChild(ilsBankCanvas);
+
+    // Close button
+    const closeBtn = document.getElementById('ilsCloseBtn');
+    if (closeBtn) {
+        closeBtn.onmouseover = () => closeBtn.style.background = 'rgba(0,160,230,0.15)';
+        closeBtn.onmouseout  = () => closeBtn.style.background = 'none';
+        closeBtn.onclick = (e) => { e.stopPropagation(); deactivateILS(); };
+    }
+}
 
 // ═══════════════════════════════════════════════════
 // SECTION 13 — COORDINATE HELPERS
@@ -2333,121 +2120,19 @@ function worldToCanvas(dx, dy, cx, cy, rotRad) {
 }
 
 // ═══════════════════════════════════════════════════
-// SECTION 14 — SPIN LINE
-// Angle advances based on real elapsed time (ms since last frame) so the
-// sweep speed is constant regardless of draw rate or fetch delays.
+// SECTION 14 — RAF DRAW LOOP
 // ═══════════════════════════════════════════════════
 
-let spinAngle    = 0;
-let _spinLastTs  = null;   // performance.now() of last rAF tick
-
-function drawSpinLine() {
-    if (!prefs.spinEnabled) return;
-
-    const cx = radarSize / 2, cy = radarSize / 2;
-    const R  = radarSize / 2 - 10;
-    const t  = T();
-
-    // ── Shadow pass (drawn first, so the bright line sits on top) ─────────
-    if (prefs.spinShadow) {
-        const shadowOffset = 0.35;                      // rad behind the line
-        const shadowAngle  = spinAngle - shadowOffset;
-        const sx = cx + Math.cos(shadowAngle) * R;
-        const sy = cy + Math.sin(shadowAngle) * R;
-
-        // Wide, very faint glow arc
-        const lgShadow = ctx.createConicalGradient
-            ? null                                       // future API; skip for now
-            : null;
-
-        // Radial wedge — same technique as the sweep trail but dimmer & wider
-        const arcStart = shadowAngle - 0.6;
-        ctx.save();
-        ctx.globalAlpha = 0.07;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.arc(cx, cy, R, arcStart, shadowAngle);
-        ctx.closePath();
-        ctx.fillStyle = settings.nightMode
-            ? 'rgba(255,100,30,0.9)'
-            : 'rgba(0,255,0,0.9)';
-        ctx.fill();
-        ctx.globalAlpha = 1;
-
-        // Thin shadow line
-        ctx.save();
-        ctx.globalAlpha = 0.25;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(sx, sy);
-        ctx.strokeStyle = settings.nightMode ? 'rgba(255,120,40,0.6)' : 'rgba(0,255,80,0.6)';
-        ctx.lineWidth   = 3;
-        ctx.shadowColor = settings.nightMode ? 'rgba(255,100,20,0.4)' : 'rgba(0,255,0,0.4)';
-        ctx.shadowBlur  = 8;
-        ctx.stroke();
-        ctx.restore();
-        ctx.restore();
-    }
-
-    // ── Sweep trail ───────────────────────────────────────────────────────
-    const sweepStart = spinAngle - 1.1;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, R, sweepStart, spinAngle);
-    ctx.closePath();
-    ctx.fillStyle = t.trailColor(0.08);
-    ctx.fill();
-
-    // ── Main sweep line ───────────────────────────────────────────────────
-    const ex = cx + Math.cos(spinAngle) * R;
-    const ey = cy + Math.sin(spinAngle) * R;
-
-    ctx.save();
-    ctx.shadowColor = t.scanLine[0];
-    ctx.shadowBlur  = 6;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(ex, ey);
-    ctx.strokeStyle = t.scanLine[0];
-    ctx.lineWidth   = 2;
-    ctx.stroke();
-    ctx.restore();
-
-    // Tip dot
-    ctx.beginPath();
-    ctx.arc(ex, ey, 3, 0, Math.PI * 2);
-    ctx.fillStyle = t.scanLine[0];
-    ctx.fill();
-}
-
-// ── requestAnimationFrame draw loop — runs every frame for smooth spin ────
-// The heavier drawRadar() still runs on DRAW_INTERVAL for performance; the
-// rAF loop only redraws the spin overlay in between heavy frames.
-let _rafActive    = true;
-let _lastHeavyTs  = 0;
+let _rafActive   = true;
+let _lastHeavyTs = 0;
 
 function _rafTick(ts) {
     if (!_rafActive) return;
-
-    // Advance spin angle by elapsed time — speed is in rad per 60-fps frame
-    if (_spinLastTs !== null && !isGamePaused && prefs.spinEnabled) {
-        const dtMs  = Math.min(ts - _spinLastTs, 100); // cap at 100ms to avoid jumps
-        const dtFrames = dtMs / (1000 / 60);           // normalise to 60-fps frames
-        spinAngle += prefs.spinSpeed * dtFrames;
-        if (spinAngle > Math.PI * 2) spinAngle -= Math.PI * 2;
-    }
-    _spinLastTs = ts;
-
-    // Run full drawRadar on interval; in between, just overdraw the spin line
     const now = performance.now();
     if (now - _lastHeavyTs >= DRAW_INTERVAL && !isDragging) {
         _lastHeavyTs = now;
-        drawRadar();   // drawRadar calls drawSpinLine() itself
-    } else if (prefs.spinEnabled && !isGamePaused) {
-        // Lightweight overdraw: just repaint the sweep on top without clearing
-        drawSpinLine();
+        drawRadar();
     }
-
     requestAnimationFrame(_rafTick);
 }
 requestAnimationFrame(_rafTick);
@@ -2456,16 +2141,21 @@ requestAnimationFrame(_rafTick);
 // SECTION 15 — AIRPORT / RUNWAY DRAWING
 // ═══════════════════════════════════════════════════
 
-let _airportCache_lastLat  = null;
-let _airportCache_lastLon  = null;
+let _airportCache_lastLat   = null;
+let _airportCache_lastLon   = null;
 let _airportCache_lastRange = null;
 
 function drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad) {
-    if (!settings.showAirports) return {runways:0, airports:0};
+    if (!settings.showAirports) { _lastRunwayPositions = []; return { runways: 0, airports: 0 }; }
+
+    // Rebuild runway screen-position list every frame for accurate click detection
+    _lastRunwayPositions = [];
+
     const moved = _airportCache_lastLat === null
         || Math.abs(playerLat - _airportCache_lastLat) * 111000 > 1
         || Math.abs(playerLon - _airportCache_lastLon) * 111000 * Math.cos(playerLat * Math.PI/180) > 1
         || radarRange !== _airportCache_lastRange;
+
     if (moved) {
         _airportCache_lastLat   = playerLat;
         _airportCache_lastLon   = playerLon;
@@ -2484,42 +2174,59 @@ function drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad) {
 
         runwayCache.forEach(rwy => {
             if (!inRangeICAOs.has(rwy.airport)) return;
-            const [dx1,dy1] = latLonToMeters(playerLat, playerLon, rwy.lat1, rwy.lon1);
-            const [dx2,dy2] = latLonToMeters(playerLat, playerLon, rwy.lat2, rwy.lon2);
+            const [dx1, dy1] = latLonToMeters(playerLat, playerLon, rwy.lat1, rwy.lon1);
+            const [dx2, dy2] = latLonToMeters(playerLat, playerLon, rwy.lat2, rwy.lon2);
             const cDist = Math.hypot((dx1+dx2)/2, (dy1+dy2)/2);
-            if (cDist > radarRange*1.2) return;
-            const [x1,y1] = worldToCanvas(dx1,dy1,cx,cy,rotRad);
-            const [x2,y2] = worldToCanvas(dx2,dy2,cx,cy,rotRad);
-            if (Math.hypot(x1-cx,y1-cy) > radarSize/2 && Math.hypot(x2-cx,y2-cy) > radarSize/2) return;
+            if (cDist > radarRange * 1.2) return;
+            const [x1, y1] = worldToCanvas(dx1, dy1, cx, cy, rotRad);
+            const [x2, y2] = worldToCanvas(dx2, dy2, cx, cy, rotRad);
+            if (Math.hypot(x1-cx, y1-cy) > radarSize/2 && Math.hypot(x2-cx, y2-cy) > radarSize/2) return;
             const icao = rwy.airport || 'UNKN';
             if (!groups[icao]) {
                 const info = airportCache.find(a => a.icao === icao);
-                groups[icao] = { runways:[], name: info?.name || icao, icao, dist: cDist };
+                groups[icao] = { runways: [], name: info?.name || icao, icao, dist: cDist };
             }
             if (cDist < groups[icao].dist) groups[icao].dist = cDist;
-            groups[icao].runways.push({x1,y1,x2,y2, isPlaceholder: !!rwy.isPlaceholder});
+            groups[icao].runways.push({
+                x1, y1, x2, y2,
+                isPlaceholder: !!rwy.isPlaceholder,
+                rwyData: { lat1: rwy.lat1, lon1: rwy.lon1, lat2: rwy.lat2, lon2: rwy.lon2, name: rwy.name, airport: rwy.airport, length: rwy.length },
+            });
         });
 
         Object.values(groups).forEach(g => {
             if (!g.runways.length) return;
-            const pts = g.runways.flatMap(r => [{x:r.x1,y:r.y1},{x:r.x2,y:r.y2}]);
-            const centX = pts.reduce((s,p)=>s+p.x,0)/pts.length;
-            const centY = pts.reduce((s,p)=>s+p.y,0)/pts.length;
-            const maxR  = Math.max(...pts.map(p=>Math.hypot(p.x-centX,p.y-centY)));
-            g.centX = centX; g.centY = centY; g.circleR = Math.max(maxR+8, 14);
+            const pts  = g.runways.flatMap(r => [{x:r.x1,y:r.y1},{x:r.x2,y:r.y2}]);
+            const centX = pts.reduce((s,p) => s+p.x, 0) / pts.length;
+            const centY = pts.reduce((s,p) => s+p.y, 0) / pts.length;
+            const maxR  = Math.max(...pts.map(p => Math.hypot(p.x-centX, p.y-centY)));
+            g.centX = centX; g.centY = centY; g.circleR = Math.max(maxR + 8, 14);
         });
 
         _cachedGroups = groups;
         drawAirportsAndRunways._cachedGroups = groups;
     }
 
+    // Recompute screen positions for this frame (orientation / range might have changed)
+    // We need fresh x/y for accurate clicks, so re-project from rwyData
+    Object.values(_cachedGroups).forEach(g => {
+        g.runways.forEach(r => {
+            if (r.rwyData && !r.isPlaceholder) {
+                const [dx1,dy1] = latLonToMeters(playerLat, playerLon, r.rwyData.lat1, r.rwyData.lon1);
+                const [dx2,dy2] = latLonToMeters(playerLat, playerLon, r.rwyData.lat2, r.rwyData.lon2);
+                const [x1,y1] = worldToCanvas(dx1, dy1, cx, cy, rotRad);
+                const [x2,y2] = worldToCanvas(dx2, dy2, cx, cy, rotRad);
+                r.x1 = x1; r.y1 = y1; r.x2 = x2; r.y2 = y2;
+                _lastRunwayPositions.push({ x1, y1, x2, y2, rwyData: r.rwyData, airportICAO: g.icao });
+            }
+        });
+    });
+
     let nearbyRunways = 0;
     Object.values(_cachedGroups).forEach(g => {
         if (!g.centX) return;
-
-        const name = g.dist < radarRange*0.5
-            ? (g.name.length>22 ? g.name.slice(0,22)+'…' : g.name) : g.icao;
-
+        const name = g.dist < radarRange * 0.5
+            ? (g.name.length > 22 ? g.name.slice(0, 22) + '…' : g.name) : g.icao;
         const allPlaceholder = g.runways.length > 0 && g.runways.every(r => r.isPlaceholder);
 
         if (allPlaceholder) {
@@ -2533,16 +2240,36 @@ function drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad) {
             g.runways.forEach(r => {
                 if (r.isPlaceholder) return;
                 nearbyRunways++;
-                ctx.beginPath(); ctx.moveTo(r.x1,r.y1); ctx.lineTo(r.x2,r.y2);
-                ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 8; ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(r.x1,r.y1); ctx.lineTo(r.x2,r.y2);
-                ctx.strokeStyle = 'rgba(160,160,160,0.35)'; ctx.lineWidth = 1.5; ctx.stroke();
+                const isActiveILS = _ilsActive && _ilsRunway && _ilsRunway === r.rwyData;
+
+                // Highlight ILS-selected runway in cyan
+                ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(r.x2, r.y2);
+                ctx.strokeStyle = isActiveILS ? 'rgba(0,240,255,0.95)' : 'rgba(255,255,255,0.95)';
+                ctx.lineWidth   = isActiveILS ? 10 : 8;
+                ctx.stroke();
+
+                ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(r.x2, r.y2);
+                ctx.strokeStyle = isActiveILS ? 'rgba(0,180,255,0.5)' : 'rgba(160,160,160,0.35)';
+                ctx.lineWidth   = 1.5;
+                ctx.stroke();
+
+                // ILS approach beacon on active runway
+                if (isActiveILS) {
+                    ctx.strokeStyle = 'rgba(0,220,255,0.6)'; ctx.lineWidth = 1;
+                    ctx.setLineDash([4, 6]);
+                    // Extended centerline 5nm ahead of threshold end being approached
+                    ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(
+                        r.x1 + (r.x1 - r.x2) * 0.6, r.y1 + (r.y1 - r.y2) * 0.6);
+                    ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(r.x2, r.y2); ctx.lineTo(
+                        r.x2 + (r.x2 - r.x1) * 0.6, r.y2 + (r.y2 - r.y1) * 0.6);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
             });
         }
 
-        const labelAnchorY = allPlaceholder
-            ? (g.centY - 10)
-            : (g.centY - g.circleR - 5);
+        const labelAnchorY = allPlaceholder ? (g.centY - 10) : (g.centY - g.circleR - 5);
         ctx.font = `bold ${UI.airportLabelFont}px ${FONT_CANVAS}`;
         ctx.textAlign = 'center';
         const tw = ctx.measureText(name).width;
@@ -2551,7 +2278,18 @@ function drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad) {
         else ctx.rect(g.centX-tw/2-4, labelAnchorY-12, tw+8, 13);
         ctx.fill();
         ctx.fillStyle = 'rgba(80,180,255,1)';
-        ctx.fillText(name, g.centX, labelAnchorY-1);
+        ctx.fillText(name, g.centX, labelAnchorY - 1);
+
+        // "ILS" badge on airport with active runway
+        if (_ilsActive && _ilsAirportICAO === g.icao) {
+            ctx.font = 'bold 9px Arial';
+            const badge = ' ILS ';
+            const bw = ctx.measureText(badge).width + 4;
+            ctx.fillStyle = 'rgba(0,180,255,0.9)';
+            ctx.fillRect(g.centX - bw/2, labelAnchorY - 26, bw, 12);
+            ctx.fillStyle = '#000'; ctx.textAlign = 'center';
+            ctx.fillText(badge, g.centX, labelAnchorY - 16);
+        }
     });
 
     return { runways: nearbyRunways, airports: Object.keys(_cachedGroups).length };
@@ -2563,39 +2301,22 @@ function drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad) {
 
 function drawPlayerTriangle(cx, cy, playerHeading, isGamePaused) {
     if (!settings.showPlayerTriangle) return;
-
-    const angleRad = (settings.orientMode === 'north')
-        ? (playerHeading * Math.PI / 180)
-        : 0;
-
-    const cos = Math.cos(angleRad);
-    const sin = Math.sin(angleRad);
-
+    const angleRad = (settings.orientMode === 'north') ? (playerHeading * Math.PI / 180) : 0;
+    const cos = Math.cos(angleRad), sin = Math.sin(angleRad);
     ctx.setTransform(cos, sin, -sin, cos, cx, cy);
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur  = 0;
-    ctx.setLineDash([]);
-
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.setLineDash([]);
     ctx.beginPath();
     ctx.moveTo(0, -UI.playerTriTip);
     ctx.lineTo( UI.playerTriBase,  UI.playerTriBaseOff);
     ctx.lineTo(-UI.playerTriBase,  UI.playerTriBaseOff);
     ctx.closePath();
-
-    ctx.fillStyle = isGamePaused ? 'rgba(150,150,150,0.9)' : 'rgba(0,255,0,0.95)';
+    ctx.fillStyle   = isGamePaused ? 'rgba(150,150,150,0.9)' : 'rgba(0,255,0,0.95)';
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-    ctx.lineWidth   = 2;
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.arc(0, 0, 3, 0, Math.PI * 2);
-    ctx.fillStyle = 'white';
-    ctx.fill();
-
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'white'; ctx.fill();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur  = 0;
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
 }
 
 // ═══════════════════════════════════════════════════
@@ -2609,13 +2330,11 @@ let _cachedCallsign     = null;
 
 function drawRadar() {
     const t  = T();
-    const cx = radarSize/2, cy = radarSize/2;
+    const cx = radarSize / 2, cy = radarSize / 2;
 
     ctx.clearRect(0, 0, radarSize, radarSize);
-    ctx.beginPath();
-    ctx.arc(cx, cy, radarSize/2, 0, Math.PI*2);
-    ctx.fillStyle = t.bg;
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy, radarSize/2, 0, Math.PI*2);
+    ctx.fillStyle = t.bg; ctx.fill();
 
     let player = null, playerHeading = 0, playerCallsign = 'YOU';
     let playerLat = 0, playerLon = 0, playerAlt = 0, playerAltFt = 0;
@@ -2629,7 +2348,6 @@ function drawRadar() {
             playerLon      = player.llaLocation[1];
             playerAlt      = player.llaLocation[2];
             playerAltFt    = geofs.animation?.values?.altitude || (playerAlt * 3.28084);
-
             if (isFinite(playerLat) && isFinite(playerLon) && (playerLat !== 0 || playerLon !== 0)) {
                 _lastValidLat   = playerLat;
                 _lastValidLon   = playerLon;
@@ -2652,234 +2370,143 @@ function drawRadar() {
         if (_cachedCallsign) window.playerCallsign = _cachedCallsign;
     }
     const displayCallsign = _cachedCallsign || playerCallsign;
+    updateMenuInfoCallsign(displayCallsign, hasPos ? playerLat : null, hasPos ? playerLon : null);
 
-    {
-        updateMenuInfoCallsign(displayCallsign, hasPos ? playerLat : null, hasPos ? playerLon : null);
-    }
+    const myData = hasPos ? { lat: playerLat, lon: playerLon, altFt: playerAltFt } : null;
+    const rotRad = settings.orientMode === 'track' ? (playerHeading * Math.PI / 180) : 0;
 
-    const myData = hasPos ? {
-        lat:   playerLat,
-        lon:   playerLon,
-        altFt: playerAltFt,
-    } : null;
-
-    const rotRad = settings.orientMode === 'track'
-        ? (playerHeading * Math.PI / 180)
-        : 0;
-
-    // ── Clip to circle ───────────────────────────
+    // ── Clip to circle ────────────────────────────
     ctx.save();
-    ctx.beginPath(); ctx.arc(cx,cy,radarSize/2,0,Math.PI*2); ctx.clip();
+    ctx.beginPath(); ctx.arc(cx, cy, radarSize/2, 0, Math.PI*2); ctx.clip();
 
-    // ── Grid lines ───────────────────────────────
+    // ── Grid lines ────────────────────────────────
     ctx.strokeStyle = t.grid; ctx.lineWidth = UI.gridLineW;
     ctx.beginPath();
-    ctx.moveTo(cx,0); ctx.lineTo(cx,radarSize);
-    ctx.moveTo(0,cy); ctx.lineTo(radarSize,cy);
+    ctx.moveTo(cx, 0); ctx.lineTo(cx, radarSize);
+    ctx.moveTo(0, cy); ctx.lineTo(radarSize, cy);
     ctx.stroke();
 
-    // ── Range rings ──────────────────────────────
+    // ── Range rings ───────────────────────────────
     if (settings.showRings) {
-        for (let i=1; i<=3; i++) {
-            const rr = (radarSize/2) * (i/3);
+        for (let i = 1; i <= 3; i++) {
+            const rr = (radarSize / 2) * (i / 3);
             ctx.strokeStyle = t.ring; ctx.lineWidth = UI.ringLineW;
-            ctx.beginPath(); ctx.arc(cx,cy,rr,0,Math.PI*2); ctx.stroke();
-
+            ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI*2); ctx.stroke();
             if (settings.showRingLabels) {
-                const dist = radarRange * (i/3);
-                const lbl  = dist >= 1000
-                    ? (dist/1000).toFixed(dist%1000===0?0:1)+' km'
-                    : Math.round(dist)+' m';
+                const dist = radarRange * (i / 3);
+                const lbl  = dist >= 1000 ? (dist/1000).toFixed(dist%1000===0?0:1)+' km' : Math.round(dist)+' m';
                 ctx.font = `bold ${UI.ringLabelFont}px ${FONT_CANVAS}`;
                 const tw = ctx.measureText(lbl).width;
-                const lx = cx + 8;
-                const ly = cy - rr + 10;
+                const lx = cx + 8, ly = cy - rr + 10;
                 ctx.fillStyle = 'rgba(0,0,0,0.65)';
-                ctx.fillRect(lx-4, ly-12, tw+8, 17);
-                ctx.fillStyle    = t.ringLabel;
-                ctx.textAlign    = 'left';
-                ctx.textBaseline = 'middle';
+                ctx.fillRect(lx - 4, ly - 12, tw + 8, 17);
+                ctx.fillStyle = t.ringLabel; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
                 ctx.fillText(lbl, lx, ly - 2);
             }
         }
     }
 
-    // ── Compass ──────────────────────────────────
+    // ── Compass ───────────────────────────────────
     {
         const dirs  = ['N','E','S','W'];
         const edgeR = radarSize/2 - 16;
-        ctx.font         = `bold ${UI.compassFont}px ${FONT_CANVAS}`;
-        ctx.textAlign    = 'center';
-        ctx.textBaseline = 'middle';
-
+        ctx.font = `bold ${UI.compassFont}px ${FONT_CANVAS}`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         dirs.forEach((d, i) => {
             const geoBearing  = i * 90;
             const screenAngle = settings.orientMode === 'track'
                 ? (geoBearing - playerHeading) * Math.PI / 180
                 : geoBearing * Math.PI / 180;
-
             const px = cx + Math.sin(screenAngle) * edgeR;
             const py = cy - Math.cos(screenAngle) * edgeR;
-
             ctx.fillStyle = d === 'N' ? 'rgba(255,80,80,0.95)' : t.compass;
             ctx.fillText(d, px, py);
         });
-
         if (settings.orientMode === 'track') {
-            ctx.font      = `bold ${UI.compassHdgFont}px ${FONT_CANVAS}`;
+            ctx.font = `bold ${UI.compassHdgFont}px ${FONT_CANVAS}`;
             ctx.fillStyle = 'rgba(180,180,180,0.55)';
             ctx.fillText(`HDG ${Math.round(playerHeading).toString().padStart(3,'0')}°`, cx, 30);
         }
     }
 
-    // ── Spin line ────────────────────────────────
-    if (!isGamePaused) drawSpinLine();
-
-    // ── Airports & runways ───────────────────────
+    // ── Airports & runways ────────────────────────
     if (!isGamePaused && hasPos) {
         drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad);
     }
 
-    // ── Other aircraft blips ─────────────────────
+    // ── Other aircraft blips ──────────────────────
     lastBlipPositions = [];
     let nearestAc = null, nearestMeters = Infinity;
 
     if (settings.showTraffic && !isGamePaused && aircraftListCache.length > 0 && hasPos) {
         const myCs = _cachedCallsign || playerCallsign;
-
         aircraftListCache.forEach(ac => {
             if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
             if (ac.cs && myCs && myCs !== 'YOU' && ac.cs.toLowerCase() === myCs.toLowerCase()) return;
-
             const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
             const distM    = Math.hypot(dx, dy);
-
-            // Track nearest regardless of radar range (HUD always shows closest)
-            if (distM < nearestMeters) {
-                nearestMeters = distM;
-                nearestAc = ac;
-            }
-
-            // Only draw blip if within radar range
+            if (distM < nearestMeters) { nearestMeters = distM; nearestAc = ac; }
             if (distM > radarRange) return;
-
             ctx.save();
             try {
-                // Isolate mode: skip drawing non-tracked blips (but nearest still tracked above)
                 if (_trackedId && settings.isolateTracked && ac.id !== _trackedId) { ctx.restore(); return; }
-
                 const [rx, ry] = worldToCanvas(dx, dy, cx, cy, rotRad);
                 if (Math.hypot(rx-cx, ry-cy) > radarSize/2) { ctx.restore(); return; }
-
                 lastBlipPositions.push({ x:rx, y:ry, ac, distance:distM, myData });
-
                 const isTrackedBlip = !!_trackedId && ac.id === _trackedId;
-                const isActive      = isTrackedBlip;
-
-                ctx.shadowColor = 'transparent';
-                ctx.shadowBlur  = 0;
-                ctx.setLineDash([]);
-
-                const acH = parseFloat(ac.h);
+                ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.setLineDash([]);
+                const acH  = parseFloat(ac.h);
                 const _apiSpd  = parseFloat(ac.s);
                 const _compSpd = typeof ac._computedSpd === 'number' ? ac._computedSpd : NaN;
                 const acS = isFinite(_apiSpd) ? _apiSpd : (isFinite(_compSpd) ? _compSpd : NaN);
-
-                // ── Velocity vector ──────────────────────────
                 if (settings.showVectors && isFinite(acH) && isFinite(acS)) {
                     const speedMs = acS * 0.514444;
                     const vecLen  = Math.min((speedMs * 30) / radarRange * (radarSize / 2), radarSize/2);
                     const hRad    = (acH * Math.PI / 180) - rotRad;
-                    const vx      = rx + Math.sin(hRad) * vecLen;
-                    const vy      = ry - Math.cos(hRad) * vecLen;
+                    const vx = rx + Math.sin(hRad) * vecLen, vy = ry - Math.cos(hRad) * vecLen;
                     ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(vx, vy);
                     ctx.strokeStyle = T().vector; ctx.lineWidth = UI.vectorLineW;
                     ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
                 }
-
-                // ── Blip shape ───────────────────────────────
                 const blipColor  = isTrackedBlip ? 'rgba(255,220,60,1)' : T().blipFill;
                 const blipStroke = isTrackedBlip ? 'rgba(255,240,120,0.9)' : 'rgba(255,255,255,0.7)';
-
                 if (isTrackedBlip) {
                     ctx.beginPath();
                     ctx.arc(rx, ry, (settings.showBlipTriangle && isFinite(acH) ? UI.blipTriTip : UI.blipDotR) + 7, 0, Math.PI*2);
-                    ctx.strokeStyle = 'rgba(255,220,60,0.4)';
-                    ctx.lineWidth   = 2.5;
-                    ctx.stroke();
+                    ctx.strokeStyle = 'rgba(255,220,60,0.4)'; ctx.lineWidth = 2.5; ctx.stroke();
                 }
-
                 if (settings.showBlipTriangle && isFinite(acH)) {
                     const angle = (acH * Math.PI / 180) - rotRad;
-                    const tip   = UI.blipTriTip, base = UI.blipTriBase;
-                    ctx.save();
-                    ctx.translate(rx, ry); ctx.rotate(angle);
-                    ctx.beginPath();
-                    ctx.moveTo(0, -tip);
-                    ctx.lineTo( base,  tip * 0.55);
-                    ctx.lineTo(-base,  tip * 0.55);
-                    ctx.closePath();
-                    ctx.fillStyle   = blipColor;
-                    ctx.fill();
-                    ctx.strokeStyle = blipStroke;
-                    ctx.lineWidth   = isActive ? 2 : 1.5;
-                    ctx.stroke();
+                    ctx.save(); ctx.translate(rx, ry); ctx.rotate(angle);
+                    ctx.beginPath(); ctx.moveTo(0,-UI.blipTriTip); ctx.lineTo(UI.blipTriBase,UI.blipTriTip*0.55); ctx.lineTo(-UI.blipTriBase,UI.blipTriTip*0.55); ctx.closePath();
+                    ctx.fillStyle = blipColor; ctx.fill();
+                    ctx.strokeStyle = blipStroke; ctx.lineWidth = isTrackedBlip ? 2 : 1.5; ctx.stroke();
                     ctx.restore();
                 } else {
-                    const blipR = isActive ? UI.blipDotRActive : UI.blipDotR;
-                    ctx.fillStyle = blipColor;
-                    ctx.beginPath(); ctx.arc(rx, ry, blipR, 0, Math.PI*2); ctx.fill();
-                    ctx.strokeStyle = blipStroke; ctx.lineWidth = isActive ? 2 : 1; ctx.stroke();
+                    const blipR = isTrackedBlip ? UI.blipDotRActive : UI.blipDotR;
+                    ctx.fillStyle = blipColor; ctx.beginPath(); ctx.arc(rx, ry, blipR, 0, Math.PI*2); ctx.fill();
+                    ctx.strokeStyle = blipStroke; ctx.lineWidth = isTrackedBlip ? 2 : 1; ctx.stroke();
                 }
-
-                // ── Labels ───────────────────────────────────
-                const blipBottom = settings.showBlipTriangle && isFinite(acH)
-                    ? ry + UI.blipTriTip + 4
-                    : ry + (isActive ? UI.blipDotRActive : UI.blipDotR) + 4;
+                const blipBottom = settings.showBlipTriangle && isFinite(acH) ? ry+UI.blipTriTip+4 : ry+(isTrackedBlip?UI.blipDotRActive:UI.blipDotR)+4;
                 let labelY = blipBottom;
-                ctx.textAlign    = 'center';
-                ctx.textBaseline = 'top';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'top';
                 ctx.font = `bold ${UI.blipLabelFont}px ${FONT_CANVAS}`;
-
                 function drawTag(text, color, yOff) {
-                    const tw   = ctx.measureText(text).width;
-                    const padX = UI.blipLabelPadX;
-                    const rowH = UI.blipLabelRowH;
+                    const tw = ctx.measureText(text).width, padX = UI.blipLabelPadX, rowH = UI.blipLabelRowH;
                     ctx.fillStyle = 'rgba(0,0,0,0.72)';
-                    ctx.fillRect(rx - tw/2 - padX, yOff, tw + padX*2, rowH - 1);
-                    ctx.fillStyle = color;
-                    ctx.fillText(text, rx, yOff + 2);
+                    ctx.fillRect(rx-tw/2-padX, yOff, tw+padX*2, rowH-1);
+                    ctx.fillStyle = color; ctx.fillText(text, rx, yOff+2);
                     return yOff + rowH;
                 }
-
-                if (settings.showCallsign && ac.cs) {
-                    labelY = drawTag(ac.cs.substring(0, 12), T().blipLabel, labelY);
-                }
-
-                const rawAlt = isFinite(parseFloat(ac.al))
-                    ? parseFloat(ac.al)
-                    : (ac.co.length >= 3 && isFinite(parseFloat(ac.co[2]))
-                        ? parseFloat(ac.co[2]) * 3.28084
-                        : null);
+                if (settings.showCallsign && ac.cs) labelY = drawTag(ac.cs.substring(0,12), T().blipLabel, labelY);
+                const rawAlt = isFinite(parseFloat(ac.al)) ? parseFloat(ac.al) : (ac.co.length>=3 && isFinite(parseFloat(ac.co[2])) ? parseFloat(ac.co[2])*3.28084 : null);
                 const altFmt = rawAlt !== null ? fmtAlt(rawAlt) : null;
-                if (settings.showAltitude && altFmt !== null) {
-                    labelY = drawTag(altFmt, T().blipAlt, labelY);
-                }
-
+                if (settings.showAltitude && altFmt !== null) labelY = drawTag(altFmt, T().blipAlt, labelY);
                 const spdFmt = isFinite(acS) ? fmtSpd(acS) : null;
-                if (settings.showSpeed && spdFmt !== null) {
-                    labelY = drawTag(spdFmt, T().blipSpeed, labelY);
-                }
-
-                if (settings.showBlipDist) {
-                    labelY = drawTag(fmtDistMetric(distM), T().blipLabel, labelY);
-                }
-
+                if (settings.showSpeed && spdFmt !== null) labelY = drawTag(spdFmt, T().blipSpeed, labelY);
+                if (settings.showBlipDist) labelY = drawTag(fmtDistMetric(distM), T().blipLabel, labelY);
             } catch(e) {
-                // swallow per-blip errors
-            } finally {
-                ctx.restore();
-            }
+            } finally { ctx.restore(); }
         });
     }
 
@@ -2894,29 +2521,40 @@ function drawRadar() {
         const ty = _playerTagBottomY;
         ctx.fillStyle   = isGamePaused ? 'rgba(80,80,80,0.85)' : 'rgba(0,80,0,0.85)';
         ctx.strokeStyle = T().playerLabel; ctx.lineWidth = 1;
-        ctx.fillRect(cx - tw/2 - 7, ty - 11, tw + 14, 22);
-        ctx.strokeRect(cx - tw/2 - 7, ty - 11, tw + 14, 22);
-        ctx.fillStyle   = T().playerLabel;
-        ctx.textAlign   = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillRect(cx-tw/2-7, ty-11, tw+14, 22);
+        ctx.strokeRect(cx-tw/2-7, ty-11, tw+14, 22);
+        ctx.fillStyle = T().playerLabel;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(lbl, cx, ty);
-        _playerTagBottomY = ty + 14;
     }
 
-    // ── Player aircraft type tag ──────────────────
-    // ── Paused overlay ───────────────────────────
+    // ── Paused overlay ────────────────────────────
     if (isGamePaused) {
         ctx.fillStyle = T().pauseText;
-        ctx.font = `bold ${UI.pausedFont}px ${FONT_CANVAS}`; ctx.textAlign = 'center';
+        ctx.font = `bold ${UI.pausedFont}px ${FONT_CANVAS}`;
+        ctx.textAlign = 'center';
         ctx.fillText('PAUSED', cx, radarSize - 30);
     }
 
-    // ── Player triangle — always on top ──────────
+    // ── Player triangle — always on top ───────────
     drawPlayerTriangle(cx, cy, playerHeading, isGamePaused);
 
-    // ── Update Tracking / Nearby Traffic HUD ─────
-    if (!isGamePaused) {
-        const _hudNow = Date.now();
+    // ── Update ILS HUD if active ──────────────────
+    if (_ilsActive && hasPos && !isGamePaused) {
+        let playerSpeedKts = 0;
+        try {
+            const rawSpd = geofs.aircraft?.instance?.animationValue?.speed;
+            if (rawSpd != null && isFinite(parseFloat(rawSpd))) playerSpeedKts = parseFloat(rawSpd);
+        } catch(e) {}
+        const ilsData = computeILSData(playerLat, playerLon, playerHeading, playerAltFt, playerSpeedKts);
+        updateILSHUD(ilsData);
+    } else if (_ilsActive && isGamePaused) {
+        // Keep HUD visible but don't update during pause
+    }
 
+    // ── Update Tracking / Nearest HUD ────────────
+    if (!isGamePaused && !_ilsActive) {
+        const _hudNow = Date.now();
         if (_trackedId) {
             const freshTracked = refreshTracked();
             const trackKey = freshTracked ? freshTracked.id : _trackedId;
@@ -2937,7 +2575,7 @@ function drawRadar() {
                 updateNearestHUD(null, null);
             }
         }
-    } else if (isGamePaused) {
+    } else if (isGamePaused && !_ilsActive) {
         if (_lastNearestCs !== null) {
             _lastNearestCs = null;
             updateNearestHUD(null, null);
@@ -2946,9 +2584,7 @@ function drawRadar() {
 }
 
 // ═══════════════════════════════════════════════════
-// SECTION 18 — DRAW LOOP
-// The requestAnimationFrame loop in Section 14 handles all drawing.
-// setInterval only drives the reposition helper.
+// SECTION 18 — REPOSITION INTERVAL
 // ═══════════════════════════════════════════════════
 
 setInterval(repositionUI, REPOSITION_INTERVAL);
@@ -2962,4 +2598,5 @@ setTimeout(() => {
     loadPosition();
     applyTheme();
     repositionNearestHUD();
+    repositionILSHUD();
 }, INIT_DELAY);
