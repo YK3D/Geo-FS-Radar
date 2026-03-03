@@ -1,5 +1,3 @@
-
-
 // ═══════════════════════════════════════════════════
 // ILS FONT SIZE VARIABLES — edit to resize ILS HUD text
 // ═══════════════════════════════════════════════════
@@ -213,7 +211,7 @@ const THEMES = {
         ringLabel:     'rgba(0, 255, 0, 0.7)',
         grid:          'rgba(0, 255, 0, 0.15)',
         compass:       'rgba(0, 255, 0, 0.75)',
-        trailColor:    (a) => `rgba(0,255,0,${a})`,
+        trailColor:    (a) => `rgba(255,140,0,${a})`,  // Orange trail
         playerFill:    'rgba(0, 255, 0, 0.9)',
         playerLabel:   'rgba(0, 255, 0, 0.9)',
         blipFill:      'rgba(255, 60, 60, 1)',
@@ -277,7 +275,7 @@ const THEMES = {
         ringLabel:     'rgba(255, 80, 80, 0.85)',
         grid:          'rgba(220, 30, 30, 0.25)',
         compass:       'rgba(255, 70, 70, 0.9)',
-        trailColor:    (a) => `rgba(220,40,40,${a})`,
+        trailColor:    (a) => `rgba(255,140,0,${a})`,  // Orange trail (night mode)
         playerFill:    'rgba(255, 90, 90, 0.95)',
         playerLabel:   'rgba(255, 90, 90, 0.95)',
         blipFill:      'rgba(255, 140, 60, 1)',
@@ -1309,89 +1307,199 @@ function createMenu() {
     // ── Radar Preferences ────────────────────────────
     addSection('Radar Preferences');
 
-    // Units toggle (metric / nautical)
+    // ── Distance Unit — 3-way radio (km/m | NM) ─────
     {
         const row = document.createElement('div');
         row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
-            padding:${UI.menuRowPadY}px 16px;cursor:pointer;transition:background .15s;`;
-        row.onmouseover = () => row.style.background = T().menuRowHover;
-        row.onmouseout  = () => row.style.background = '';
-        const lbl = document.createElement('span');
-        lbl.dataset.menuRowlbl = '1';
-        lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
-        lbl.textContent = 'Nautical Miles (NM)'; // Switch all distances to nautical miles
-        const sw = document.createElement('div');
-        const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
-        sw.style.cssText = `width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
-            border-radius:${UI.menuSwitchH/2}px;position:relative;
-            background:${prefs.useNautical ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
-            border:1px solid rgba(0,255,0,0.3);transition:background .2s;flex-shrink:0;`;
-        const knob = document.createElement('div');
-        knob.style.cssText = `position:absolute;top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
-            left:${prefs.useNautical ? knobOn : knobOff}px;
-            width:${UI.menuKnobSize}px;height:${UI.menuKnobSize}px;border-radius:50%;
-            background:${prefs.useNautical ? '#0f0' : '#888'};transition:left .2s,background .2s;`;
-        sw.appendChild(knob); row.appendChild(lbl); row.appendChild(sw);
-        row.onclick = () => {
-            prefs.useNautical = !prefs.useNautical;
-            const t = T();
-            sw.style.background   = prefs.useNautical ? t.switchOn  : t.switchOff;
-            knob.style.left       = prefs.useNautical ? knobOn+'px' : knobOff+'px';
-            knob.style.background = prefs.useNautical ? t.knobOn    : t.knobOff;
-            savePrefs(); updateRangeBox();
-        };
-        panel.appendChild(row);
-    }
-
-    // Radar Size row (unchanged from before)
-    {
-        const row = document.createElement('div');
-        row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
-            padding:${UI.menuRowPadY-1}px 16px;gap:6px;`;
+            padding:${UI.menuRowPadY}px 16px;`;
         const lbl = document.createElement('span');
         lbl.dataset.menuRowlbl = '1';
         lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};flex:1;`;
-        lbl.textContent = 'Radar Size';
-        const btnMinus = document.createElement('button');
-        btnMinus.textContent = '−';
-        btnMinus.style.cssText = `width:26px;height:26px;border-radius:5px;flex-shrink:0;
-            background:rgba(0,60,0,0.7);color:rgba(0,255,0,0.9);border:1px solid rgba(0,255,0,0.3);
-            font:bold 15px ${FONT_SANS};cursor:pointer;display:flex;align-items:center;
-            justify-content:center;transition:background .12s;line-height:1;`;
-        btnMinus.onmouseover = () => btnMinus.style.background = 'rgba(0,100,0,0.8)';
-        btnMinus.onmouseout  = () => btnMinus.style.background = 'rgba(0,60,0,0.7)';
-        const valSpan = document.createElement('span');
-        valSpan.style.cssText = `display:inline-block;min-width:64px;text-align:center;
-            color:rgba(0,255,0,0.95);font:bold ${UI.menuRowFont}px ${FONT_MONO};
-            background:rgba(0,40,0,0.6);border:1px solid rgba(0,255,0,0.3);
-            border-radius:5px;padding:2px 6px;cursor:pointer;`;
-        function updateDisplay() { valSpan.textContent = prefs.radarSizePx + ' px'; }
-        updateDisplay();
-        const btnPlus = document.createElement('button');
-        btnPlus.textContent = '+';
-        btnPlus.style.cssText = btnMinus.style.cssText;
-        btnPlus.onmouseover = () => btnPlus.style.background = 'rgba(0,100,0,0.8)';
-        btnPlus.onmouseout  = () => btnPlus.style.background = 'rgba(0,60,0,0.7)';
-        btnMinus.onclick = () => { prefs.radarSizePx = Math.max(150,Math.min(900,Math.round((prefs.radarSizePx-10)/10)*10)); updateDisplay(); applyPrefs(); };
-        btnPlus.onclick  = () => { prefs.radarSizePx = Math.max(150,Math.min(900,Math.round((prefs.radarSizePx+10)/10)*10)); updateDisplay(); applyPrefs(); };
-        row.appendChild(lbl); row.appendChild(btnMinus); row.appendChild(valSpan); row.appendChild(btnPlus);
+        lbl.textContent = 'Distance Unit'; // Controls whether distances show as km/m or NM
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex;gap:5px;';
+        [['km / m', false], ['NM', true]].forEach(([label, isNm]) => {
+            const b = document.createElement('button');
+            b.textContent = label;
+            const isActive = () => prefs.useNautical === isNm;
+            const t = T();
+            b.style.cssText = `padding:4px 10px;font:bold ${UI.menuRadioFont}px ${FONT_SANS};
+                border-radius:5px;cursor:pointer;border:1px solid rgba(0,255,0,0.3);
+                transition:all .15s;
+                background:${isActive() ? 'rgba(0,180,0,0.5)' : 'rgba(0,40,0,0.5)'};
+                color:${isActive() ? '#0f0' : 'rgba(150,200,150,0.7)'};`;
+            b.onclick = () => {
+                prefs.useNautical = isNm;
+                wrap.querySelectorAll('button').forEach((btn, i) => {
+                    const active = prefs.useNautical === [false, true][i];
+                    const tc = T();
+                    btn.style.background  = active ? tc.radioBtnOn  : tc.radioBtnOff;
+                    btn.style.color       = active ? tc.radioTextOn : tc.radioTextOff;
+                    btn.style.borderColor = tc.radioBorder;
+                });
+                savePrefs(); updateRangeBox();
+            };
+            wrap.appendChild(b);
+        });
+        row.appendChild(lbl); row.appendChild(wrap);
         panel.appendChild(row);
     }
 
-    // ── Dual-handle range slider for Min/Max range ────
-    addRangeSlider({
-        label: 'Range Bounds',              // Slider controls both Min and Max range simultaneously
-        getMin: () => prefs.minRangeKm,
-        setMin: v  => { prefs.minRangeKm = v; },
-        getMax: () => prefs.maxRangeKm,
-        setMax: v  => { prefs.maxRangeKm = v; },
-        absMin: 0.5, absMax: 100, step: 0.5,
-        fmt:  v => v.toFixed(v < 10 ? 1 : 0) + ' km',
+    // ── Radar Size — slider ───────────────────────────
+    addSlider({
+        label:    'Radar Size',                             // Radar canvas diameter in pixels
+        get:      () => prefs.radarSizePx,
+        set:      v  => { prefs.radarSizePx = Math.round(v / 10) * 10; }, // Snap to 10px
+        fmt:      v  => Math.round(v / 10) * 10 + ' px',
+        min: 150, max: 900, step: 10,
         onCommit: applyPrefs,
     });
 
-    addPrefRow({ label:'Scroll Step',   get:()=>prefs.scrollIncKm, set:v=>{prefs.scrollIncKm=v;}, fmt:v=>v.toFixed(1)+' km', min:0.5,max:10,step:0.5, onCommit:applyPrefs });
-    addPrefRow({ label:'Update Delay',  get:()=>prefs.fetchDelay,  set:v=>{prefs.fetchDelay=v;},  fmt:v=>v+' ms',            min:50,max:1000,step:50,  onCommit:applyPrefs });
+    // ── Dual-handle range slider for Min/Max range with connecting line ────
+    {
+        const opts = {
+            label: 'Range Bounds',              // Controls both min and max radar zoom range
+            getMin: () => prefs.minRangeKm,
+            setMin: v  => { prefs.minRangeKm = v; },
+            getMax: () => prefs.maxRangeKm,
+            setMax: v  => { prefs.maxRangeKm = v; },
+            absMin: 0.5, absMax: 100, step: 0.5,
+            fmt:  v => v.toFixed(v < 10 ? 1 : 0) + ' km',
+            onCommit: applyPrefs,
+        };
+
+        const { label, getMin, setMin, getMax, setMax, absMin, absMax, step, fmt, onCommit } = opts;
+        const wrap = document.createElement('div');
+        wrap.style.cssText = `padding:${UI.menuRowPadY-1}px 16px 8px;`;
+
+        const header = document.createElement('div');
+        header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;';
+        const hLbl = document.createElement('span');
+        hLbl.dataset.menuRowlbl = '1';
+        hLbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
+        hLbl.textContent = label;
+        const valSpanR = document.createElement('span');
+        valSpanR.style.cssText = `color:rgba(0,255,0,0.95);font:bold ${UI.menuRowFont}px ${FONT_MONO};min-width:100px;text-align:right;`;
+        function updateRLabel() { valSpanR.textContent = fmt(getMin()) + ' – ' + fmt(getMax()); }
+        updateRLabel();
+        header.appendChild(hLbl); header.appendChild(valSpanR);
+
+        // Canvas-based dual thumb slider with a line between the two dots
+        const SLIDER_H = 28;      // Canvas height in pixels
+        const SLIDER_W_PAD = 10;  // Horizontal padding so thumb doesn't clip edge
+        const THUMB_R = 7;        // Thumb circle radius
+        const TRACK_Y = SLIDER_H / 2; // Vertical centre of track
+
+        const sliderCanvas = document.createElement('canvas');
+        sliderCanvas.height = SLIDER_H;
+        sliderCanvas.style.cssText = 'width:100%;display:block;cursor:pointer;';
+        // Set actual pixel width after appending (so offsetWidth is available)
+
+        function valToFrac(v) { return (v - absMin) / (absMax - absMin); } // 0–1 fraction
+        function fracToVal(f) { return Math.round((absMin + f * (absMax - absMin)) / step) * step; }
+
+        let _dragging = null; // 'min' | 'max' | null — which thumb is being dragged
+
+        function drawRangeCanvas() {
+            const W = sliderCanvas.width;
+            const sc = sliderCanvas.getContext('2d');
+            sc.clearRect(0, 0, W, SLIDER_H);
+            const minX = SLIDER_W_PAD + valToFrac(getMin()) * (W - SLIDER_W_PAD * 2);
+            const maxX = SLIDER_W_PAD + valToFrac(getMax()) * (W - SLIDER_W_PAD * 2);
+
+            // Full track background
+            sc.strokeStyle = 'rgba(0,60,0,0.8)'; sc.lineWidth = 4;
+            sc.beginPath(); sc.moveTo(SLIDER_W_PAD, TRACK_Y); sc.lineTo(W - SLIDER_W_PAD, TRACK_Y); sc.stroke();
+
+            // Active range line between the two thumbs
+            sc.strokeStyle = 'rgba(0,220,0,0.7)'; sc.lineWidth = 4;
+            sc.beginPath(); sc.moveTo(minX, TRACK_Y); sc.lineTo(maxX, TRACK_Y); sc.stroke();
+
+            // Min thumb
+            sc.beginPath(); sc.arc(minX, TRACK_Y, THUMB_R, 0, Math.PI * 2);
+            sc.fillStyle = _dragging === 'min' ? '#fff' : 'rgba(0,220,0,0.95)';
+            sc.fill();
+            sc.strokeStyle = '#0f0'; sc.lineWidth = 2; sc.stroke();
+
+            // Max thumb
+            sc.beginPath(); sc.arc(maxX, TRACK_Y, THUMB_R, 0, Math.PI * 2);
+            sc.fillStyle = _dragging === 'max' ? '#fff' : 'rgba(0,220,0,0.95)';
+            sc.fill();
+            sc.strokeStyle = '#0f0'; sc.lineWidth = 2; sc.stroke();
+        }
+
+        function clientXToVal(e) {
+            const rect = sliderCanvas.getBoundingClientRect();
+            const W = sliderCanvas.width;
+            const scale = W / rect.width; // account for CSS width vs canvas pixel width
+            const x = (e.clientX - rect.left) * scale;
+            const f = Math.max(0, Math.min(1, (x - SLIDER_W_PAD) / (W - SLIDER_W_PAD * 2)));
+            return fracToVal(f);
+        }
+
+        sliderCanvas.addEventListener('mousedown', (e) => {
+            const rect = sliderCanvas.getBoundingClientRect();
+            const W = sliderCanvas.width;
+            const scale = W / rect.width;
+            const x = (e.clientX - rect.left) * scale;
+            const minX = SLIDER_W_PAD + valToFrac(getMin()) * (W - SLIDER_W_PAD * 2);
+            const maxX = SLIDER_W_PAD + valToFrac(getMax()) * (W - SLIDER_W_PAD * 2);
+            const dMin = Math.abs(x - minX), dMax = Math.abs(x - maxX);
+            _dragging = dMin <= dMax ? 'min' : 'max'; // Pick closer thumb
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!_dragging) return;
+            let v = clientXToVal(e);
+            if (_dragging === 'min') {
+                v = Math.min(v, getMax() - step);
+                setMin(Math.max(absMin, v));
+            } else {
+                v = Math.max(v, getMin() + step);
+                setMax(Math.min(absMax, v));
+            }
+            updateRLabel(); drawRangeCanvas();
+        });
+        document.addEventListener('mouseup', () => {
+            if (_dragging) { _dragging = null; drawRangeCanvas(); if (onCommit) onCommit(); }
+        });
+
+        // Resize observer to set canvas pixel width
+        const ro = new ResizeObserver(() => {
+            sliderCanvas.width = sliderCanvas.offsetWidth || 220;
+            drawRangeCanvas();
+        });
+
+        wrap.appendChild(header); wrap.appendChild(sliderCanvas);
+        panel.appendChild(wrap);
+
+        // Draw after insert (width known)
+        setTimeout(() => {
+            sliderCanvas.width = sliderCanvas.offsetWidth || 220;
+            ro.observe(sliderCanvas);
+            drawRangeCanvas();
+        }, 0);
+    }
+
+    // ── Scroll Step — slider ──────────────────────────
+    addSlider({
+        label:    'Scroll Step',                            // Range change per mouse wheel tick
+        get:      () => prefs.scrollIncKm,
+        set:      v  => { prefs.scrollIncKm = v; },
+        fmt:      v  => v.toFixed(1) + ' km',
+        min: 0.5, max: 10, step: 0.5,
+        onCommit: applyPrefs,
+    });
+
+    // ── Update Delay — slider ─────────────────────────
+    addSlider({
+        label:    'Update Delay',                           // REST API poll interval (ms)
+        get:      () => prefs.fetchDelay,
+        set:      v  => { prefs.fetchDelay = v; },
+        fmt:      v  => v + ' ms',
+        min: 50, max: 1000, step: 50,
+        onCommit: applyPrefs,
+    });
 
     // ── Radar Opacity slider ──────────────────────────
     addSlider({
