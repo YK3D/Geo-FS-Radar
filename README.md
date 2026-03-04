@@ -1,115 +1,271 @@
 # GeoFS-Radar v10.00
 
-A Tampermonkey userscript for [GeoFS](https://www.geo-fs.com/geofs.php?v=3.9) that adds a live radar overlay, ILS approach system, TCAS collision warning, and a fully customizable settings panel.
+A Tampermonkey userscript for [GeoFS](https://www.geo-fs.com/geofs.php?v=3.9) that adds a live radar overlay, ILS approach system, TCAS collision warning, nearest-traffic HUD, aircraft tracker, and a fully customizable settings panel.
 
 ---
 
 ## Installation
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) for your browser.
-2. Create a new script and paste the contents of `GeoFS-Radar.js`.
-3. Save and navigate to `https://www.geo-fs.com/geofs.php?v=3.9`.
+2. Create a new script and paste the contents of `GeoFS-Main.user.js`.
+3. Save and navigate to [GeoFS](https://www.geo-fs.com/geofs.php?v=3.9).
 4. The radar appears in the top-left corner. Press **Alt+Z** to toggle visibility.
 
 ---
 
-## Features
+## Features at a Glance
 
-### 🛩️ Live Radar
-- Circular radar canvas showing nearby aircraft as labeled blips.
-- Blips display callsign, altitude, speed, and distance.
-- Color-coded heading vector arrows showing each aircraft's 30-second projected path.
-- Click any blip to open a popup with full details and a **Track** button.
-- Scroll wheel to zoom the radar range in/out.
-- North-up or Track-up orientation modes.
+| Feature | Description |
+|---------|-------------|
+| 🛩️ Live Radar | Circular sweep showing all nearby aircraft as labeled blips |
+| ✈️ Traffic Overlays | Heading triangles, callsigns, altitude, speed, distance labels |
+| 🔍 Traffic Filters | Hide Foo, hide ground, altitude band filter |
+| 🎯 Click-to-Track | Click any blip to open a popup and lock onto that aircraft |
+| 📊 Nearest-Traffic HUD | Live data card for the closest (or tracked) aircraft |
+| 🛬 ILS Approach | Full ILS HUD with CDI, glideslope, VS, AGL, bank angle |
+| ⚠️ TCAS Warning | Heading-vector intersection alarm with callsign + countdown |
+| 🎨 Customization | Sliders for every font, size, and UI element |
 
-### ✈️ Traffic Overlays
-- Traffic triangles oriented to heading.
-- Nearest aircraft HUD in the corner showing callsign, distance, altitude, and speed.
-- Option to isolate/track a single aircraft.
+<img width="50%" alt="Screenshot 2026-03-04 224124" src="https://github.com/user-attachments/assets/36224292-59d3-4c30-ad2a-f9e1ada94aef" /><img width="50%" alt="Screenshot 2026-03-04 214213" src="https://github.com/user-attachments/assets/e82842d5-7dc1-4d81-904b-472a3e0c7a28" />
 
-### 🔍 Traffic Filters
+## 🛩️ Live Radar
+
+The radar is a circular canvas drawn in real time from live GeoFS multiplayer API data.
+
+<img width="173" height="187" alt="Radar" src="https://github.com/user-attachments/assets/18ca9ba2-f270-4e75-a68f-8468f72fdf96" />
+
+**What it shows:**
+- Your aircraft in the centre as a green triangle pointing in your heading direction.
+- All other online aircraft as color-coded triangles or dots with labels.
+- A fading orange trail behind your aircraft showing your recent flight path.
+- Range rings with distance labels.
+- A compass rose.
+- Heading vector arrows for each aircraft (30-second projected path line).
+- A dashed amber/red line ahead of your aircraft showing your own TCAS lookahead vector.
+
+**Interaction:**
+- **Scroll wheel** — zoom radar range in/out by the configured scroll step.
+- **Click a blip** — opens a popup with full details and a Track button.
+- **Click a runway** — activates ILS approach guidance for that runway.
+- **Alt+Z** — toggle visibility of radar and all HUDs.
+- **Drag** — move the radar around the screen.
+
+**Orientation modes:**
+- **North-up** — map is fixed, your triangle rotates to show heading.
+- **Track-up** — your triangle always points up, map rotates around you.
+
+**Range:** Configurable from 0.5 km to 50 km via scroll wheel or the Range Bounds slider.
+
+---
+
+## ✈️ Traffic Overlays
+
+<img width="178" height="236" alt="Traffic" src="https://github.com/user-attachments/assets/8bda0d0a-0293-429b-a10e-52cac122fb18" />
+
+Each traffic aircraft on the radar can display:
+
+| Label | Description |
+|-------|-------------|
+| **Callsign** | Aircraft registration or player name |
+| **Altitude** | Current altitude in ft or m |
+| **Speed** | Ground speed in kts or km/h |
+| **Distance** | Range from your position in NM or km |
+| **Triangle** | Heading-oriented shape (direction = heading) |
+| **Vector arrow** | Dashed line showing 30-second projected path |
+
+All labels are individually toggleable in the **✈️ Traffic** section. Triangle size, dot size, label font, and vector line weight are all adjustable in **🎨 Customization**.
+
+---
+
+## 🔍 Traffic Filters
+
+<img width="171" height="137" alt="Filters" src="https://github.com/user-attachments/assets/a6245adc-66d7-43d0-a3c3-04228b6f11d8" />
+
 | Filter | Description |
 |--------|-------------|
-| Hide "Foo" Players | Hides aircraft with callsign matching "Foo" |
-| Hide Ground Traffic | Hides aircraft detected below 200 ft |
-| Altitude Filter | Dual-handle range slider to show only traffic between a min and max altitude (0–60,000 ft) |
+| **Hide "Foo" Players** | Hides aircraft whose callsign is "Foo" — also excluded from TCAS detection |
+| **Hide Ground Traffic** | Hides aircraft below 200 ft AGL |
+| **Altitude Filter** | Dual-handle canvas slider: only show traffic between a min and max altitude |
 
-The altitude filter uses a canvas slider with two draggable dots connected by a green line — drag the left dot for minimum altitude and the right dot for maximum altitude.
+### Altitude Range Slider
 
-### 🛬 ILS Approach System
-Click any runway on the radar to activate an ILS approach HUD for that runway. The HUD shows:
+The altitude filter uses a canvas-drawn slider with two draggable circular handles connected by a green line. Drag the **left handle** to set the minimum altitude and the **right handle** to set the maximum altitude (0–60,000 ft in 500 ft steps). Labels show the current min/max values. Enable it with the **Altitude Filter** toggle above the slider.
+
+---
+
+## 🎯 Click-to-Inspect Popup
+
+Click any aircraft blip on the radar to open a floating popup showing:
 
 | Field | Description |
 |-------|-------------|
-| **Localizer** | Horizontal deviation from runway centreline (degrees) |
-| **Glideslope** | Vertical deviation from 3° glide path (feet) |
-| **CDI** | Cross-shaped course deviation indicator |
-| **ALT AGL** | Altitude above ground level using `geofs.animation.values.groundElevationFeet` |
-| **Distance** | Distance to runway threshold (NM or km) |
-| **Vert Speed** | Vertical speed (ft/min) from `geofs.animation.values.verticalSpeed` |
-| **Descent °** | Actual descent angle computed from VS and ground speed |
-| **Bank Angle** | Roll angle with arc indicator |
+| **Callsign** | Aircraft identifier |
+| **Distance** | Range in NM or km |
+| **Bearing** | Magnetic bearing (degrees + compass direction, e.g. `045° NE`) |
+| **Altitude** | Altitude with ▲/▼ delta vs your own altitude (green = above, red = below) |
+| **Speed GS** | Ground speed |
+| **Heading** | Current heading in degrees |
 
-All ILS font sizes are adjustable via sliders in the **🛬 ILS Display** section.
+A **Track** button in the popup locks the Nearest-Traffic HUD onto that aircraft. Click outside the popup or press **Alt+Z** to dismiss it.
 
-### ⚠️ TCAS Warning System
-A real-time collision detection system that projects both your aircraft and all nearby traffic 30 seconds ahead along their current headings.
+---
 
-**How it works:**
-- Your 30-second heading vector is drawn as a dashed line from your aircraft nose.
-- Each traffic aircraft's 30-second heading vector is computed.
-- If the two vector **line segments** intersect (or come within the intersection margin) at roughly the same time fraction, a **TRAFFIC** warning fires.
-- The warning shows the **callsign** of the conflicting aircraft and the **predicted time to collision** in seconds.
+## 📊 Nearest-Traffic HUD
 
-**Conditions required to trigger:**
-- Both aircraft must be above the configured minimum AGL.
-- Both aircraft must be moving (≥ 10 m/s).
-- Altitude difference must be within the configured band.
-- Path vectors must intersect within the intersection margin at a similar time (|s−t| ≤ time tolerance).
+The Nearest-Traffic HUD is a floating data card that automatically shows the **closest aircraft** on the radar, updating in real time as aircraft move.
 
-**Warning display:**
-- Full-screen flashing red **TRAFFIC** text at 50% opacity.
-- Orange callsign of the conflicting aircraft below.
-- Yellow countdown: `COLLISION IN ~Xs`.
-- Optional audio alert (stops immediately when threat clears).
+**HUD fields:**
 
-**TCAS settings:**
+| Field | Description |
+|-------|-------------|
+| **Callsign** | Aircraft identifier |
+| **Distance** | Range to the aircraft |
+| **Bearing** | Direction from your position (degrees + cardinal) |
+| **Altitude** | Altitude with ▲/▼ delta showing how much higher or lower than you |
+| **Speed (GS)** | Ground speed |
+| **Heading** | Aircraft heading in degrees |
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| TCAS Warning | On | Master enable/disable |
-| TCAS Audio | On | Enable/disable the audio alert |
-| Lookahead Time | 30 s | How far ahead to project each path |
-| Altitude Band | ±200 ft | Max altitude difference to consider a threat |
-| Min Altitude (AGL) | 200 ft | Both aircraft must exceed this AGL |
-| Intersection Margin | 300 m | Path proximity threshold to trigger |
-| Audio Cooldown | 10 s | Minimum gap between audio replays |
+The header reads **NEARBY TRAFFIC** when auto-tracking the nearest aircraft.
 
-If **Hide "Foo" Players** is enabled, those aircraft are also excluded from TCAS detection.
+**Behaviour:**
+- Updates every frame with the nearest aircraft in the current radar range.
+- Automatically hidden when ILS approach mode is active (ILS HUD takes priority).
+- Can be disabled via the **Tracking / Nearby Traffic** toggle in ✈️ Traffic settings.
 
-### 🛩️ My Aircraft
-- Own-aircraft trail: fading orange line showing recent flight path.
-- Trail length (5–300 s) and thickness (1–8 px) configurable.
-- Own callsign label on radar.
+---
 
-### ⚙️ Radar Settings
-- **Radar Size**: 150–900 px slider.
-- **Scroll Step**: 0.5–10 km zoom increment per scroll wheel click.
-- **Update Delay**: 50–1000 ms API poll interval.
-- **Radar Opacity**: 10–100% canvas transparency — persists across sessions and page reloads.
-- **Distance Unit**: km/m or Nautical Miles radio selector.
-- **Range Bounds**: Dual-handle canvas slider for min/max radar range.
+## 🔒 Aircraft Tracker
 
-### 🎨 Customization
-Sliders for every visual element size:
-- Blip dot and triangle sizes, label font
-- Player triangle size and callsign font
-- HUD callsign, data, and label fonts
-- Compass and ring label fonts
-- Popup title and body fonts
-- Trail line thickness
-- All 7 ILS HUD font sizes
+Click any blip → open popup → **Track** to lock the HUD onto a specific aircraft regardless of distance.
+
+When tracking is active:
+
+- The HUD header changes from **NEARBY TRAFFIC** to **TRACKING** in amber.
+- The tracked blip gets a glowing **yellow ring** on the radar.
+- The HUD border and accent colors turn amber.
+- An **Isolate aircraft** toggle appears in the HUD — when enabled, all other traffic disappears from the radar so you can focus solely on the tracked aircraft.
+- A **✕ STOP TRACKING** button appears at the bottom of the HUD.
+
+**To stop tracking:** click **STOP TRACKING**, click an empty area on the radar, or press **Alt+Z**.
+
+Tracking persists across range changes and zoom levels. If the tracked aircraft leaves the API response (out of range or disconnected), the HUD gracefully falls back to the nearest aircraft.
+
+<img width="192" height="235" alt="Screenshot 2026-03-04 213942" src="https://github.com/user-attachments/assets/f3128ebe-3df6-4a72-9bba-7a60d6d570dc" />
+
+---
+
+## 🛬 ILS Approach System
+
+Click any runway on the radar to activate an ILS approach HUD for that runway.
+
+<img width="1914" height="929" alt="ILS" src="https://github.com/user-attachments/assets/97c8da0d-251c-4120-b1cb-6242f996cff0" />
+<img width="230" height="361" alt="image" src="https://github.com/user-attachments/assets/1cbb88ee-494a-426e-b3a5-9e821611f940" />
+
+**HUD fields:**
+
+| Field | Source | Description |
+|-------|--------|-------------|
+| **Localizer** | Geometry | Horizontal deviation from runway centreline (degrees) |
+| **Glideslope** | Geometry | Vertical deviation from 3° glide path (feet) |
+| **CDI** | Both | Cross-shaped instrument — horizontal needle = LOC, vertical needle = GS |
+| **ALT AGL** | `animation.values.groundElevationFeet` | True altitude above the terrain |
+| **Distance** | GPS | Distance to runway threshold (NM or km) |
+| **Vert Speed** | `animation.values.verticalSpeed` | Vertical speed in ft/min |
+| **Descent °** | `atan2(-VS, groundspeed)` | Actual descent angle in degrees |
+| **Bank Angle** | `animationValue.roll` | Roll angle with arc indicator canvas |
+
+The glideslope target is a standard **3° approach path**. CDI dots represent approximately 50% deflection per dot.
+
+**To close ILS:** click the runway again, or click the **×** button on the ILS HUD.
+
+All 7 ILS font sizes are independently adjustable via sliders in **🛬 ILS Display** settings.
+
+---
+
+## ⚠️ TCAS Warning System
+
+A real-time collision detection system based on heading-vector intersection geometry.
+
+<img width="169" height="269" alt="TCAS" src="https://github.com/user-attachments/assets/296433fb-fd94-4698-91de-24bb0db46dda" />
+
+### How It Works
+
+1. Your **30-second heading vector** is drawn as a line segment from your aircraft nose: `currentPosition → currentPosition + (speed × lookahead seconds)` in your heading direction.
+2. Each traffic aircraft's **30-second heading vector** is computed the same way.
+3. The algorithm finds the **closest point of approach (CPA)** between the two segments using parametric geometry — solving for the time fractions `s` (your path) and `t` (their path) that minimise the distance between the two trajectories.
+4. A warning fires **only when all of these are true:**
+   - CPA distance ≤ **Intersection Margin**
+   - `|s − t|` ≤ time tolerance (both aircraft reach the crossing point at the same moment)
+   - Both aircraft are above **Min Altitude (AGL)**
+   - Altitude difference ≤ **±Altitude Band**
+   - Both aircraft are moving (≥ 10 m/s)
+   - The other aircraft's callsign does not match yours
+   - The other aircraft is not filtered by "Hide Foo Players"
+
+Your TCAS vector is shown on the radar as a dashed **amber** line from your nose. It turns **red** when a threat is active.
+
+### Warning Display
+
+- Full-screen flashing red **TRAFFIC** text at 50% opacity (400 ms flash cycle).
+- Orange **callsign** of the conflicting aircraft.
+- Yellow **COLLISION IN ~Xs** countdown based on the time-fraction of closest approach.
+- Optional audio alert that cuts off immediately when the threat clears.
+
+### TCAS Settings
+
+| Setting | Default | Range | Description |
+|---------|---------|-------|-------------|
+| **TCAS Warning** | On | toggle | Master enable/disable |
+| **TCAS Audio** | On | toggle | Audio alert independent of visual |
+| **Lookahead Time** | 30 s | 5–120 s | How far ahead to project each path |
+| **Altitude Band** | ±200 ft | 50–2000 ft | Max altitude difference to consider a threat |
+| **Min Altitude (AGL)** | 200 ft | 0–2000 ft | Both aircraft must exceed this height |
+| **Intersection Margin** | 300 m | 50–2000 m | Path proximity threshold to trigger |
+| **Audio Cooldown** | 10 s | 1–60 s | Minimum gap between audio replays |
+
+---
+
+## 🛩️ My Aircraft
+
+- **Own callsign label** displayed below your triangle on the radar.
+- **Flight trail** — a fading orange line showing your recent path.
+  - Toggle on/off with **Show Trail**.
+  - **Trail Length** slider: 5–300 seconds of history.
+  - **Trail Thickness** slider: 1–8 px line width.
+
+<img width="172" height="137" alt="My Aircraft" src="https://github.com/user-attachments/assets/7be82e9c-3aa4-4439-934b-af681d98fd48" />
+
+---
+
+## ⚙️ Radar Settings
+
+<img width="176" height="228" alt="Radar Settings" src="https://github.com/user-attachments/assets/3224f9c9-f6c4-48b3-bd7a-8870c9af38fb" />
+
+| Setting | Range | Description |
+|---------|-------|-------------|
+| **Radar Size** | 150–900 px | Physical size of the radar canvas |
+| **Scroll Step** | 0.5–10 km | Range change per scroll wheel click |
+| **Update Delay** | 50–1000 ms | API poll interval |
+| **Radar Opacity** | 10–100% | Canvas transparency — persists across sessions |
+| **Distance Unit** | km/m · NM | Radio selector for metric or nautical miles |
+| **Range Bounds** | dual slider | Minimum and maximum allowed radar range |
+
+---
+
+## 🎨 Customization
+
+<img width="169" height="298" alt="Customization" src="https://github.com/user-attachments/assets/e4a63a79-5e9b-480d-adb5-c73d4ae20fe4" />
+<img width="174" height="184" alt="ILS Fonts" src="https://github.com/user-attachments/assets/418a66ca-6003-4384-857a-a6d56f77cc7c" />
+
+| Group | Sliders |
+|-------|---------|
+| **Blips** | Dot size, triangle size, label font |
+| **Player** | Triangle size, callsign font |
+| **HUD** | Callsign font, data font, label font |
+| **Compass / Rings** | Compass font, ring label font |
+| **Popups** | Title font, body font |
+| **Trail** | Line thickness (1–8 px) |
+| **ILS HUD** | Header, label, value, pill label, pill value, footer, bank label (7 sliders) |
 
 ---
 
@@ -117,51 +273,56 @@ Sliders for every visual element size:
 
 | Key | Action |
 |-----|--------|
-| **Alt+Z** | Toggle radar + all HUDs visibility |
+| **Alt+Z** | Toggle radar + all HUDs on/off |
 
 ---
 
-## Settings Menu
+## Settings Menu Reference
 
-Open by clicking the **☰** button next to the radar. Sections:
+Open by clicking the **☰** button next to the radar.
 
 | Section | Contents |
 |---------|----------|
-| 🖥️ Display | Night mode, player triangle, rings, labels, orientation |
-| ✈️ Traffic | Show traffic, triangles, callsigns, altitude, speed, distance, vectors, nearest HUD |
-| 🔍 Filters | Hide Foo, hide ground, altitude range filter |
-| 🗺️ Map | Airports & runways |
-| 🛩️ My Aircraft | Callsign, trail on/off, trail length, trail thickness |
-| ⚙️ Radar Settings | Size, scroll step, update delay, opacity, distance unit, range bounds |
-| 📡 API Status | Live data source status |
-| 🎨 Customization | All size/font sliders, trail thickness, ILS fonts |
-| ⚠️ TCAS | Warning enable, audio enable, lookahead, alt band, min alt, margin, cooldown |
+| 🖥️ **Display** | Night mode, player triangle, range rings, ring labels, orientation mode |
+| ✈️ **Traffic** | Show traffic, triangles, callsigns, altitude, speed, distance, vectors, nearest HUD |
+| 🔍 **Filters** | Hide Foo, hide ground, altitude range filter with dual-handle slider |
+| 🗺️ **Map** | Airports & runways overlay |
+| 🛩️ **My Aircraft** | Callsign display, trail on/off, trail length, trail thickness |
+| ⚙️ **Radar Settings** | Size, scroll step, update delay, opacity, distance unit, range bounds |
+| 📡 **API Status** | Live data source and connection status |
+| 🎨 **Customization** | All size/font sliders, trail thickness, ILS font sizes |
+| ⚠️ **TCAS** | Warning toggle, audio toggle, lookahead, alt band, min alt, margin, cooldown |
 
 ---
 
 ## Data Sources
 
-The script reads aircraft data from the GeoFS multiplayer REST API and own-aircraft data from `geofs.animation.values` (the same source used by the GeoFS Information Display userscript), which provides accurate pre-computed values for altitude, vertical speed, IAS, ground speed, and ground elevation.
+<img width="170" height="48" alt="API" src="https://github.com/user-attachments/assets/98a6f2cd-ddbd-493b-8e9a-ce9673b44070" />
+
+Own-aircraft data is read from `geofs.animation.values` — the same pre-computed values used by the GeoFS Information Display userscript — providing accurate altitude, vertical speed, IAS, ground speed, and ground elevation in real time.
+
+Traffic data comes from the GeoFS multiplayer REST API, polled at the configured **Update Delay** interval.
 
 ---
 
 ## Changelog
 
 ### v10.00
-- ILS font sizes converted to live sliders (saved to localStorage).
-- Radar opacity slider persists correctly — no longer reset by pause detection.
+- ILS font sizes converted from hardcoded constants to live sliders (saved to `localStorage`).
+- Radar opacity slider now persists correctly — pause detection no longer resets it to 100%.
 - Trail color changed to orange; trail line thickness slider added.
-- Dual-handle canvas range slider for radar min/max range (with connecting line).
-- Distance Unit changed to 3-way radio (km/m vs NM).
-- Altitude filter added: dual-handle canvas slider to show only traffic in an altitude band.
-- TCAS warning system: vector-intersection algorithm, full-screen TRAFFIC overlay.
-- TCAS overlay shows conflicting callsign and predicted time to collision.
+- Dual-handle canvas range slider for radar min/max range (with green connecting line).
+- Distance Unit changed to radio selector (km/m vs NM).
+- Altitude filter added: dual-handle canvas slider, 0–60k ft.
+- TCAS warning system with heading-vector intersection algorithm.
+- TCAS overlay shows conflicting callsign and predicted collision countdown.
 - TCAS audio stops immediately when threat clears.
+- TCAS excludes aircraft with same callsign as player (anti-self-detection).
 - TCAS respects "Hide Foo Players" filter.
 - All TCAS parameters exposed as sliders; audio independently toggleable.
-- ILS now reads vertical speed and AGL from `geofs.animation.values` for accuracy.
+- ILS reads vertical speed and AGL from `geofs.animation.values` for accuracy.
 - ILS descent angle uses `atan2(-VS, groundspeed)` for correctness.
-- All menu sections have emoji labels for readability.
+- All menu sections have emoji labels.
 
 ### v9.00
 - ILS approach system with CDI, glideslope, bank angle indicator.
@@ -169,7 +330,7 @@ The script reads aircraft data from the GeoFS multiplayer REST API and own-aircr
 
 ### v8.06
 - Internal REST API source for multiplayer traffic.
-- Aircraft tracking and nearest HUD.
+- Aircraft tracking, nearest-traffic HUD, isolate mode.
 - Night mode toggle.
 
 ---
