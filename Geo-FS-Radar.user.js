@@ -21,7 +21,7 @@ function saveIlsPrefs() { localStorage.setItem('radarIlsPrefs', JSON.stringify(i
 // ═══════════════════════════════════════════════════
 
     const _PREF_DEFAULTS = {
-        radarSizePx:        450,     // Radar canvas size in pixels
+        radarSizePx:        300,     // Radar canvas size in pixels
         radarSizeUnit:      'px',    // Size unit: 'px' or '%'
         minRangeKm:         0.5,     // Minimum radar range (km)
         maxRangeKm:         50,      // Maximum radar range (km)
