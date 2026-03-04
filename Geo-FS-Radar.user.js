@@ -41,6 +41,10 @@ function saveIlsPrefs() { localStorage.setItem('radarIlsPrefs', JSON.stringify(i
         tcasMinAltFt:       200,     // Feet AGL: both aircraft must be above this
         tcasMarginM:        300,     // Metres: intersection tolerance
         tcasAudioCooldownMs:10000,   // Minimum ms between audio replays
+        tcasTimeTolPct:     8,       // ±% time tolerance: intersection must occur at similar t on both paths
+        altFilterEnabled:   false,   // Filter traffic by altitude band
+        altFilterMinFt:     0,       // Min altitude (ft) to show traffic
+        altFilterMaxFt:     50000,   // Max altitude (ft) to show traffic
     };
 
     let prefs;
@@ -895,8 +899,9 @@ function createMenu() {
     function addSection(label) {
         const s = document.createElement('div');
         s.dataset.menuSection = '1';
-        s.style.cssText = `color:rgba(0,255,0,0.5);font:bold ${UI.menuSectionFont}px ${FONT_SANS};
-            padding:8px 16px 3px;letter-spacing:1.5px;text-transform:uppercase;`;
+        s.style.cssText = `color:rgba(0,220,0,0.65);font:bold ${UI.menuSectionFont}px ${FONT_SANS};
+            padding:10px 16px 3px;letter-spacing:1px;text-transform:uppercase;
+            border-top:1px solid rgba(0,255,0,0.08);margin-top:2px;`;
         s.textContent = label;
         panel.appendChild(s);
     }
@@ -1179,7 +1184,7 @@ function createMenu() {
     }
 
     // ── Display ──────────────────────────────────────
-    addSection('Display');
+    addSection('🖥️  Display');
     addToggle('Night Mode',               'nightMode',        () => applyTheme());
     addRadio ('Orientation',              'orientMode',       'north', 'track', 'N↑', 'TRK↑');
     addToggle('Player Triangle',          'showPlayerTriangle');
@@ -1188,7 +1193,7 @@ function createMenu() {
     addSep();
 
     // ── Traffic ───────────────────────────────────────
-    addSection('Traffic');
+    addSection('✈️  Traffic');
     addToggle('Show Traffic',             'showTraffic');
     addToggle('Traffic Triangles',        'showBlipTriangle');
     addToggle('Callsign',                 'showCallsign');
@@ -1202,7 +1207,7 @@ function createMenu() {
     addSep();
 
     // ── Filters ───────────────────────────────────────
-    addSection('Traffic Filters');
+    addSection('🔍  Filters');
     // Hide Foo players toggle
     {
         const row = document.createElement('div');
@@ -1269,15 +1274,76 @@ function createMenu() {
         };
         panel.appendChild(row);
     }
+
+    // ── Altitude Range Filter ─────────────────────────
+    addToggle('Altitude Filter', 'altFilterEnabled');
+    {
+        const ALT_MIN = 0, ALT_MAX = 60000, STEP = 500;
+        const SLIDER_H = 30, PAD = 12, THUMB_R = 7;
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'padding:2px 16px 8px;';
+        const labelRow = document.createElement('div');
+        labelRow.style.cssText = 'display:flex;justify-content:space-between;margin-bottom:4px;';
+        const lblL = document.createElement('span');
+        lblL.style.cssText = `color:rgba(180,240,180,0.7);font:${UI.menuRowFont-1}px ${FONT_SANS};`;
+        const lblR = document.createElement('span');
+        lblR.style.cssText = `color:rgba(180,240,180,0.7);font:${UI.menuRowFont-1}px ${FONT_SANS};`;
+        const fmtAlt = v => v >= 1000 ? (v/1000).toFixed(0)+'k ft' : v+' ft';
+        const updateAltLabels = () => { lblL.textContent = fmtAlt(prefs.altFilterMinFt); lblR.textContent = fmtAlt(prefs.altFilterMaxFt); };
+        updateAltLabels();
+        labelRow.appendChild(lblL); labelRow.appendChild(lblR);
+        wrap.appendChild(labelRow);
+        const cv = document.createElement('canvas');
+        cv.height = SLIDER_H;
+        cv.style.cssText = 'width:100%;display:block;cursor:pointer;';
+        wrap.appendChild(cv);
+        panel.appendChild(wrap);
+        const drawAltSlider = () => {
+            const W = cv.offsetWidth || 200; cv.width = W;
+            const cw = W - PAD*2, cy2 = SLIDER_H/2;
+            const ctx2 = cv.getContext('2d');
+            ctx2.clearRect(0,0,W,SLIDER_H);
+            const v2x = v => PAD + ((v-ALT_MIN)/(ALT_MAX-ALT_MIN))*cw;
+            const minX = v2x(prefs.altFilterMinFt), maxX = v2x(prefs.altFilterMaxFt);
+            ctx2.beginPath(); ctx2.moveTo(PAD,cy2); ctx2.lineTo(PAD+cw,cy2);
+            ctx2.strokeStyle='rgba(0,60,0,0.9)'; ctx2.lineWidth=4; ctx2.stroke();
+            ctx2.beginPath(); ctx2.moveTo(minX,cy2); ctx2.lineTo(maxX,cy2);
+            ctx2.strokeStyle='rgba(0,210,60,0.9)'; ctx2.lineWidth=4; ctx2.stroke();
+            [minX,maxX].forEach(x => {
+                ctx2.beginPath(); ctx2.arc(x,cy2,THUMB_R,0,Math.PI*2);
+                ctx2.fillStyle='rgba(0,220,60,0.95)'; ctx2.fill();
+                ctx2.strokeStyle='rgba(255,255,255,0.9)'; ctx2.lineWidth=1.5; ctx2.stroke();
+            });
+        };
+        let altDrag = null;
+        cv.addEventListener('mousedown', e => {
+            const rect = cv.getBoundingClientRect(), cw = rect.width-PAD*2;
+            const cx2 = e.clientX-rect.left;
+            const v2x = v => PAD+((v-ALT_MIN)/(ALT_MAX-ALT_MIN))*cw;
+            altDrag = Math.abs(cx2-v2x(prefs.altFilterMinFt)) <= Math.abs(cx2-v2x(prefs.altFilterMaxFt)) ? 'min' : 'max';
+        });
+        window.addEventListener('mousemove', e => {
+            if (!altDrag) return;
+            const rect = cv.getBoundingClientRect(), cw = rect.width-PAD*2;
+            const frac = Math.max(0,Math.min(1,(e.clientX-rect.left-PAD)/cw));
+            const v = Math.round((ALT_MIN+frac*(ALT_MAX-ALT_MIN))/STEP)*STEP;
+            if (altDrag==='min') prefs.altFilterMinFt = Math.min(v, prefs.altFilterMaxFt-STEP);
+            else prefs.altFilterMaxFt = Math.max(v, prefs.altFilterMinFt+STEP);
+            updateAltLabels(); drawAltSlider();
+        });
+        window.addEventListener('mouseup', () => { if(altDrag){altDrag=null;savePrefs();} });
+        new ResizeObserver(drawAltSlider).observe(cv);
+        drawAltSlider();
+    }
     addSep();
 
     // ── Map ───────────────────────────────────────────
-    addSection('Map');
+    addSection('🗺️  Map');
     addToggle('Airports & Runways',       'showAirports');
     addSep();
 
     // ── My Aircraft ───────────────────────────────────
-    addSection('My Aircraft');
+    addSection('🛩️  My Aircraft');
     addInfoRow('Callsign', 'callsign');
     addInfoRow('Position', 'position');
     addToggle('Show My Callsign',         'showMyCallsign');
@@ -1320,7 +1386,7 @@ function createMenu() {
     addSep();
 
     // ── Radar Preferences ────────────────────────────
-    addSection('Radar Preferences');
+    addSection('⚙️  Radar Settings');
 
     // ── Distance Unit — 3-way radio (km/m | NM) ─────
     {
@@ -1548,7 +1614,7 @@ function createMenu() {
     addSep();
 
     // ── API Status ────────────────────────────────────
-    addSection('API Status');
+    addSection('📡  API Status');
     addStatusRow();
 
     // ═══════════════════════════════════════════════════
@@ -1556,7 +1622,7 @@ function createMenu() {
     // Implemented as a second scrollable section
     // ═══════════════════════════════════════════════════
     addSep();
-    addSection('Customization');
+    addSection('🎨  Customization');
 
     // Helper: add a UI size slider that updates the UI object and redraws
     function addUISlider(label, key, min, max, step) {
@@ -1609,7 +1675,7 @@ function createMenu() {
     addSep();
 
     // ── ILS Font sizes ────────────────
-    addSection('ILS Display');
+    addSection('🛬  ILS Display');
     function addILSFontSlider(label, key) {
         addSlider({
             label,
@@ -1630,7 +1696,7 @@ function createMenu() {
     addSep();
 
     // ── TCAS ─────────────────────────
-    addSection('TCAS');
+    addSection('⚠️  TCAS');
     // TCAS enable toggle
     {
         const row = document.createElement('div');
@@ -1666,8 +1732,39 @@ function createMenu() {
         panel.appendChild(row);
     }
 
-    // ── TCAS Audio toggle ─────────────────────────
-    addToggle('TCAS Audio', 'tcasAudioEnabled');
+    // ── TCAS Audio toggle (reads/writes prefs, not settings) ─────────────
+    {
+        const row = document.createElement('div');
+        row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
+            padding:${UI.menuRowPadY}px 16px;cursor:pointer;transition:background .15s;`;
+        row.onmouseover = () => row.style.background = T().menuRowHover;
+        row.onmouseout  = () => row.style.background = '';
+        const lbl = document.createElement('span');
+        lbl.dataset.menuRowlbl = '1';
+        lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
+        lbl.textContent = 'TCAS Audio';
+        const sw = document.createElement('div');
+        const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
+        sw.style.cssText = `width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
+            border-radius:${UI.menuSwitchH/2}px;position:relative;
+            background:${prefs.tcasAudioEnabled ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
+            border:1px solid rgba(0,255,0,0.3);transition:background .2s;flex-shrink:0;`;
+        const knob = document.createElement('div');
+        knob.style.cssText = `position:absolute;top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+            left:${prefs.tcasAudioEnabled ? knobOn : knobOff}px;
+            width:${UI.menuKnobSize}px;height:${UI.menuKnobSize}px;border-radius:50%;
+            background:${prefs.tcasAudioEnabled ? '#0f0' : '#888'};transition:left .2s,background .2s;`;
+        sw.appendChild(knob); row.appendChild(lbl); row.appendChild(sw);
+        row.onclick = () => {
+            prefs.tcasAudioEnabled = !prefs.tcasAudioEnabled;
+            const tc = T();
+            sw.style.background   = prefs.tcasAudioEnabled ? tc.switchOn  : tc.switchOff;
+            knob.style.left       = prefs.tcasAudioEnabled ? knobOn+'px'  : knobOff+'px';
+            knob.style.background = prefs.tcasAudioEnabled ? tc.knobOn    : tc.knobOff;
+            savePrefs();
+        };
+        panel.appendChild(row);
+    }
 
     // ── TCAS tuning sliders ───────────────────────
     addSlider({
@@ -1708,6 +1805,14 @@ function createMenu() {
         set:   v  => { prefs.tcasAudioCooldownMs = v * 1000; },
         fmt:   v  => v + ' s',
         min: 1, max: 60, step: 1,
+        onCommit: savePrefs,
+    });
+    addSlider({
+        label: 'Time Sync Tolerance',               // ±% — how closely both aircraft must hit the intersection at the same time
+        get:   () => prefs.tcasTimeTolPct,
+        set:   v  => { prefs.tcasTimeTolPct = v; },
+        fmt:   v  => '±' + v + '%',
+        min: 1, max: 30, step: 1,
         onCommit: savePrefs,
     });
 
@@ -2731,15 +2836,40 @@ tcasOverlay.style.cssText = `
 `;
 document.body.appendChild(tcasOverlay);
 
+const tcasInner = document.createElement('div');
+tcasInner.style.cssText = 'display:flex;flex-direction:column;align-items:center;';
+tcasOverlay.appendChild(tcasInner);
+
 const tcasText = document.createElement('div');
 tcasText.style.cssText = `
-    font-family:Arial, sans-serif; font-size:72px; font-weight:bold;
+    font-family:Arial,sans-serif; font-size:72px; font-weight:bold;
     letter-spacing:8px; text-transform:uppercase;
     color:rgba(255,0,0,0.5); text-shadow:0 0 30px rgba(255,0,0,0.8);
-    user-select:none; pointer-events:none;
+    user-select:none; pointer-events:none; text-align:center; line-height:1;
 `;
 tcasText.textContent = 'TRAFFIC';
-tcasOverlay.appendChild(tcasText);
+tcasInner.appendChild(tcasText);
+
+const tcasCallsign = document.createElement('div');
+tcasCallsign.style.cssText = `
+    font-family:Arial,sans-serif; font-size:26px; font-weight:bold;
+    letter-spacing:4px; color:rgba(255,130,0,0.80);
+    text-shadow:0 0 16px rgba(255,80,0,0.6);
+    user-select:none; pointer-events:none; text-align:center; margin-top:8px;
+`;
+tcasCallsign.textContent = '';
+tcasInner.appendChild(tcasCallsign);
+
+const tcasTimer = document.createElement('div');
+tcasTimer.style.cssText = `
+    font-family:Arial,sans-serif; font-size:18px; font-weight:bold;
+    letter-spacing:2px; color:rgba(255,210,0,0.85);
+    text-shadow:0 0 10px rgba(255,180,0,0.5);
+    user-select:none; pointer-events:none; text-align:center; margin-top:4px;
+`;
+tcasTimer.textContent = '';
+tcasInner.appendChild(tcasTimer);
+
 
 // ── TCAS audio (lazy-loaded once) ────────────────
 let _tcasAudio = null;
@@ -2763,16 +2893,26 @@ function _playTCASAudio() {
     } catch(e) {}
 }
 
-function _startTCAS() {
-    if (_tcasActive) return;
+function _startTCAS(callsign, etaSec) {
+    const isNew = !_tcasActive;
     _tcasActive = true;
     tcasOverlay.style.display = 'flex';
-    _playTCASAudio();
-    let _flashOn = true;
-    _tcasFlashTimer = setInterval(() => {
-        _flashOn = !_flashOn;
-        tcasText.style.opacity = _flashOn ? '1' : '0';
-    }, 400); // Flash every 400 ms
+    // Update info fields every call (threat may have changed)
+    tcasCallsign.textContent = callsign ? callsign.toUpperCase() : '';
+    tcasTimer.textContent    = (etaSec != null && isFinite(etaSec))
+        ? 'COLLISION IN ~' + Math.round(etaSec) + 's'
+        : '';
+    if (isNew) {
+        _playTCASAudio();
+        let _flashOn = true;
+        _tcasFlashTimer = setInterval(() => {
+            _flashOn = !_flashOn;
+            const op = _flashOn ? '1' : '0';
+            tcasText.style.opacity     = op;
+            tcasCallsign.style.opacity = op;
+            tcasTimer.style.opacity    = op;
+        }, 400);
+    }
 }
 
 function _stopTCAS() {
@@ -2780,48 +2920,33 @@ function _stopTCAS() {
     _tcasActive = false;
     tcasOverlay.style.display = 'none';
     if (_tcasFlashTimer) { clearInterval(_tcasFlashTimer); _tcasFlashTimer = null; }
-}
-
-// ── Closest-point-of-approach between two line segments (metres) ─────────
-// Segments: (p1x,p1y)→(p2x,p2y) and (p3x,p3y)→(p4x,p4y) in flat XY metres.
-// Returns the minimum distance between any point on segment 1 and any point on segment 2.
-function _segmentMinDist(p1x, p1y, p2x, p2y, p3x, p3y, p4x, p4y) {
-    const d1x = p2x-p1x, d1y = p2y-p1y;
-    const d2x = p4x-p3x, d2y = p4y-p3y;
-    const rx  = p1x-p3x, ry  = p1y-p3y;
-    const a   = d1x*d1x + d1y*d1y;
-    const e   = d2x*d2x + d2y*d2y;
-    const f   = d2x*rx  + d2y*ry;
-    let s, t;
-    if (a < 1e-10 && e < 1e-10) return Math.hypot(rx, ry);
-    if (a < 1e-10) { s = 0; t = Math.max(0, Math.min(1, f / e)); }
-    else {
-        const c = d1x*rx + d1y*ry;
-        if (e < 1e-10) { t = 0; s = Math.max(0, Math.min(1, -c / a)); }
-        else {
-            const b = d1x*d2x + d1y*d2y;
-            const denom = a*e - b*b;
-            s = denom !== 0 ? Math.max(0, Math.min(1, (b*f - c*e) / denom)) : 0;
-            t = (f + b*s) / e;
-            if      (t < 0) { t = 0; s = Math.max(0, Math.min(1, -c / a)); }
-            else if (t > 1) { t = 1; s = Math.max(0, Math.min(1, (b - c) / a)); }
-        }
-    }
-    const cx = (p1x + d1x*s) - (p3x + d2x*t);
-    const cy = (p1y + d1y*s) - (p3y + d2y*t);
-    return Math.hypot(cx, cy);
+    // Stop audio immediately if playing
+    try { if (_tcasAudio && !_tcasAudio.paused) { _tcasAudio.pause(); _tcasAudio.currentTime = 0; } } catch(e) {}
 }
 
 // Store my TCAS projected path endpoint for radar canvas drawing each frame
 let _tcasMyEndX = 0, _tcasMyEndY = 0, _tcasHasPath = false;
 
-// ── TCAS: strict heading-vector intersection check ───────────────────────
-// EXACT logic:
-//   My vector   = line from MY position, extending (mySpeed × 30s) metres on my heading.
-//   Their vector = line from THEIR position, extending (theirSpeed × 30s) metres on their heading.
-//   ALARM fires ONLY when those two line segments intersect (or pass within _tcasMargin() metres).
-//   No other criteria (closing speed, future separation, etc.) — pure vector geometry.
-function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic) {
+// ── TCAS: simultaneous-time intersection check ───────────────────────────
+//
+// The key insight: two aircraft are on a collision course only if they reach
+// the SAME POINT at the SAME TIME — not just if their paths happen to cross.
+//
+// Algorithm:
+//   s = parameter along MY segment (0 = now, 1 = 30 s from now)
+//   t = parameter along THEIR segment (0 = now, 1 = 30 s from now)
+//
+//   At time fraction s, I am at position P(s) = my_start + s * my_vector
+//   At time fraction t, they are at Q(t) = their_start + t * their_vector
+//
+//   We find the s,t pair that minimises |P(s) - Q(t)|.
+//   IF that minimum distance <= _tcasMargin() metres
+//   AND |s - t| <= tcasTimeTolPct/100  (both at same relative time)
+//   THEN it's a genuine collision course — alarm fires.
+//
+// This correctly rejects cases like: my path crosses their path at t=0.1
+// but they won't be there until t=0.7. Those aircraft are NOT on a collision course.
+function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic, myCallsign) {
     if (!prefs.tcasEnabled) { _stopTCAS(); _tcasHasPath = false; return; }
 
     // Must be airborne
@@ -2836,25 +2961,43 @@ function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic) {
     const mySpeedMs = (mySpeedKts || 0) * 0.514444;
     if (mySpeedMs < 10) { _stopTCAS(); _tcasHasPath = false; return; }
 
-    // My 30-second vector in flat-earth metres (east=X, north=Y)
+    // My lookahead vector in flat-earth metres (east=X, north=Y)
     const myHdgRad   = myHdg * Math.PI / 180;
     const myPathDist = mySpeedMs * _tcasLookahead();
-    _tcasMyEndX  = myPathDist * Math.sin(myHdgRad);
-    _tcasMyEndY  = myPathDist * Math.cos(myHdgRad);
+    _tcasMyEndX  = myPathDist * Math.sin(myHdgRad);   // east
+    _tcasMyEndY  = myPathDist * Math.cos(myHdgRad);   // north
     _tcasHasPath = true;
 
-    let threat = false;
+    // Time tolerance: |s - t| must be within this fraction (e.g. 0.08 = ±8%)
+    const timeTol = (prefs.tcasTimeTolPct || 8) / 100;
+
+    let threat         = false;
+    let threatCallsign = null;
+    let threatETA      = null;
 
     for (const ac of traffic) {
         if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) continue;
+
+        // Skip aircraft with the same callsign as me (own aircraft seen via API)
+        const acCs = (ac.cs || ac.callsign || '').toLowerCase().trim();
+        const myCs = (_cachedCallsign || myCallsign || '').toLowerCase().trim();
+        if (acCs && myCs && myCs !== 'you' && acCs === myCs) continue;
+
+        // Skip Foo players if that filter is active
+        if (prefs.hideFooPlayers) {
+            if (acCs === 'foo' || acCs.startsWith('foo ') || acCs === 'foo_') continue;
+        }
 
         // Both must be airborne
         const acAltFt = isFinite(parseFloat(ac.al)) ? parseFloat(ac.al)
             : (ac.co.length >= 3 && isFinite(ac.co[2]) ? parseFloat(ac.co[2]) * 3.28084 : null);
         if (acAltFt === null || acAltFt < _tcasMinAlt()) continue;
-
-        // Altitude band — both within ±TCAS_ALT_BAND_FT
         if (Math.abs(myAltFt - acAltFt) > _tcasAltBand()) continue;
+
+        // Apply altitude display filter if enabled
+        if (prefs.altFilterEnabled) {
+            if (acAltFt < prefs.altFilterMinFt || acAltFt > prefs.altFilterMaxFt) continue;
+        }
 
         // Traffic must have a known heading and be moving
         const acH = isFinite(parseFloat(ac.h)) ? parseFloat(ac.h) : null;
@@ -2862,32 +3005,50 @@ function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic) {
         const acS = isFinite(parseFloat(ac.s)) ? parseFloat(ac.s)
             : (typeof ac._computedSpd === 'number' ? ac._computedSpd : 0);
         const acSpeedMs = acS * 0.514444;
-        if (acSpeedMs < 10) continue; // Stationary — no vector, skip
+        if (acSpeedMs < 10) continue;
 
-        // Traffic position in my local tangent plane (metres east/north from me)
+        // Traffic position in my local tangent plane
         const [acOffX, acOffY] = latLonToMeters(myLat, myLon, ac.co[0], ac.co[1]);
 
-        // Their 30-second vector endpoint
-        const acHdgRad  = acH * Math.PI / 180;
+        // Their lookahead vector
+        const acHdgRad   = acH * Math.PI / 180;
         const acPathDist = acSpeedMs * _tcasLookahead();
-        const acEndX    = acOffX + acPathDist * Math.sin(acHdgRad);
-        const acEndY    = acOffY + acPathDist * Math.cos(acHdgRad);
+        const acVecX     = acPathDist * Math.sin(acHdgRad);
+        const acVecY     = acPathDist * Math.cos(acHdgRad);
 
-        // ── Strict intersection: do the two vector SEGMENTS intersect? ──
-        // Use _segmentMinDist — the two segments intersect when their min distance ≈ 0.
-        // Intersection tolerance from prefs (metres)
-        const cpa = _segmentMinDist(
-            0, 0, _tcasMyEndX, _tcasMyEndY,   // My segment
-            acOffX, acOffY, acEndX, acEndY     // Their segment
-        );
+        const myVecX = _tcasMyEndX, myVecY = _tcasMyEndY;
+        const mm  = myVecX*myVecX + myVecY*myVecY;
+        const aa  = acVecX*acVecX + acVecY*acVecY;
+        const ma  = myVecX*acVecX + myVecY*acVecY;
+        const det = mm * aa - ma * ma;
 
-        if (cpa <= _tcasMargin()) {
-            threat = true;
+        let s, t;
+        if (Math.abs(det) < 1e-6) {
+            s = 0.5; t = 0.5;
+        } else {
+            const rm = acOffX*myVecX + acOffY*myVecY;
+            const ra = acOffX*acVecX + acOffY*acVecY;
+            s = ( aa*rm - ma*ra) / det;
+            t = ( ma*rm - mm*ra) / det;
+            s = Math.max(0, Math.min(1, s));
+            t = Math.max(0, Math.min(1, t));
+        }
+
+        const px = s * myVecX;
+        const py = s * myVecY;
+        const qx = acOffX + t * acVecX;
+        const qy = acOffY + t * acVecY;
+        const dist = Math.hypot(px - qx, py - qy);
+
+        if (dist <= _tcasMargin() && Math.abs(s - t) <= timeTol) {
+            threat         = true;
+            threatCallsign = ac.cs || ac.callsign || ac.id || null;
+            threatETA      = s * _tcasLookahead(); // seconds until closest approach
             break;
         }
     }
 
-    if (threat) _startTCAS();
+    if (threat) _startTCAS(threatCallsign, threatETA);
     else _stopTCAS();
 }
 
@@ -3287,8 +3448,14 @@ function drawRadar() {
             if (prefs.hideGroundPlayers) {
                 const acAltFt = isFinite(parseFloat(ac.al)) ? parseFloat(ac.al)
                     : (ac.co.length >= 3 && isFinite(parseFloat(ac.co[2])) ? parseFloat(ac.co[2]) * 3.28084 : null);
-                // If altitude available and very low, skip
                 if (acAltFt !== null && acAltFt < 200) return;
+            }
+
+            // ── Altitude filter ────────────────────────
+            if (prefs.altFilterEnabled) {
+                const acAltFt = isFinite(parseFloat(ac.al)) ? parseFloat(ac.al)
+                    : (ac.co.length >= 3 && isFinite(parseFloat(ac.co[2])) ? parseFloat(ac.co[2]) * 3.28084 : null);
+                if (acAltFt !== null && (acAltFt < prefs.altFilterMinFt || acAltFt > prefs.altFilterMaxFt)) return;
             }
             const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
             const distM    = Math.hypot(dx, dy);
@@ -3366,7 +3533,7 @@ function drawRadar() {
             const av = geofs.animation?.values;
             mySpeedKts = av?.groundSpeed ?? av?.kias ?? 0;
         } catch(e) {}
-        checkTCAS(playerLat, playerLon, playerAltFt, playerHeading, mySpeedKts, aircraftListCache);
+        checkTCAS(playerLat, playerLon, playerAltFt, playerHeading, mySpeedKts, aircraftListCache, _cachedCallsign || playerCallsign);
     } else {
         _stopTCAS();
     }
@@ -3399,39 +3566,25 @@ function drawRadar() {
     drawPlayerTriangle(cx, cy, playerHeading, isGamePaused);
 
     // ── TCAS projected path line — starts at nose of player triangle ─────
-    // The line represents: where will I be in _tcasLookahead() seconds at current speed/heading?
-    // Origin = tip of player triangle (UI.playerTriTip px ahead of centre in heading direction).
+    // Line = nose tip → nose tip + (speed × TCAS_LOOKAHEAD_S) metres along heading.
     if (_tcasHasPath && prefs.tcasEnabled && hasPos && !isGamePaused) {
-        const scale  = (radarSize / 2) / radarRange; // px per metre on canvas
-
-        // In North-up mode: everything is rotated by playerHeading on screen.
-        // In Track-up mode: player triangle always points up (angleRad=0), map rotates.
-        // The triangle tip always renders at (0, -UI.playerTriTip) in its local rotated frame.
-        // We need the tip in canvas space, then project forward along the heading screen-direction.
-
-        const isNorthUp   = settings.orientMode === 'north';
-        // Screen angle of "forward" = heading angle when north-up, or straight up (0) when track-up
-        const fwdAngle    = isNorthUp ? (playerHeading * Math.PI / 180) : 0;
+        const scale    = (radarSize / 2) / radarRange; // canvas px per metre
+        const isNorthUp = settings.orientMode === 'north';
+        const fwdAngle  = isNorthUp ? (playerHeading * Math.PI / 180) : 0;
         const cosFwd = Math.cos(fwdAngle), sinFwd = Math.sin(fwdAngle);
 
-        // Tip of triangle in canvas coords
-        const tipX = cx + sinFwd *  UI.playerTriTip;
-        const tipY = cy - cosFwd *  UI.playerTriTip;
+        // Triangle nose tip in canvas coords (always UI.playerTriTip px forward from centre)
+        const tipX = cx + sinFwd * UI.playerTriTip;
+        const tipY = cy - cosFwd * UI.playerTriTip;
 
-        // Project the 30-second path from the tip.
-        // _tcasMyEndX/Y are in flat-earth metres (east/north).  Convert to canvas px.
-        // For north-up: east→right, north→up (standard).
-        // For track-up: the map is rotated by -playerHeading, so east/north must be rotated the same way.
-        const pathEast  = _tcasMyEndX;  // metres east
-        const pathNorth = _tcasMyEndY;  // metres north
-        // Rotate into screen space: apply the same -rotRad the blip loop uses
-        const cosR  = Math.cos(-rotRad), sinR = Math.sin(-rotRad);
-        const scrEast  =  pathEast * cosR + pathNorth * sinR;  // screen-right component
-        const scrNorth = -pathEast * sinR + pathNorth * cosR;  // screen-up component
-
-        // End point in canvas coords (starting from centre cx,cy then add tip offset)
-        const ex = cx + scrEast  * scale + sinFwd * UI.playerTriTip;
-        const ey = cy - scrNorth * scale - cosFwd * UI.playerTriTip;
+        // Convert path metres (east/north) → canvas pixels using the blip-loop rotation
+        const cosR = Math.cos(-rotRad), sinR = Math.sin(-rotRad);
+        // Rotate east/north into screen-right / screen-up
+        const scrRight =  _tcasMyEndX * cosR + _tcasMyEndY * sinR;
+        const scrUp    = -_tcasMyEndX * sinR + _tcasMyEndY * cosR;
+        // End point: centre + rotated path, no extra tip offset (tip is already baked into tipX/Y start)
+        const ex = cx + scrRight * scale;
+        const ey = cy - scrUp   * scale;
 
         ctx.save();
         ctx.beginPath();
@@ -3440,8 +3593,8 @@ function drawRadar() {
         ctx.setLineDash([7, 5]);
         ctx.lineWidth   = 1.5;
         ctx.strokeStyle = _tcasActive
-            ? 'rgba(255,60,60,0.65)'    // Red-tinted when alarm firing
-            : 'rgba(255,190,0,0.30)';   // Faint amber when clear
+            ? 'rgba(255,60,60,0.70)'
+            : 'rgba(255,190,0,0.32)';
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.restore();
