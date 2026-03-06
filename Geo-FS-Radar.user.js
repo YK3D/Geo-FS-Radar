@@ -3818,30 +3818,29 @@ function _apFireInputChange(el, value) {
 // Engage the autopilot ONCE. Subsequent calls while _apEngaged === true
 // are no-ops, which is what prevents the toggle flicker.
 function _apEnable() {
-    if (_apEngaged) return; // ← guard: do nothing if already on
+    if (_apEngaged) return;
     try {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
 
         if (typeof ap.toggle === 'function') {
-            if (!ap.engaged) {
-                ap.toggle();
-            }
-            // Set HDG mode once on engagement only — never called again mid-flight
+            if (!ap.engaged) ap.toggle();
             if (typeof ap.setMode === 'function') ap.setMode('HDG');
             _apEngaged = true;
+            _apSyncBar(); // ← sync the bar exactly once, immediately after engagement
             return;
         }
-        if (typeof ap.activate === 'function') { ap.activate(); _apEngaged = true; return; }
-        if (typeof ap.engage   === 'function') { ap.engage();   _apEngaged = true; return; }
-        if ('active'  in ap) { ap.active  = true; _apEngaged = true; return; }
-        if ('on'      in ap) { ap.on      = true; _apEngaged = true; return; }
-        if ('enabled' in ap) { ap.enabled = true; _apEngaged = true; return; }
+        if (typeof ap.activate === 'function') { ap.activate(); _apEngaged = true; _apSyncBar(); return; }
+        if (typeof ap.engage   === 'function') { ap.engage();   _apEngaged = true; _apSyncBar(); return; }
+        if ('active'  in ap) { ap.active  = true; _apEngaged = true; _apSyncBar(); return; }
+        if ('on'      in ap) { ap.on      = true; _apEngaged = true; _apSyncBar(); return; }
+        if ('enabled' in ap) { ap.enabled = true; _apEngaged = true; _apSyncBar(); return; }
         const apBtn = document.querySelector(
             '[data-feature="autopilot"] button, .geofs-autopilot-toggle, #autopilot-toggle');
         if (apBtn && apBtn.dataset.active !== 'true') {
             apBtn.click();
             _apEngaged = true;
+            _apSyncBar();
         }
     } catch(e) {}
 }
