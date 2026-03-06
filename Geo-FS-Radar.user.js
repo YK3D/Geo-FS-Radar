@@ -597,6 +597,7 @@ let _apLastSpd     = -1;     // last speed sent to AP (kts)
 let _apLastAlt     = -9e9;   // last altitude sent to AP (ft)
 let _apUiSync      = 0;      // timestamp of last AP bar DOM sync
 let _apAirbrakesOn = false;  // current airbrake deployment state
+let _apLastEngageAttempt = 0; // timestamp of last _apEnable() call (debounce guard)
 
 function stopTracking() {
     _apSetAirbrakes(false);   // always retract airbrakes when tracking ends
@@ -609,9 +610,10 @@ function stopTracking() {
     _escortMode    = null;
     _chasePid      = { integral: 0, prevError: 0, lastTime: 0 };
     _headingPid    = { integral: 0, prevError: 0, lastTime: 0 };
-    _apLastHdg     = -999;
-    _apLastSpd     = -1;
-    _apLastAlt     = -9e9;
+    _apLastHdg          = -999;
+    _apLastSpd          = -1;
+    _apLastAlt          = -9e9;
+    _apLastEngageAttempt = 0;
 }
 
 function refreshTracked() {
@@ -878,9 +880,10 @@ function updateNearestHUD(nearest, myData) {
                 _escortMode = null;
                 _chasePid   = { integral: 0, prevError: 0, lastTime: 0 };
                 _headingPid = { integral: 0, prevError: 0, lastTime: 0 };
-                _apLastHdg  = -999;   // force re-command of all values on first tick
-                _apLastSpd  = -1;
-                _apLastAlt  = -9e9;
+                _apLastHdg          = -999;  // force re-command of all values on first tick
+                _apLastSpd          = -1;
+                _apLastAlt          = -9e9;
+                _apLastEngageAttempt = 0;    // allow immediate engage on first tick
             } else {
                 _apSetAirbrakes(false);
                 _chasePhase = 'chase';
@@ -3870,12 +3873,9 @@ function _apEnable() {
         if (typeof ap.toggle === 'function') {
             if (!ap.engaged) {
                 ap.toggle();
-                // One-time setup: HDG mode + UI button — only on initial engagement,
-                // never on subsequent ticks (avoids repeated button clicks that would
-                // toggle the autopilot off again).
+                // Set HDG mode via API only — do NOT click the bar button, as GeoFS
+                // treats that click as a full manual re-engage and overwrites our values.
                 if (typeof ap.setMode === 'function') ap.setMode('HDG');
-                const barHDG = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-HDG');
-                if (barHDG) barHDG.click();
             }
             return;
         }
@@ -4052,9 +4052,17 @@ function _tickChaseEscort(myLat, myLon, myData) {
     const bearingDeg = calcBearing(myLat, myLon, trackedLat, trackedLon);
     const escortDistM = _escortDistNm * 1852; // NM → metres
 
+    // ── Keep autopilot engaged for the full chase/escort session ──────────
+    // Only call _apEnable() when AP isn't engaged, and at most once every 2 s.
+    // This prevents rapid toggle if ap.engaged momentarily reads false during
+    // a setSpeed/setCourse call, which was the source of the flickering.
+    if (!window.geofs?.autopilot?.engaged && (now - _apLastEngageAttempt) > 2000) {
+        _apLastEngageAttempt = now;
+        _apEnable();
+    }
+
     if (_chasePhase === 'chase') {
         // ── Phase 1: Chase — fly toward the tracked aircraft ──────────
-        _apEnable();
         _apSetHeading(bearingDeg);
         if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
@@ -4089,7 +4097,6 @@ function _tickChaseEscort(myLat, myLon, myData) {
         // ── Phase 2: Escort — maintain formation around the tracked aircraft ──
         if (_escortMode === null) {
             // No formation selected yet — just maintain distance, match heading and altitude
-            _apEnable();
             _apSetHeading(trackedHdg);
             if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
             // Gentle PID to keep at escort distance
@@ -4114,7 +4121,6 @@ function _tickChaseEscort(myLat, myLon, myData) {
 
             // Heading correction: if I'm too far right (lateralM > targetLateral → error > 0)
             // I need to go more LEFT → decrease heading (subtract correction)
-            _apEnable();
             _apSetHeading(trackedHdg - hdgCorr);
             if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
@@ -4135,7 +4141,6 @@ function _tickChaseEscort(myLat, myLon, myData) {
 
             // PID speed: if forwardErrNm > 0 (I'm too far ahead), slow down
             const pidOut = _pidStep(_chasePid, -forwardErrNm, dt); // negate: ahead = slow
-            _apEnable();
             _apSetHeading(trackedHdg);
             if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
             const baseSpeed = isFinite(parseFloat(_trackedAc.s)) ? parseFloat(_trackedAc.s)
