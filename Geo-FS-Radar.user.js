@@ -3824,8 +3824,13 @@ function _apSetHeading(hdg) {
         const h = ((hdg % 360) + 360) % 360;
         // Try common GeoFS API patterns
         if (ap.values != null && 'heading' in ap.values) { ap.values.heading = h; return; }
-        if ('heading' in ap) { ap.heading = h; return; }
+        if (typeof ap.setHDG === 'function') { ap.setHDG(h); return; }
         if (typeof ap.setHeading === 'function') { ap.setHeading(h); return; }
+        if (typeof ap.set === 'function') { ap.set('heading', h); return; }
+        if ('selectedHeading' in ap) { ap.selectedHeading = h; return; }
+        if ('targetHeading' in ap) { ap.targetHeading = h; return; }
+        if ('hdg' in ap) { ap.hdg = h; return; }
+        if ('heading' in ap) { ap.heading = h; return; }
     } catch(e) {}
 }
 
@@ -3834,6 +3839,18 @@ function _apSetSpeed(kts) {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
         const s = Math.max(CHASE_MIN_SPEED_KT, Math.min(CHASE_MAX_SPEED_KT, Math.round(kts)));
+        if (ap.values != null && 'speed' in ap.values) { ap.values.speed = s; return; }
+        if ('speed' in ap) { ap.speed = s; return; }
+        if (typeof ap.setSpeed === 'function') { ap.setSpeed(s); return; }
+    } catch(e) {}
+}
+
+// Uncapped speed setter — used during the chase phase to slam to max speed.
+function _apSetSpeedRaw(kts) {
+    try {
+        const ap = window.geofs?.autopilot;
+        if (!ap) return;
+        const s = Math.round(kts);
         if (ap.values != null && 'speed' in ap.values) { ap.values.speed = s; return; }
         if ('speed' in ap) { ap.speed = s; return; }
         if (typeof ap.setSpeed === 'function') { ap.setSpeed(s); return; }
@@ -3914,12 +3931,8 @@ function _tickChaseEscort(myLat, myLon, myData) {
         _apSetHeading(bearingDeg);
         if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
-        // PID speed: positive error = too far → speed up
-        const errNm = distNm - _escortDistNm;
-        const pidOut = _pidStep(_chasePid, errNm, dt);
-        const newSpeed = Math.max(CHASE_MIN_SPEED_KT,
-            Math.min(CHASE_MAX_SPEED_KT, _apCurrentSpeed() + pidOut));
-        _apSetSpeed(newSpeed);
+        // Full throttle while chasing — close the gap as fast as possible
+        _apSetSpeedRaw(10000);
 
         // Transition to escort when within arrival threshold
         if (distNm <= _escortDistNm * CHASE_ARRIVAL_RATIO) {
