@@ -591,7 +591,15 @@ let _escortDistNm = 0.5;            // Target escort distance in NM (slider valu
 let _chasePid     = { integral: 0, prevError: 0, lastTime: 0 }; // Speed PID state
 let _headingPid   = { integral: 0, prevError: 0, lastTime: 0 }; // Lateral heading PID state
 
+// ── AP command-state (used to throttle API + DOM calls) ──
+let _apLastHdg     = -999;   // last heading sent to AP (deg); -999 = uninitialised
+let _apLastSpd     = -1;     // last speed sent to AP (kts)
+let _apLastAlt     = -9e9;   // last altitude sent to AP (ft)
+let _apUiSync      = 0;      // timestamp of last AP bar DOM sync
+let _apAirbrakesOn = false;  // current airbrake deployment state
+
 function stopTracking() {
+    _apSetAirbrakes(false);   // always retract airbrakes when tracking ends
     _trackedAc     = null;
     _trackedId     = null;
     activePopupCs  = null;
@@ -601,6 +609,9 @@ function stopTracking() {
     _escortMode    = null;
     _chasePid      = { integral: 0, prevError: 0, lastTime: 0 };
     _headingPid    = { integral: 0, prevError: 0, lastTime: 0 };
+    _apLastHdg     = -999;
+    _apLastSpd     = -1;
+    _apLastAlt     = -9e9;
 }
 
 function refreshTracked() {
@@ -867,7 +878,11 @@ function updateNearestHUD(nearest, myData) {
                 _escortMode = null;
                 _chasePid   = { integral: 0, prevError: 0, lastTime: 0 };
                 _headingPid = { integral: 0, prevError: 0, lastTime: 0 };
+                _apLastHdg  = -999;   // force re-command of all values on first tick
+                _apLastSpd  = -1;
+                _apLastAlt  = -9e9;
             } else {
+                _apSetAirbrakes(false);
                 _chasePhase = 'chase';
                 _escortMode = null;
             }
@@ -3827,6 +3842,12 @@ const CHASE_HDG_MAX_CORR  = 35;     // Max heading correction in degrees
 const CHASE_MIN_SPEED_KT  = 60;     // Minimum autopilot speed (knots)
 const CHASE_MAX_SPEED_KT  = 600;    // Maximum autopilot speed (knots)
 const CHASE_ARRIVAL_RATIO = 1.25;   // Enter escort when dist < escortDist * this ratio
+const CHASE_DECEL_ZONE    = 8;      // Begin decelerating at escortDist × this NM out
+const CHASE_OVERSHOOT_R   = 0.85;   // Deploy airbrakes when dist < escortDist × this
+const AP_UI_SYNC_MS       = 400;    // Minimum ms between DOM input-event syncs
+const AP_HDG_THRESH       = 1;      // Min heading delta (°) before re-commanding AP
+const AP_SPD_THRESH       = 5;      // Min speed delta (kts) before re-commanding AP
+const AP_ALT_THRESH       = 50;     // Min altitude delta (ft) before re-commanding AP
 
 // ── Autopilot wrappers ───────────────────────────
 // Priority order: confirmed-working GeoFS API (toggle/engaged, setCourse, setSpeed,
@@ -3875,17 +3896,11 @@ function _apSetHeading(hdg) {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
         const h = ((hdg % 360) + 360) % 360;
+        // Skip if change is below threshold (avoids hammering the API every frame)
+        if (Math.abs(((h - _apLastHdg + 540) % 360) - 180) < AP_HDG_THRESH) return;
+        _apLastHdg = h;
         // ── Confirmed-working GeoFS API ──
-        if (typeof ap.setCourse === 'function') {
-            ap.setCourse(h);
-            // Sync the course input in the autopilot bar
-            const barCourse = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-course');
-            _apFireInputChange(barCourse, h);
-            // Also sync legacy map-panel input
-            const mapCourse = document.querySelector('.geofs-autopilot .geofs-autopilot-course');
-            _apFireInputChange(mapCourse, h);
-            return;
-        }
+        if (typeof ap.setCourse === 'function') { ap.setCourse(h); return; }
         // ── ap.values object (separate from animation.values) ──
         const animVals = window.geofs?.animation?.values;
         if (ap.values != null && ap.values !== animVals) {
@@ -3900,7 +3915,6 @@ function _apSetHeading(hdg) {
         if ('targetHeading'   in ap) { ap.targetHeading   = h; return; }
         if ('hdg'             in ap) { ap.hdg             = h; return; }
         if ('heading'         in ap) { ap.heading         = h; return; }
-        // Last resort: steer via direct bank-angle control so heading always responds
         _apSteerByBank(h);
     } catch(e) {}
 }
@@ -3927,35 +3941,9 @@ function _apSetSpeed(kts) {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
         const s = Math.max(CHASE_MIN_SPEED_KT, Math.min(CHASE_MAX_SPEED_KT, Math.round(kts)));
-        // ── Confirmed-working GeoFS API ──
-        if (typeof ap.setSpeed === 'function') {
-            ap.setSpeed(s);
-            const barSpeed = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-knots');
-            _apFireInputChange(barSpeed, s);
-            const mapSpeed = document.querySelector('.geofs-autopilot-kias');
-            _apFireInputChange(mapSpeed, s);
-            return;
-        }
-        if (ap.values != null && 'speed' in ap.values) { ap.values.speed = s; return; }
-        if ('speed' in ap) { ap.speed = s; return; }
-    } catch(e) {}
-}
-
-// Uncapped speed setter — used during the chase phase to slam to max speed.
-function _apSetSpeedRaw(kts) {
-    try {
-        const ap = window.geofs?.autopilot;
-        if (!ap) return;
-        const s = Math.round(kts);
-        // ── Confirmed-working GeoFS API ──
-        if (typeof ap.setSpeed === 'function') {
-            ap.setSpeed(s);
-            const barSpeed = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-knots');
-            _apFireInputChange(barSpeed, s);
-            const mapSpeed = document.querySelector('.geofs-autopilot-kias');
-            _apFireInputChange(mapSpeed, s);
-            return;
-        }
+        if (Math.abs(s - _apLastSpd) < AP_SPD_THRESH) return;
+        _apLastSpd = s;
+        if (typeof ap.setSpeed === 'function') { ap.setSpeed(s); return; }
         if (ap.values != null && 'speed' in ap.values) { ap.values.speed = s; return; }
         if ('speed' in ap) { ap.speed = s; return; }
     } catch(e) {}
@@ -3966,17 +3954,45 @@ function _apSetAltitude(ft) {
         const ap = window.geofs?.autopilot;
         if (!ap || !isFinite(ft)) return;
         const a = Math.round(ft);
-        // ── Confirmed-working GeoFS API ──
-        if (typeof ap.setAltitude === 'function') {
-            ap.setAltitude(a);
-            const barAlt = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-altitude');
-            _apFireInputChange(barAlt, a);
-            const mapAlt = document.querySelector('.geofs-autopilot .geofs-autopilot-altitude');
-            _apFireInputChange(mapAlt, a);
-            return;
-        }
+        if (Math.abs(a - _apLastAlt) < AP_ALT_THRESH) return;
+        _apLastAlt = a;
+        if (typeof ap.setAltitude === 'function') { ap.setAltitude(a); return; }
         if (ap.values != null && 'altitude' in ap.values) { ap.values.altitude = a; return; }
         if ('altitude' in ap) { ap.altitude = a; return; }
+    } catch(e) {}
+}
+
+// Sync the autopilot bar UI inputs — throttled to AP_UI_SYNC_MS so DOM change-events
+// don't fire every frame and trigger GeoFS's own listeners unexpectedly.
+function _apSyncBar() {
+    const now = Date.now();
+    if (now - _apUiSync < AP_UI_SYNC_MS) return;
+    _apUiSync = now;
+    if (_apLastHdg > -900) {
+        _apFireInputChange(document.querySelector('.geofs-autopilot-bar .geofs-autopilot-course'), _apLastHdg);
+        _apFireInputChange(document.querySelector('.geofs-autopilot .geofs-autopilot-course'), _apLastHdg);
+    }
+    if (_apLastSpd >= 0) {
+        _apFireInputChange(document.querySelector('.geofs-autopilot-bar .geofs-autopilot-knots'), _apLastSpd);
+        _apFireInputChange(document.querySelector('.geofs-autopilot-kias'), _apLastSpd);
+    }
+    if (_apLastAlt > -9e8) {
+        _apFireInputChange(document.querySelector('.geofs-autopilot-bar .geofs-autopilot-altitude'), _apLastAlt);
+        _apFireInputChange(document.querySelector('.geofs-autopilot .geofs-autopilot-altitude'), _apLastAlt);
+    }
+}
+
+// Deploy or retract airbrakes / spoilers using the GeoFS controls API.
+function _apSetAirbrakes(deploy) {
+    try {
+        const c = window.controls;
+        if (!c?.airbrakes) return;
+        const target = deploy ? 1 : 0;
+        if (c.airbrakes.target === target) return; // already in correct state
+        c.airbrakes.target = target;
+        if (typeof c.setPartAnimationDelta === 'function')
+            c.setPartAnimationDelta(c.airbrakes);
+        _apAirbrakesOn = deploy;
     } catch(e) {}
 }
 
@@ -4038,17 +4054,30 @@ function _tickChaseEscort(myLat, myLon, myData) {
 
     if (_chasePhase === 'chase') {
         // ── Phase 1: Chase — fly toward the tracked aircraft ──────────
-        // Head toward the tracked aircraft's current bearing; match its altitude
         _apEnable();
         _apSetHeading(bearingDeg);
         if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
-        // Full throttle while chasing — close the gap as fast as possible
-        _apSetSpeedRaw(10000);
+        // Proportional deceleration: taper from CHASE_MAX_SPEED_KT down to
+        // CHASE_MIN_SPEED_KT as we close from CHASE_DECEL_ZONE × escort NM to 0.
+        // If we overshoot (inside CHASE_OVERSHOOT_R × escort NM), floor speed
+        // and deploy airbrakes/spoilers to bleed off excess closure rate.
+        const decelZoneNm = _escortDistNm * CHASE_DECEL_ZONE;
+        const closeRatio  = Math.max(0, Math.min(1, distNm / decelZoneNm));
+        const chaseSpd    = Math.round(
+            CHASE_MIN_SPEED_KT + (CHASE_MAX_SPEED_KT - CHASE_MIN_SPEED_KT) * closeRatio);
+        if (distNm < _escortDistNm * CHASE_OVERSHOOT_R) {
+            _apSetSpeed(CHASE_MIN_SPEED_KT);
+            _apSetAirbrakes(true);
+        } else {
+            _apSetSpeed(chaseSpd);
+            _apSetAirbrakes(false);
+        }
 
         // Transition to escort when within arrival threshold
         if (distNm <= _escortDistNm * CHASE_ARRIVAL_RATIO) {
             _chasePhase = 'escort';
+            _apSetAirbrakes(false);   // ensure brakes retracted on escort entry
             _chasePid   = { integral: 0, prevError: 0, lastTime: now };
             _headingPid = { integral: 0, prevError: 0, lastTime: now };
             // Rebuild HUD to show escort arrows
@@ -4068,6 +4097,7 @@ function _tickChaseEscort(myLat, myLon, myData) {
             const pidOut = _pidStep(_chasePid, errNm, dt);
             _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
                 Math.min(CHASE_MAX_SPEED_KT, _apCurrentSpeed() + pidOut)));
+            _apSyncBar();
             return;
         }
 
@@ -4114,6 +4144,8 @@ function _tickChaseEscort(myLat, myLon, myData) {
                 Math.min(CHASE_MAX_SPEED_KT, baseSpeed + pidOut)));
         }
     }
+    // Sync autopilot bar UI inputs — throttled, safe to call every tick
+    _apSyncBar();
 }
 
 // ═══════════════════════════════════════════════════
