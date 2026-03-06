@@ -580,11 +580,24 @@ let _hudNearestData = null;
 let _trackedAc      = null;
 let _trackedId      = null;
 
+// ── Chase / Escort state ──────────────────────────
+let _chaseActive  = false;          // Chase/escort mode engaged
+let _chasePhase   = 'chase';        // 'chase' | 'escort'
+let _escortMode   = null;           // null | 'left' | 'right' | 'forward' | 'back'
+let _escortDistNm = 0.5;            // Target escort distance in NM (slider value)
+let _chasePid     = { integral: 0, prevError: 0, lastTime: 0 }; // Speed PID state
+let _headingPid   = { integral: 0, prevError: 0, lastTime: 0 }; // Lateral heading PID state
+
 function stopTracking() {
     _trackedAc     = null;
     _trackedId     = null;
     activePopupCs  = null;
     _lastNearestCs = null;
+    _chaseActive   = false;
+    _chasePhase    = 'chase';
+    _escortMode    = null;
+    _chasePid      = { integral: 0, prevError: 0, lastTime: 0 };
+    _headingPid    = { integral: 0, prevError: 0, lastTime: 0 };
 }
 
 function refreshTracked() {
@@ -679,6 +692,76 @@ function updateNearestHUD(nearest, myData) {
     </div>
   </div>` : '';
 
+    // ── Chase / Escort HUD rows ──────────────────────────────────────────
+    const chaseSwBg     = _chaseActive ? t.switchOn    : t.switchOff;
+    const chaseKnobBg   = _chaseActive ? t.knobOn      : t.knobOff;
+    const chaseKnobLeft = _chaseActive ? (UI.menuSwitchW - UI.menuKnobSize - 3) : 3;
+    const chasePhaseLbl = _chasePhase === 'escort' ? 'ESCORTING' : 'CHASING';
+    const chasePhaseCol = _chasePhase === 'escort' ? 'rgba(100,220,255,0.95)' : 'rgba(255,200,60,0.95)';
+
+    // Distance slider shown when chase is active
+    const escortDistSlider = _chaseActive ? `
+  <div style="padding:3px 14px 6px;border-top:1px solid ${t.hudSep};">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+      <span style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont}px;">Escort distance</span>
+      <span id="radarEscortDistLbl" style="color:rgba(255,200,60,0.95);font-size:${UI.hudIsolateLabelFont}px;font-weight:bold;">${_escortDistNm.toFixed(1)} NM</span>
+    </div>
+    <input id="radarEscortDistSlider" type="range" min="0.1" max="5.0" step="0.1"
+      value="${_escortDistNm}"
+      style="width:100%;accent-color:rgba(255,180,30,0.9);margin:0;">
+  </div>` : '';
+
+    // Phase label when active
+    const chasePhaseRow = _chaseActive ? `
+  <div style="padding:2px 14px 4px;text-align:center;">
+    <span style="color:${chasePhaseCol};font-size:${UI.hudIsolateLabelFont - 1}px;letter-spacing:1px;font-weight:bold;">● ${chasePhaseLbl}</span>
+  </div>` : '';
+
+    // Escort formation arrows — shown in escort phase with a formation selected indicator
+    const escortArrowPanel = (_chaseActive && _chasePhase === 'escort') ? (() => {
+        const arrowStyle = (mode) => {
+            const isActive = _escortMode === mode;
+            const bg       = isActive ? 'rgba(100,220,255,0.25)' : 'rgba(0,40,0,0.5)';
+            const border   = isActive ? '1.5px solid rgba(100,220,255,0.8)' : `1px solid ${t.hudBorder}`;
+            const color    = isActive ? 'rgba(100,220,255,1)' : t.hudLabel;
+            return `background:${bg};border:${border};color:${color};`;
+        };
+        const btnBase = `padding:8px 12px;border-radius:6px;cursor:pointer;font-size:16px;
+            transition:all .15s;user-select:none;`;
+        return `
+  <div style="padding:4px 14px 6px;border-top:1px solid ${t.hudSep};">
+    <div style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont - 1}px;text-align:center;margin-bottom:5px;letter-spacing:0.5px;">ESCORT POSITION</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:auto auto auto;gap:4px;max-width:140px;margin:0 auto;">
+      <div></div>
+      <div id="radarEscortFwd" style="${btnBase}${arrowStyle('forward')}text-align:center;" title="Ahead of target">▲</div>
+      <div></div>
+      <div id="radarEscortLeft" style="${btnBase}${arrowStyle('left')}text-align:center;" title="Left wing">◀</div>
+      <div style="display:flex;align-items:center;justify-content:center;color:${t.hudLabel};font-size:10px;letter-spacing:0.5px;">FORM</div>
+      <div id="radarEscortRight" style="${btnBase}${arrowStyle('right')}text-align:center;" title="Right wing">▶</div>
+      <div></div>
+      <div id="radarEscortBack" style="${btnBase}${arrowStyle('back')}text-align:center;" title="Behind target">▼</div>
+      <div></div>
+    </div>
+  </div>`;
+    })() : '';
+
+    const chaseRow = isTracking ? `
+  <div style="padding:5px 14px 6px;border-top:1px solid ${t.hudSep};
+    display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
+    id="radarChaseRow">
+    <span style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont}px;letter-spacing:0.5px;">Chase / Escort Player</span>
+    <div id="raderChaseSw" style="width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
+      border-radius:${UI.menuSwitchH/2}px;position:relative;background:${chaseSwBg};
+      border:1px solid ${t.switchBorder};transition:background .2s;flex-shrink:0;">
+      <div id="radarChaseKnob" style="position:absolute;top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+        left:${chaseKnobLeft}px;width:${UI.menuKnobSize}px;height:${UI.menuKnobSize}px;
+        border-radius:50%;background:${chaseKnobBg};transition:left .2s,background .2s;"></div>
+    </div>
+  </div>
+  ${chasePhaseRow}
+  ${escortDistSlider}
+  ${escortArrowPanel}` : '';
+
     const stopBtn = isTracking ? `
   <div style="padding:4px 14px 8px;">
     <button id="radarStopTrackBtn" style="width:100%;padding:6px 0;
@@ -723,6 +806,7 @@ function updateNearestHUD(nearest, myData) {
     </div>
   </div>
   ${isolateRow}
+  ${chaseRow}
   ${stopBtn}
 </div>`;
 
@@ -741,6 +825,56 @@ function updateNearestHUD(nearest, myData) {
         stopEl.onmouseout  = () => stopEl.style.background = T().hudBg;
         stopEl.onclick     = (e) => { e.stopPropagation(); stopTracking(); };
     }
+
+    // ── Chase/Escort toggle ─────────────────────────
+    const chaseRowEl = document.getElementById('radarChaseRow');
+    if (chaseRowEl) {
+        chaseRowEl.onclick = (e) => {
+            e.stopPropagation();
+            _chaseActive = !_chaseActive;
+            if (_chaseActive) {
+                // Reset state for fresh chase
+                _chasePhase = 'chase';
+                _escortMode = null;
+                _chasePid   = { integral: 0, prevError: 0, lastTime: 0 };
+                _headingPid = { integral: 0, prevError: 0, lastTime: 0 };
+            } else {
+                _chasePhase = 'chase';
+                _escortMode = null;
+            }
+            _lastHudUpdate = 0;
+            _lastNearestCs = null;
+            updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+        };
+    }
+
+    // ── Escort distance slider ───────────────────────
+    const distSlider = document.getElementById('radarEscortDistSlider');
+    if (distSlider) {
+        distSlider.addEventListener('input', (e) => {
+            e.stopPropagation();
+            _escortDistNm = parseFloat(e.target.value);
+            const lbl = document.getElementById('radarEscortDistLbl');
+            if (lbl) lbl.textContent = _escortDistNm.toFixed(1) + ' NM';
+        });
+        distSlider.addEventListener('click', e => e.stopPropagation());
+    }
+
+    // ── Escort formation arrow buttons ───────────────
+    ['forward', 'back', 'left', 'right'].forEach(mode => {
+        const el = document.getElementById(`radarEscort${mode.charAt(0).toUpperCase() + mode.slice(1)}`);
+        if (!el) return;
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            _escortMode = (_escortMode === mode) ? null : mode;
+            // Reset PID on mode change
+            _chasePid   = { integral: 0, prevError: 0, lastTime: 0 };
+            _headingPid = { integral: 0, prevError: 0, lastTime: 0 };
+            _lastHudUpdate = 0;
+            _lastNearestCs = null;
+            updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+        });
+    });
 }
 
 function repositionNearestHUD() {
@@ -3600,6 +3734,11 @@ function drawRadar() {
         ctx.restore();
     }
 
+    // ── Chase / Escort autopilot tick ─────────────
+    if (_chaseActive && hasPos && !isGamePaused && _trackedAc) {
+        _tickChaseEscort(playerLat, playerLon, myData);
+    }
+
     // ── Update ILS HUD if active ──────────────────
     if (_ilsActive && hasPos && !isGamePaused) {
         let playerSpeedKts = 0;
@@ -3647,7 +3786,196 @@ function drawRadar() {
 }
 
 // ═══════════════════════════════════════════════════
-// SECTION 18 — REPOSITION INTERVAL
+// SECTION 18 — CHASE / ESCORT AUTOPILOT SYSTEM
+// ═══════════════════════════════════════════════════
+
+// ── PID constants ────────────────────────────────
+const CHASE_PID_KP        =  8.0;   // Proportional gain (speed control)
+const CHASE_PID_KI        =  0.05;  // Integral gain
+const CHASE_PID_KD        =  3.0;   // Derivative gain
+const CHASE_HDG_KP        = 20.0;   // Proportional gain (lateral heading correction)
+const CHASE_HDG_MAX_CORR  = 35;     // Max heading correction in degrees
+const CHASE_MIN_SPEED_KT  = 60;     // Minimum autopilot speed (knots)
+const CHASE_MAX_SPEED_KT  = 600;    // Maximum autopilot speed (knots)
+const CHASE_ARRIVAL_RATIO = 1.25;   // Enter escort when dist < escortDist * this ratio
+
+// ── Autopilot wrappers ───────────────────────────
+// GeoFS autopilot values may live under geofs.autopilot directly or under geofs.autopilot.values
+// Try both patterns gracefully.
+
+function _apEnable() {
+    try {
+        const ap = window.geofs?.autopilot;
+        if (!ap) return;
+        if (typeof ap.engage === 'function') { ap.engage(); return; }
+        // Fallback: try toggling 'on' property or dispatching a click on the AP button
+        if ('on' in ap) { ap.on = true; return; }
+        if ('enabled' in ap) { ap.enabled = true; return; }
+        // Last resort: find and click the autopilot toggle button in the GeoFS UI
+        const apBtn = document.querySelector('[data-feature="autopilot"] button, .geofs-autopilot-toggle, #autopilot-toggle');
+        if (apBtn && apBtn.dataset.active !== 'true') apBtn.click();
+    } catch(e) {}
+}
+
+function _apSetHeading(hdg) {
+    try {
+        const ap = window.geofs?.autopilot;
+        if (!ap) return;
+        const h = ((hdg % 360) + 360) % 360;
+        // Try common GeoFS API patterns
+        if (ap.values != null && 'heading' in ap.values) { ap.values.heading = h; return; }
+        if ('heading' in ap) { ap.heading = h; return; }
+        if (typeof ap.setHeading === 'function') { ap.setHeading(h); return; }
+    } catch(e) {}
+}
+
+function _apSetSpeed(kts) {
+    try {
+        const ap = window.geofs?.autopilot;
+        if (!ap) return;
+        const s = Math.max(CHASE_MIN_SPEED_KT, Math.min(CHASE_MAX_SPEED_KT, Math.round(kts)));
+        if (ap.values != null && 'speed' in ap.values) { ap.values.speed = s; return; }
+        if ('speed' in ap) { ap.speed = s; return; }
+        if (typeof ap.setSpeed === 'function') { ap.setSpeed(s); return; }
+    } catch(e) {}
+}
+
+function _apCurrentSpeed() {
+    try {
+        const av = window.geofs?.animation?.values;
+        const s = av?.groundSpeed ?? av?.kias ?? 200;
+        return isFinite(s) ? Math.max(0, s) : 200;
+    } catch(e) { return 200; }
+}
+
+// ── PID step helpers ─────────────────────────────
+
+function _pidStep(pid, error, dt) {
+    pid.integral += error * dt;
+    pid.integral  = Math.max(-200, Math.min(200, pid.integral)); // anti-windup clamp
+    const deriv   = dt > 0 ? (error - pid.prevError) / dt : 0;
+    pid.prevError = error;
+    pid.lastTime  = Date.now();
+    return CHASE_PID_KP * error + CHASE_PID_KI * pid.integral + CHASE_PID_KD * deriv;
+}
+
+function _hdgPidStep(pid, error, dt) {
+    // Simple proportional for heading correction (no integral windup needed)
+    pid.prevError = error;
+    pid.lastTime  = Date.now();
+    return Math.max(-CHASE_HDG_MAX_CORR, Math.min(CHASE_HDG_MAX_CORR, CHASE_HDG_KP * error));
+}
+
+// ── Geometry helper ──────────────────────────────
+// Returns {forwardM, lateralM} of MY position in TRACKED aircraft's reference frame.
+// forwardM  > 0 → I am ahead of tracked along its heading
+// lateralM  > 0 → I am to the RIGHT of tracked
+function _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdgDeg) {
+    const [vEast, vNorth] = latLonToMeters(trackedLat, trackedLon, myLat, myLon);
+    const θ = trackedHdgDeg * Math.PI / 180;
+    const forwardM  =  vEast * Math.sin(θ) + vNorth * Math.cos(θ);
+    const lateralM  =  vEast * Math.cos(θ) - vNorth * Math.sin(θ);
+    return { forwardM, lateralM };
+}
+
+// ── Main chase/escort tick (called each draw frame) ─
+function _tickChaseEscort(myLat, myLon, myData) {
+    if (!_chaseActive || !_trackedAc || !_trackedAc.co) return;
+
+    const trackedLat = _trackedAc.co[0];
+    const trackedLon = _trackedAc.co[1];
+    const trackedHdg = isFinite(parseFloat(_trackedAc.h)) ? parseFloat(_trackedAc.h) : 0;
+
+    const now        = Date.now();
+    const dtRaw      = (now - (_chasePid.lastTime || now)) / 1000;
+    const dt         = Math.min(2, Math.max(0.05, dtRaw));
+
+    const distNm     = calcDistNm(myLat, myLon, trackedLat, trackedLon);
+    const bearingDeg = calcBearing(myLat, myLon, trackedLat, trackedLon);
+    const escortDistM = _escortDistNm * 1852; // NM → metres
+
+    if (_chasePhase === 'chase') {
+        // ── Phase 1: Chase — fly toward the tracked aircraft ──────────
+        // Head toward the tracked aircraft's current bearing
+        _apEnable();
+        _apSetHeading(bearingDeg);
+
+        // PID speed: positive error = too far → speed up
+        const errNm = distNm - _escortDistNm;
+        const pidOut = _pidStep(_chasePid, errNm, dt);
+        const newSpeed = Math.max(CHASE_MIN_SPEED_KT,
+            Math.min(CHASE_MAX_SPEED_KT, _apCurrentSpeed() + pidOut));
+        _apSetSpeed(newSpeed);
+
+        // Transition to escort when within arrival threshold
+        if (distNm <= _escortDistNm * CHASE_ARRIVAL_RATIO) {
+            _chasePhase = 'escort';
+            _chasePid   = { integral: 0, prevError: 0, lastTime: now };
+            _headingPid = { integral: 0, prevError: 0, lastTime: now };
+            // Rebuild HUD to show escort arrows
+            _lastHudUpdate = 0;
+            _lastNearestCs = null;
+        }
+
+    } else {
+        // ── Phase 2: Escort — maintain formation around the tracked aircraft ──
+        if (_escortMode === null) {
+            // No formation selected yet — just maintain distance, match heading
+            _apEnable();
+            _apSetHeading(trackedHdg);
+            // Gentle PID to keep at escort distance
+            const errNm = distNm - _escortDistNm;
+            const pidOut = _pidStep(_chasePid, errNm, dt);
+            _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
+                Math.min(CHASE_MAX_SPEED_KT, _apCurrentSpeed() + pidOut)));
+            return;
+        }
+
+        const { forwardM, lateralM } = _relativePosition(
+            myLat, myLon, trackedLat, trackedLon, trackedHdg);
+
+        if (_escortMode === 'left' || _escortMode === 'right') {
+            // ── Parallel formation (left / right) ────────────────────────
+            // Both aircraft fly at matching heading.
+            // The target lateral offset: negative for left, positive for right.
+            const targetLateral = (_escortMode === 'left') ? -escortDistM : +escortDistM;
+            const lateralErr    = (lateralM - targetLateral) / 1852; // convert m to NM for PID scale
+            const hdgCorr       = _hdgPidStep(_headingPid, lateralErr, dt);
+
+            // Heading correction: if I'm too far right (lateralM > targetLateral → error > 0)
+            // I need to go more LEFT → decrease heading (subtract correction)
+            _apEnable();
+            _apSetHeading(trackedHdg - hdgCorr);
+
+            // Speed: match tracked aircraft's speed (keep distance stable)
+            const trackedSpd = isFinite(parseFloat(_trackedAc.s)) ? parseFloat(_trackedAc.s)
+                : (typeof _trackedAc._computedSpd === 'number' ? _trackedAc._computedSpd : _apCurrentSpeed());
+            // Small PID correction for distance drift
+            const distErrNm = distNm - _escortDistNm;
+            const spdAdj = CHASE_PID_KP * distErrNm * 0.3;
+            _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
+                Math.min(CHASE_MAX_SPEED_KT, trackedSpd + spdAdj)));
+
+        } else if (_escortMode === 'forward' || _escortMode === 'back') {
+            // ── Collinear formation (ahead / behind) ────────────────────
+            // Both aircraft on same heading. I maintain forwardM offset.
+            const targetForward = (_escortMode === 'forward') ? +escortDistM : -escortDistM;
+            const forwardErrNm  = (forwardM - targetForward) / 1852;
+
+            // PID speed: if forwardErrNm > 0 (I'm too far ahead), slow down
+            const pidOut = _pidStep(_chasePid, -forwardErrNm, dt); // negate: ahead = slow
+            _apEnable();
+            _apSetHeading(trackedHdg);
+            const baseSpeed = isFinite(parseFloat(_trackedAc.s)) ? parseFloat(_trackedAc.s)
+                : (typeof _trackedAc._computedSpd === 'number' ? _trackedAc._computedSpd : _apCurrentSpeed());
+            _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
+                Math.min(CHASE_MAX_SPEED_KT, baseSpeed + pidOut)));
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════
+// SECTION 19 — REPOSITION INTERVAL
 // ═══════════════════════════════════════════════════
 
 setInterval(repositionUI, REPOSITION_INTERVAL);
