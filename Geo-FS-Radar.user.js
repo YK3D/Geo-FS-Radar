@@ -3781,83 +3781,33 @@ function drawRadar() {
         ctx.restore();
     }
 
-    // ── Chase / Escort autopilot tick ─────────────
-    if (_chaseActive && hasPos && !isGamePaused && _trackedAc) {
-        _tickChaseEscort(playerLat, playerLon, myData);
-    }
-
-    // ── Update ILS HUD if active ──────────────────
-    if (_ilsActive && hasPos && !isGamePaused) {
-        let playerSpeedKts = 0;
-        try {
-            // Use geofs.animation.values.kias (knots indicated) or groundSpeed for accuracy
-            const av = geofs.animation?.values;
-            const rawSpd = av?.kias ?? av?.groundSpeed ?? geofs.aircraft?.instance?.animationValue?.speed;
-            if (rawSpd != null && isFinite(parseFloat(rawSpd))) playerSpeedKts = parseFloat(rawSpd);
-        } catch(e) {}
-        const ilsData = computeILSData(playerLat, playerLon, playerHeading, playerAltFt, playerSpeedKts);
-        updateILSHUD(ilsData);
-    } else if (_ilsActive && isGamePaused) {
-        // Keep HUD visible but don't update during pause
-    }
-
-    // ── Update Tracking / Nearest HUD ────────────
-    if (!isGamePaused && !_ilsActive) {
-        const _hudNow = Date.now();
-        if (_trackedId) {
-            const freshTracked = refreshTracked();
-            const trackKey = freshTracked ? freshTracked.id : _trackedId;
-            if (trackKey !== _lastNearestCs || _hudNow - _lastHudUpdate > HUD_UPDATE_INTERVAL) {
-                _lastNearestCs = trackKey;
-                _lastHudUpdate = _hudNow;
-                updateNearestHUD(nearestAc, myData);
-            }
-        } else if (nearestAc) {
-            if (nearestAc.id !== _lastNearestCs || _hudNow - _lastHudUpdate > HUD_UPDATE_INTERVAL) {
-                _lastNearestCs = nearestAc.id;
-                _lastHudUpdate = _hudNow;
-                updateNearestHUD(nearestAc, myData);
-            }
-        } else {
-            if (_lastNearestCs !== null) {
-                _lastNearestCs = null;
-                updateNearestHUD(null, null);
-            }
-        }
-    } else if (isGamePaused && !_ilsActive) {
-        if (_lastNearestCs !== null) {
-            _lastNearestCs = null;
-            updateNearestHUD(null, null);
-        }
-    }
-}
-
 // ═══════════════════════════════════════════════════
 // SECTION 18 — CHASE / ESCORT AUTOPILOT SYSTEM
 // ═══════════════════════════════════════════════════
 
 // ── PID constants ────────────────────────────────
-const CHASE_PID_KP        =  8.0;   // Proportional gain (speed control)
-const CHASE_PID_KI        =  0.05;  // Integral gain
-const CHASE_PID_KD        =  3.0;   // Derivative gain
-const CHASE_HDG_KP        = 20.0;   // Proportional gain (lateral heading correction)
-const CHASE_HDG_MAX_CORR  = 35;     // Max heading correction in degrees
-const CHASE_MIN_SPEED_KT  = 60;     // Minimum autopilot speed (knots)
-const CHASE_MAX_SPEED_KT  = 600;    // Maximum autopilot speed (knots)
-const CHASE_ARRIVAL_RATIO = 1.25;   // Enter escort when dist < escortDist * this ratio
-const CHASE_DECEL_ZONE    = 8;      // Begin decelerating at escortDist × this NM out
-const CHASE_OVERSHOOT_R   = 0.85;   // Deploy airbrakes when dist < escortDist × this
-const AP_UI_SYNC_MS       = 400;    // Minimum ms between DOM input-event syncs
-const AP_HDG_THRESH       = 1;      // Min heading delta (°) before re-commanding AP
-const AP_SPD_THRESH       = 5;      // Min speed delta (kts) before re-commanding AP
-const AP_ALT_THRESH       = 50;     // Min altitude delta (ft) before re-commanding AP
+const CHASE_PID_KP        =  8.0;
+const CHASE_PID_KI        =  0.05;
+const CHASE_PID_KD        =  3.0;
+const CHASE_HDG_KP        = 20.0;
+const CHASE_HDG_MAX_CORR  = 35;
+const CHASE_MIN_SPEED_KT  = 60;
+const CHASE_MAX_SPEED_KT  = 1000;
+const CHASE_ARRIVAL_RATIO = 1.25;
+const CHASE_DECEL_ZONE    = 8;
+const CHASE_OVERSHOOT_R   = 0.85;
+const AP_UI_SYNC_MS       = 400;
+const AP_HDG_THRESH       = 1;
+const AP_SPD_THRESH       = 5;
+const AP_ALT_THRESH       = 50;
+
+// ── Engagement state — prevents repeated toggle() calls ─────────────
+// This is THE fix for the flicker: _apEngaged tracks whether we have
+// already turned the AP on. _apEnable() is now a no-op if already engaged.
+let _apEngaged = false;
 
 // ── Autopilot wrappers ───────────────────────────
-// Priority order: confirmed-working GeoFS API (toggle/engaged, setCourse, setSpeed,
-// setAltitude, setMode) → property setters on ap.values → direct property fallbacks.
-// UI inputs are always synced so the autopilot bar reflects the commanded values.
 
-// Helper: fire input + change events on an element (mirrors GeoFS AP bar behaviour).
 function _apFireInputChange(el, value) {
     if (!el) return;
     el.value = value;
@@ -3865,30 +3815,59 @@ function _apFireInputChange(el, value) {
         el.dispatchEvent(new Event(type, { bubbles: true })));
 }
 
+// Engage the autopilot ONCE. Subsequent calls while _apEngaged === true
+// are no-ops, which is what prevents the toggle flicker.
 function _apEnable() {
+    if (_apEngaged) return; // ← guard: do nothing if already on
     try {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
-        // ── Confirmed-working GeoFS API (toggle + engaged guard) ──
+
         if (typeof ap.toggle === 'function') {
             if (!ap.engaged) {
                 ap.toggle();
-                // Set HDG mode via API only — do NOT click the bar button, as GeoFS
-                // treats that click as a full manual re-engage and overwrites our values.
-                if (typeof ap.setMode === 'function') ap.setMode('HDG');
             }
+            // Set HDG mode once on engagement only — never called again mid-flight
+            if (typeof ap.setMode === 'function') ap.setMode('HDG');
+            _apEngaged = true;
             return;
         }
-        // ── Older / alternative API patterns ──
-        if (typeof ap.activate === 'function') { ap.activate(); return; }
-        if (typeof ap.engage   === 'function') { ap.engage();   return; }
-        if ('active'  in ap) { ap.active  = true; return; }
-        if ('on'      in ap) { ap.on      = true; return; }
-        if ('enabled' in ap) { ap.enabled = true; return; }
-        // Last resort: click the autopilot toggle button in the GeoFS UI
-        const apBtn = document.querySelector('[data-feature="autopilot"] button, .geofs-autopilot-toggle, #autopilot-toggle');
-        if (apBtn && apBtn.dataset.active !== 'true') apBtn.click();
+        if (typeof ap.activate === 'function') { ap.activate(); _apEngaged = true; return; }
+        if (typeof ap.engage   === 'function') { ap.engage();   _apEngaged = true; return; }
+        if ('active'  in ap) { ap.active  = true; _apEngaged = true; return; }
+        if ('on'      in ap) { ap.on      = true; _apEngaged = true; return; }
+        if ('enabled' in ap) { ap.enabled = true; _apEngaged = true; return; }
+        const apBtn = document.querySelector(
+            '[data-feature="autopilot"] button, .geofs-autopilot-toggle, #autopilot-toggle');
+        if (apBtn && apBtn.dataset.active !== 'true') {
+            apBtn.click();
+            _apEngaged = true;
+        }
     } catch(e) {}
+}
+
+// Disengage the autopilot and clear the engagement flag.
+// Call this when chase/escort is stopped so _apEnable() works on the next session.
+function _apDisable() {
+    if (!_apEngaged) return;
+    try {
+        const ap = window.geofs?.autopilot;
+        if (!ap) { _apEngaged = false; return; }
+
+        if (typeof ap.toggle === 'function') {
+            if (ap.engaged) ap.toggle();
+        } else if (typeof ap.deactivate === 'function') { ap.deactivate(); }
+        else if (typeof ap.disengage   === 'function') { ap.disengage(); }
+        else if ('active'  in ap) { ap.active  = false; }
+        else if ('on'      in ap) { ap.on      = false; }
+        else if ('enabled' in ap) { ap.enabled = false; }
+        else {
+            const apBtn = document.querySelector(
+                '[data-feature="autopilot"] button, .geofs-autopilot-toggle, #autopilot-toggle');
+            if (apBtn && apBtn.dataset.active === 'true') apBtn.click();
+        }
+    } catch(e) {}
+    _apEngaged = false;
 }
 
 function _apSetHeading(hdg) {
@@ -3896,12 +3875,9 @@ function _apSetHeading(hdg) {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
         const h = ((hdg % 360) + 360) % 360;
-        // Skip if change is below threshold (avoids hammering the API every frame)
         if (Math.abs(((h - _apLastHdg + 540) % 360) - 180) < AP_HDG_THRESH) return;
         _apLastHdg = h;
-        // ── Confirmed-working GeoFS API ──
         if (typeof ap.setCourse === 'function') { ap.setCourse(h); return; }
-        // ── ap.values object (separate from animation.values) ──
         const animVals = window.geofs?.animation?.values;
         if (ap.values != null && ap.values !== animVals) {
             if ('heading'    in ap.values) ap.values.heading    = h;
@@ -3919,16 +3895,13 @@ function _apSetHeading(hdg) {
     } catch(e) {}
 }
 
-// Steer toward targetHdg by banking — used when the autopilot API cannot set heading.
 function _apSteerByBank(targetHdg) {
     try {
         const av = window.geofs?.animation?.values;
         const currentHdg = av?.heading360 ?? 0;
-        // Shortest angular error, normalised to -180..180
         const err = ((targetHdg - currentHdg + 540) % 360) - 180;
-        // Proportional bank: ±1° error → small bank; saturate at ±45°
-        const bankDeg  = Math.max(-45, Math.min(45, err * 0.6));
-        const rollInput = bankDeg / 45; // normalise to -1..1
+        const bankDeg   = Math.max(-45, Math.min(45, err * 0.6));
+        const rollInput = bankDeg / 45;
         const ac = window.geofs?.aircraft?.instance;
         if (!ac) return;
         if (Array.isArray(ac.controls))           { ac.controls[0] = rollInput; }
@@ -3962,8 +3935,6 @@ function _apSetAltitude(ft) {
     } catch(e) {}
 }
 
-// Sync the autopilot bar UI inputs — throttled to AP_UI_SYNC_MS so DOM change-events
-// don't fire every frame and trigger GeoFS's own listeners unexpectedly.
 function _apSyncBar() {
     const now = Date.now();
     if (now - _apUiSync < AP_UI_SYNC_MS) return;
@@ -3982,13 +3953,12 @@ function _apSyncBar() {
     }
 }
 
-// Deploy or retract airbrakes / spoilers using the GeoFS controls API.
 function _apSetAirbrakes(deploy) {
     try {
         const c = window.controls;
         if (!c?.airbrakes) return;
         const target = deploy ? 1 : 0;
-        if (c.airbrakes.target === target) return; // already in correct state
+        if (c.airbrakes.target === target) return;
         c.airbrakes.target = target;
         if (typeof c.setPartAnimationDelta === 'function')
             c.setPartAnimationDelta(c.airbrakes);
@@ -4008,7 +3978,7 @@ function _apCurrentSpeed() {
 
 function _pidStep(pid, error, dt) {
     pid.integral += error * dt;
-    pid.integral  = Math.max(-200, Math.min(200, pid.integral)); // anti-windup clamp
+    pid.integral  = Math.max(-200, Math.min(200, pid.integral));
     const deriv   = dt > 0 ? (error - pid.prevError) / dt : 0;
     pid.prevError = error;
     pid.lastTime  = Date.now();
@@ -4016,16 +3986,13 @@ function _pidStep(pid, error, dt) {
 }
 
 function _hdgPidStep(pid, error, dt) {
-    // Simple proportional for heading correction (no integral windup needed)
     pid.prevError = error;
     pid.lastTime  = Date.now();
     return Math.max(-CHASE_HDG_MAX_CORR, Math.min(CHASE_HDG_MAX_CORR, CHASE_HDG_KP * error));
 }
 
 // ── Geometry helper ──────────────────────────────
-// Returns {forwardM, lateralM} of MY position in TRACKED aircraft's reference frame.
-// forwardM  > 0 → I am ahead of tracked along its heading
-// lateralM  > 0 → I am to the RIGHT of tracked
+
 function _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdgDeg) {
     const [vEast, vNorth] = latLonToMeters(trackedLat, trackedLon, myLat, myLon);
     const θ = trackedHdgDeg * Math.PI / 180;
@@ -4034,7 +4001,10 @@ function _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdgDeg) 
     return { forwardM, lateralM };
 }
 
-// ── Main chase/escort tick (called each draw frame) ─
+// ── Main chase/escort tick ───────────────────────
+// _apEnable() is called each tick but is a no-op after first engagement —
+// the AP stays on until _apDisable() is explicitly called on disengage.
+
 function _tickChaseEscort(myLat, myLon, myData) {
     if (!_chaseActive || !_trackedAc || !_trackedAc.co) return;
 
@@ -4042,38 +4012,27 @@ function _tickChaseEscort(myLat, myLon, myData) {
     const trackedLon   = _trackedAc.co[1];
     const trackedHdg   = isFinite(parseFloat(_trackedAc.h)) ? parseFloat(_trackedAc.h) : 0;
     const trackedAltFt = isFinite(parseFloat(_trackedAc.al)) ? parseFloat(_trackedAc.al)
-        : (_trackedAc.co.length >= 3 && isFinite(parseFloat(_trackedAc.co[2])) ? parseFloat(_trackedAc.co[2]) * 3.28084 : null);
+        : (_trackedAc.co.length >= 3 && isFinite(parseFloat(_trackedAc.co[2]))
+            ? parseFloat(_trackedAc.co[2]) * 3.28084 : null);
 
-    const now        = Date.now();
-    const dtRaw      = (now - (_chasePid.lastTime || now)) / 1000;
-    const dt         = Math.min(2, Math.max(0.05, dtRaw));
+    const now   = Date.now();
+    const dtRaw = (now - (_chasePid.lastTime || now)) / 1000;
+    const dt    = Math.min(2, Math.max(0.05, dtRaw));
 
-    const distNm     = calcDistNm(myLat, myLon, trackedLat, trackedLon);
-    const bearingDeg = calcBearing(myLat, myLon, trackedLat, trackedLon);
-    const escortDistM = _escortDistNm * 1852; // NM → metres
-
-    // ── Keep autopilot engaged for the full chase/escort session ──────────
-    // Only call _apEnable() when AP isn't engaged, and at most once every 2 s.
-    // This prevents rapid toggle if ap.engaged momentarily reads false during
-    // a setSpeed/setCourse call, which was the source of the flickering.
-    if (!window.geofs?.autopilot?.engaged && (now - _apLastEngageAttempt) > 2000) {
-        _apLastEngageAttempt = now;
-        _apEnable();
-    }
+    const distNm      = calcDistNm(myLat, myLon, trackedLat, trackedLon);
+    const bearingDeg  = calcBearing(myLat, myLon, trackedLat, trackedLon);
+    const escortDistM = _escortDistNm * 1852;
 
     if (_chasePhase === 'chase') {
-        // ── Phase 1: Chase — fly toward the tracked aircraft ──────────
+        _apEnable(); // no-op if already engaged
         _apSetHeading(bearingDeg);
         if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
-        // Proportional deceleration: taper from CHASE_MAX_SPEED_KT down to
-        // CHASE_MIN_SPEED_KT as we close from CHASE_DECEL_ZONE × escort NM to 0.
-        // If we overshoot (inside CHASE_OVERSHOOT_R × escort NM), floor speed
-        // and deploy airbrakes/spoilers to bleed off excess closure rate.
         const decelZoneNm = _escortDistNm * CHASE_DECEL_ZONE;
         const closeRatio  = Math.max(0, Math.min(1, distNm / decelZoneNm));
         const chaseSpd    = Math.round(
             CHASE_MIN_SPEED_KT + (CHASE_MAX_SPEED_KT - CHASE_MIN_SPEED_KT) * closeRatio);
+
         if (distNm < _escortDistNm * CHASE_OVERSHOOT_R) {
             _apSetSpeed(CHASE_MIN_SPEED_KT);
             _apSetAirbrakes(true);
@@ -4082,25 +4041,22 @@ function _tickChaseEscort(myLat, myLon, myData) {
             _apSetAirbrakes(false);
         }
 
-        // Transition to escort when within arrival threshold
         if (distNm <= _escortDistNm * CHASE_ARRIVAL_RATIO) {
             _chasePhase = 'escort';
-            _apSetAirbrakes(false);   // ensure brakes retracted on escort entry
+            _apSetAirbrakes(false);
             _chasePid   = { integral: 0, prevError: 0, lastTime: now };
             _headingPid = { integral: 0, prevError: 0, lastTime: now };
-            // Rebuild HUD to show escort arrows
             _lastHudUpdate = 0;
             _lastNearestCs = null;
         }
 
     } else {
-        // ── Phase 2: Escort — maintain formation around the tracked aircraft ──
+        _apEnable(); // no-op if already engaged
+
         if (_escortMode === null) {
-            // No formation selected yet — just maintain distance, match heading and altitude
             _apSetHeading(trackedHdg);
             if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
-            // Gentle PID to keep at escort distance
-            const errNm = distNm - _escortDistNm;
+            const errNm  = distNm - _escortDistNm;
             const pidOut = _pidStep(_chasePid, errNm, dt);
             _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
                 Math.min(CHASE_MAX_SPEED_KT, _apCurrentSpeed() + pidOut)));
@@ -4112,44 +4068,36 @@ function _tickChaseEscort(myLat, myLon, myData) {
             myLat, myLon, trackedLat, trackedLon, trackedHdg);
 
         if (_escortMode === 'left' || _escortMode === 'right') {
-            // ── Parallel formation (left / right) ────────────────────────
-            // Both aircraft fly at matching heading.
-            // The target lateral offset: negative for left, positive for right.
             const targetLateral = (_escortMode === 'left') ? -escortDistM : +escortDistM;
-            const lateralErr    = (lateralM - targetLateral) / 1852; // convert m to NM for PID scale
+            const lateralErr    = (lateralM - targetLateral) / 1852;
             const hdgCorr       = _hdgPidStep(_headingPid, lateralErr, dt);
 
-            // Heading correction: if I'm too far right (lateralM > targetLateral → error > 0)
-            // I need to go more LEFT → decrease heading (subtract correction)
             _apSetHeading(trackedHdg - hdgCorr);
             if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
-            // Speed: match tracked aircraft's speed (keep distance stable)
             const trackedSpd = isFinite(parseFloat(_trackedAc.s)) ? parseFloat(_trackedAc.s)
-                : (typeof _trackedAc._computedSpd === 'number' ? _trackedAc._computedSpd : _apCurrentSpeed());
-            // Small PID correction for distance drift
+                : (typeof _trackedAc._computedSpd === 'number'
+                    ? _trackedAc._computedSpd : _apCurrentSpeed());
             const distErrNm = distNm - _escortDistNm;
-            const spdAdj = CHASE_PID_KP * distErrNm * 0.3;
+            const spdAdj    = CHASE_PID_KP * distErrNm * 0.3;
             _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
                 Math.min(CHASE_MAX_SPEED_KT, trackedSpd + spdAdj)));
 
         } else if (_escortMode === 'forward' || _escortMode === 'back') {
-            // ── Collinear formation (ahead / behind) ────────────────────
-            // Both aircraft on same heading. I maintain forwardM offset.
             const targetForward = (_escortMode === 'forward') ? +escortDistM : -escortDistM;
             const forwardErrNm  = (forwardM - targetForward) / 1852;
+            const pidOut        = _pidStep(_chasePid, -forwardErrNm, dt);
 
-            // PID speed: if forwardErrNm > 0 (I'm too far ahead), slow down
-            const pidOut = _pidStep(_chasePid, -forwardErrNm, dt); // negate: ahead = slow
             _apSetHeading(trackedHdg);
             if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
+
             const baseSpeed = isFinite(parseFloat(_trackedAc.s)) ? parseFloat(_trackedAc.s)
-                : (typeof _trackedAc._computedSpd === 'number' ? _trackedAc._computedSpd : _apCurrentSpeed());
+                : (typeof _trackedAc._computedSpd === 'number'
+                    ? _trackedAc._computedSpd : _apCurrentSpeed());
             _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
                 Math.min(CHASE_MAX_SPEED_KT, baseSpeed + pidOut)));
         }
     }
-    // Sync autopilot bar UI inputs — throttled, safe to call every tick
     _apSyncBar();
 }
 
