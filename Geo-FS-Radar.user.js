@@ -637,7 +637,7 @@ function updateNearestHUD(nearest, myData) {
 
     _hudNearestData = { nearest: displayAc, myData };
     nearestHUD.style.display    = 'block';
-    nearestHUD.style.pointerEvents = isTracking ? 'auto' : 'none';
+    nearestHUD.style.pointerEvents = 'auto';
 
     const cs  = displayAc.cs && displayAc.cs !== 'Foo' ? displayAc.cs : `Foo #${displayAc.id || '???'}`;
     const { distStr, brgStr } = _hudDistBrg(myData, displayAc);
@@ -770,6 +770,14 @@ function updateNearestHUD(nearest, myData) {
       letter-spacing:1px;cursor:pointer;transition:background .15s;">✕  STOP TRACKING</button>
   </div>` : '';
 
+    const trackBtn = !isTracking ? `
+  <div style="padding:4px 14px 8px;border-top:1px solid ${t.hudSep};">
+    <button id="radarTrackPlayerBtn" style="width:100%;padding:6px 0;
+      background:rgba(60,180,80,0.15);border:1px solid rgba(60,200,80,0.4);border-radius:6px;
+      color:rgba(100,230,110,0.95);font:bold ${UI.hudStopBtnFont}px ${FONT_SANS};
+      letter-spacing:1px;cursor:pointer;transition:background .15s;">▶  TRACK PLAYER</button>
+  </div>` : '';
+
     nearestHUD.innerHTML = `
 <div style="background:${t.hudBg};border:1.5px solid ${trackBorder};border-radius:10px;overflow:hidden;
   box-shadow:0 4px 20px rgba(0,0,0,0.75)${trackGlow};font-family:${FONT_MONO};">
@@ -808,6 +816,7 @@ function updateNearestHUD(nearest, myData) {
   ${isolateRow}
   ${chaseRow}
   ${stopBtn}
+  ${trackBtn}
 </div>`;
 
     const isolateRowEl = document.getElementById('radarIsolateRow');
@@ -824,6 +833,23 @@ function updateNearestHUD(nearest, myData) {
         stopEl.onmouseover = () => stopEl.style.background = T().hudBorder;
         stopEl.onmouseout  = () => stopEl.style.background = T().hudBg;
         stopEl.onclick     = (e) => { e.stopPropagation(); stopTracking(); };
+    }
+
+    // ── Track Player button (shown in NEARBY TRAFFIC mode) ──────────────
+    const trackPlayerEl = document.getElementById('radarTrackPlayerBtn');
+    if (trackPlayerEl) {
+        trackPlayerEl.onmouseover = () => trackPlayerEl.style.background = 'rgba(60,180,80,0.3)';
+        trackPlayerEl.onmouseout  = () => trackPlayerEl.style.background = 'rgba(60,180,80,0.15)';
+        trackPlayerEl.onclick = (e) => {
+            e.stopPropagation();
+            if (!displayAc) return;
+            _trackedAc     = displayAc;
+            _trackedId     = displayAc.id;
+            activePopupCs  = displayAc.cs;
+            _lastHudUpdate = 0;
+            _lastNearestCs = null;
+            updateNearestHUD(displayAc, myData);
+        };
     }
 
     // ── Chase/Escort toggle ─────────────────────────
