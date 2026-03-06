@@ -3935,101 +3935,23 @@ function _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdgDeg) 
 }
 
 // ── Main chase/escort tick (called each draw frame) ─
+// Every frame: heading = bearing to tracked aircraft, altitude = tracked aircraft's altitude.
 function _tickChaseEscort(myLat, myLon, myData) {
     if (!_chaseActive || !_trackedAc || !_trackedAc.co) return;
 
     const trackedLat   = _trackedAc.co[0];
     const trackedLon   = _trackedAc.co[1];
-    const trackedHdg   = isFinite(parseFloat(_trackedAc.h)) ? parseFloat(_trackedAc.h) : 0;
     const trackedAltFt = isFinite(parseFloat(_trackedAc.al)) ? parseFloat(_trackedAc.al)
         : (_trackedAc.co.length >= 3 && isFinite(parseFloat(_trackedAc.co[2])) ? parseFloat(_trackedAc.co[2]) * 3.28084 : null);
 
-    const now        = Date.now();
-    const dtRaw      = (now - (_chasePid.lastTime || now)) / 1000;
-    const dt         = Math.min(2, Math.max(0.05, dtRaw));
-
-    const distNm     = calcDistNm(myLat, myLon, trackedLat, trackedLon);
     const bearingDeg = calcBearing(myLat, myLon, trackedLat, trackedLon);
-    const escortDistM = _escortDistNm * 1852; // NM → metres
 
-    if (_chasePhase === 'chase') {
-        // ── Phase 1: Chase — fly toward the tracked aircraft ──────────
-        // Head toward the tracked aircraft's current bearing; match its altitude
-        _apEnable();
-        _apSetHeading(bearingDeg);
-        if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
+    _apEnable();
+    _apSetHeading(bearingDeg);
+    if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
+    _apSetSpeedRaw(10000);
 
-        // Full throttle while chasing — close the gap as fast as possible
-        _apSetSpeedRaw(10000);
-
-        // Transition to escort when within arrival threshold
-        if (distNm <= _escortDistNm * CHASE_ARRIVAL_RATIO) {
-            _chasePhase = 'escort';
-            _chasePid   = { integral: 0, prevError: 0, lastTime: now };
-            _headingPid = { integral: 0, prevError: 0, lastTime: now };
-            // Rebuild HUD to show escort arrows
-            _lastHudUpdate = 0;
-            _lastNearestCs = null;
-        }
-
-    } else {
-        // ── Phase 2: Escort — maintain formation around the tracked aircraft ──
-        if (_escortMode === null) {
-            // No formation selected yet — just maintain distance, match heading and altitude
-            _apEnable();
-            _apSetHeading(trackedHdg);
-            if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
-            // Gentle PID to keep at escort distance
-            const errNm = distNm - _escortDistNm;
-            const pidOut = _pidStep(_chasePid, errNm, dt);
-            _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
-                Math.min(CHASE_MAX_SPEED_KT, _apCurrentSpeed() + pidOut)));
-            return;
-        }
-
-        const { forwardM, lateralM } = _relativePosition(
-            myLat, myLon, trackedLat, trackedLon, trackedHdg);
-
-        if (_escortMode === 'left' || _escortMode === 'right') {
-            // ── Parallel formation (left / right) ────────────────────────
-            // Both aircraft fly at matching heading.
-            // The target lateral offset: negative for left, positive for right.
-            const targetLateral = (_escortMode === 'left') ? -escortDistM : +escortDistM;
-            const lateralErr    = (lateralM - targetLateral) / 1852; // convert m to NM for PID scale
-            const hdgCorr       = _hdgPidStep(_headingPid, lateralErr, dt);
-
-            // Heading correction: if I'm too far right (lateralM > targetLateral → error > 0)
-            // I need to go more LEFT → decrease heading (subtract correction)
-            _apEnable();
-            _apSetHeading(trackedHdg - hdgCorr);
-            if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
-
-            // Speed: match tracked aircraft's speed (keep distance stable)
-            const trackedSpd = isFinite(parseFloat(_trackedAc.s)) ? parseFloat(_trackedAc.s)
-                : (typeof _trackedAc._computedSpd === 'number' ? _trackedAc._computedSpd : _apCurrentSpeed());
-            // Small PID correction for distance drift
-            const distErrNm = distNm - _escortDistNm;
-            const spdAdj = CHASE_PID_KP * distErrNm * 0.3;
-            _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
-                Math.min(CHASE_MAX_SPEED_KT, trackedSpd + spdAdj)));
-
-        } else if (_escortMode === 'forward' || _escortMode === 'back') {
-            // ── Collinear formation (ahead / behind) ────────────────────
-            // Both aircraft on same heading. I maintain forwardM offset.
-            const targetForward = (_escortMode === 'forward') ? +escortDistM : -escortDistM;
-            const forwardErrNm  = (forwardM - targetForward) / 1852;
-
-            // PID speed: if forwardErrNm > 0 (I'm too far ahead), slow down
-            const pidOut = _pidStep(_chasePid, -forwardErrNm, dt); // negate: ahead = slow
-            _apEnable();
-            _apSetHeading(trackedHdg);
-            if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
-            const baseSpeed = isFinite(parseFloat(_trackedAc.s)) ? parseFloat(_trackedAc.s)
-                : (typeof _trackedAc._computedSpd === 'number' ? _trackedAc._computedSpd : _apCurrentSpeed());
-            _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
-                Math.min(CHASE_MAX_SPEED_KT, baseSpeed + pidOut)));
-        }
-    }
+    _chasePid.lastTime = Date.now();
 }
 
 // ═══════════════════════════════════════════════════
