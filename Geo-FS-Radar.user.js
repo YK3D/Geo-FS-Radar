@@ -3800,21 +3800,39 @@ const CHASE_MAX_SPEED_KT  = 600;    // Maximum autopilot speed (knots)
 const CHASE_ARRIVAL_RATIO = 1.25;   // Enter escort when dist < escortDist * this ratio
 
 // ── Autopilot wrappers ───────────────────────────
-// GeoFS autopilot values may live under geofs.autopilot directly or under geofs.autopilot.values
-// Try both patterns gracefully.
+// Priority order: confirmed-working GeoFS API (toggle/engaged, setCourse, setSpeed,
+// setAltitude, setMode) → property setters on ap.values → direct property fallbacks.
+// UI inputs are always synced so the autopilot bar reflects the commanded values.
+
+// Helper: fire input + change events on an element (mirrors GeoFS AP bar behaviour).
+function _apFireInputChange(el, value) {
+    if (!el) return;
+    el.value = value;
+    ['input', 'change'].forEach(type =>
+        el.dispatchEvent(new Event(type, { bubbles: true })));
+}
 
 function _apEnable() {
     try {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
-        // GeoFS 3.x uses activate(); older forks may use engage()
+        // ── Confirmed-working GeoFS API (toggle + engaged guard) ──
+        if (typeof ap.toggle === 'function') {
+            if (!ap.engaged) ap.toggle();
+            // Ensure HDG mode is active so heading commands are respected
+            if (typeof ap.setMode === 'function') ap.setMode('HDG');
+            // Sync the HDG mode button in the autopilot bar
+            const barHDG = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-HDG');
+            if (barHDG) barHDG.click();
+            return;
+        }
+        // ── Older / alternative API patterns ──
         if (typeof ap.activate === 'function') { ap.activate(); return; }
         if (typeof ap.engage   === 'function') { ap.engage();   return; }
-        // Property-based fallbacks
         if ('active'  in ap) { ap.active  = true; return; }
         if ('on'      in ap) { ap.on      = true; return; }
         if ('enabled' in ap) { ap.enabled = true; return; }
-        // Last resort: find and click the autopilot toggle button in the GeoFS UI
+        // Last resort: click the autopilot toggle button in the GeoFS UI
         const apBtn = document.querySelector('[data-feature="autopilot"] button, .geofs-autopilot-toggle, #autopilot-toggle');
         if (apBtn && apBtn.dataset.active !== 'true') apBtn.click();
     } catch(e) {}
@@ -3825,8 +3843,18 @@ function _apSetHeading(hdg) {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
         const h = ((hdg % 360) + 360) % 360;
-        // Don't write into geofs.animation.values — the sim overwrites it every frame.
-        // ap.values is the autopilot's own commanded-values object (separate from animation.values).
+        // ── Confirmed-working GeoFS API ──
+        if (typeof ap.setCourse === 'function') {
+            ap.setCourse(h);
+            // Sync the course input in the autopilot bar
+            const barCourse = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-course');
+            _apFireInputChange(barCourse, h);
+            // Also sync legacy map-panel input
+            const mapCourse = document.querySelector('.geofs-autopilot .geofs-autopilot-course');
+            _apFireInputChange(mapCourse, h);
+            return;
+        }
+        // ── ap.values object (separate from animation.values) ──
         const animVals = window.geofs?.animation?.values;
         if (ap.values != null && ap.values !== animVals) {
             if ('heading'    in ap.values) ap.values.heading    = h;
@@ -3867,9 +3895,17 @@ function _apSetSpeed(kts) {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
         const s = Math.max(CHASE_MIN_SPEED_KT, Math.min(CHASE_MAX_SPEED_KT, Math.round(kts)));
+        // ── Confirmed-working GeoFS API ──
+        if (typeof ap.setSpeed === 'function') {
+            ap.setSpeed(s);
+            const barSpeed = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-knots');
+            _apFireInputChange(barSpeed, s);
+            const mapSpeed = document.querySelector('.geofs-autopilot-kias');
+            _apFireInputChange(mapSpeed, s);
+            return;
+        }
         if (ap.values != null && 'speed' in ap.values) { ap.values.speed = s; return; }
         if ('speed' in ap) { ap.speed = s; return; }
-        if (typeof ap.setSpeed === 'function') { ap.setSpeed(s); return; }
     } catch(e) {}
 }
 
@@ -3879,9 +3915,17 @@ function _apSetSpeedRaw(kts) {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
         const s = Math.round(kts);
+        // ── Confirmed-working GeoFS API ──
+        if (typeof ap.setSpeed === 'function') {
+            ap.setSpeed(s);
+            const barSpeed = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-knots');
+            _apFireInputChange(barSpeed, s);
+            const mapSpeed = document.querySelector('.geofs-autopilot-kias');
+            _apFireInputChange(mapSpeed, s);
+            return;
+        }
         if (ap.values != null && 'speed' in ap.values) { ap.values.speed = s; return; }
         if ('speed' in ap) { ap.speed = s; return; }
-        if (typeof ap.setSpeed === 'function') { ap.setSpeed(s); return; }
     } catch(e) {}
 }
 
@@ -3890,9 +3934,17 @@ function _apSetAltitude(ft) {
         const ap = window.geofs?.autopilot;
         if (!ap || !isFinite(ft)) return;
         const a = Math.round(ft);
+        // ── Confirmed-working GeoFS API ──
+        if (typeof ap.setAltitude === 'function') {
+            ap.setAltitude(a);
+            const barAlt = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-altitude');
+            _apFireInputChange(barAlt, a);
+            const mapAlt = document.querySelector('.geofs-autopilot .geofs-autopilot-altitude');
+            _apFireInputChange(mapAlt, a);
+            return;
+        }
         if (ap.values != null && 'altitude' in ap.values) { ap.values.altitude = a; return; }
         if ('altitude' in ap) { ap.altitude = a; return; }
-        if (typeof ap.setAltitude === 'function') { ap.setAltitude(a); return; }
     } catch(e) {}
 }
 
