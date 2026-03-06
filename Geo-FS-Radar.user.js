@@ -3822,26 +3822,9 @@ function _apEnable() {
     try {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
-
-        if (typeof ap.toggle === 'function') {
-            if (!ap.engaged) ap.toggle();
-            if (typeof ap.setMode === 'function') ap.setMode('HDG');
-            _apEngaged = true;
-            _apSyncBar(); // ← sync the bar exactly once, immediately after engagement
-            return;
-        }
-        if (typeof ap.activate === 'function') { ap.activate(); _apEngaged = true; _apSyncBar(); return; }
-        if (typeof ap.engage   === 'function') { ap.engage();   _apEngaged = true; _apSyncBar(); return; }
-        if ('active'  in ap) { ap.active  = true; _apEngaged = true; _apSyncBar(); return; }
-        if ('on'      in ap) { ap.on      = true; _apEngaged = true; _apSyncBar(); return; }
-        if ('enabled' in ap) { ap.enabled = true; _apEngaged = true; _apSyncBar(); return; }
-        const apBtn = document.querySelector(
-            '[data-feature="autopilot"] button, .geofs-autopilot-toggle, #autopilot-toggle');
-        if (apBtn && apBtn.dataset.active !== 'true') {
-            apBtn.click();
-            _apEngaged = true;
-            _apSyncBar();
-        }
+        if (!ap.on) ap.turnOn();
+        if (typeof ap.setMode === 'function') ap.setMode('HDG');
+        _apEngaged = true;
     } catch(e) {}
 }
 
@@ -3851,20 +3834,7 @@ function _apDisable() {
     if (!_apEngaged) return;
     try {
         const ap = window.geofs?.autopilot;
-        if (!ap) { _apEngaged = false; return; }
-
-        if (typeof ap.toggle === 'function') {
-            if (ap.engaged) ap.toggle();
-        } else if (typeof ap.deactivate === 'function') { ap.deactivate(); }
-        else if (typeof ap.disengage   === 'function') { ap.disengage(); }
-        else if ('active'  in ap) { ap.active  = false; }
-        else if ('on'      in ap) { ap.on      = false; }
-        else if ('enabled' in ap) { ap.enabled = false; }
-        else {
-            const apBtn = document.querySelector(
-                '[data-feature="autopilot"] button, .geofs-autopilot-toggle, #autopilot-toggle');
-            if (apBtn && apBtn.dataset.active === 'true') apBtn.click();
-        }
+        if (ap?.on) ap.turnOff();
     } catch(e) {}
     _apEngaged = false;
 }
