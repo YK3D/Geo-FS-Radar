@@ -3807,9 +3807,12 @@ function _apEnable() {
     try {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
-        if (typeof ap.engage === 'function') { ap.engage(); return; }
-        // Fallback: try toggling 'on' property or dispatching a click on the AP button
-        if ('on' in ap) { ap.on = true; return; }
+        // GeoFS 3.x uses activate(); older forks may use engage()
+        if (typeof ap.activate === 'function') { ap.activate(); return; }
+        if (typeof ap.engage   === 'function') { ap.engage();   return; }
+        // Property-based fallbacks
+        if ('active'  in ap) { ap.active  = true; return; }
+        if ('on'      in ap) { ap.on      = true; return; }
         if ('enabled' in ap) { ap.enabled = true; return; }
         // Last resort: find and click the autopilot toggle button in the GeoFS UI
         const apBtn = document.querySelector('[data-feature="autopilot"] button, .geofs-autopilot-toggle, #autopilot-toggle');
@@ -3822,15 +3825,40 @@ function _apSetHeading(hdg) {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
         const h = ((hdg % 360) + 360) % 360;
-        // Try common GeoFS API patterns
-        if (ap.values != null && 'heading' in ap.values) { ap.values.heading = h; return; }
-        if (typeof ap.setHDG === 'function') { ap.setHDG(h); return; }
+        // Don't write into geofs.animation.values — the sim overwrites it every frame.
+        // ap.values is the autopilot's own commanded-values object (separate from animation.values).
+        const animVals = window.geofs?.animation?.values;
+        if (ap.values != null && ap.values !== animVals) {
+            if ('heading'    in ap.values) ap.values.heading    = h;
+            if ('heading360' in ap.values) ap.values.heading360 = h;
+            return;
+        }
+        if (typeof ap.setHDG     === 'function') { ap.setHDG(h); return; }
         if (typeof ap.setHeading === 'function') { ap.setHeading(h); return; }
-        if (typeof ap.set === 'function') { ap.set('heading', h); return; }
+        if (typeof ap.set        === 'function') { ap.set('heading', h); return; }
         if ('selectedHeading' in ap) { ap.selectedHeading = h; return; }
-        if ('targetHeading' in ap) { ap.targetHeading = h; return; }
-        if ('hdg' in ap) { ap.hdg = h; return; }
-        if ('heading' in ap) { ap.heading = h; return; }
+        if ('targetHeading'   in ap) { ap.targetHeading   = h; return; }
+        if ('hdg'             in ap) { ap.hdg             = h; return; }
+        if ('heading'         in ap) { ap.heading         = h; return; }
+        // Last resort: steer via direct bank-angle control so heading always responds
+        _apSteerByBank(h);
+    } catch(e) {}
+}
+
+// Steer toward targetHdg by banking — used when the autopilot API cannot set heading.
+function _apSteerByBank(targetHdg) {
+    try {
+        const av = window.geofs?.animation?.values;
+        const currentHdg = av?.heading360 ?? 0;
+        // Shortest angular error, normalised to -180..180
+        const err = ((targetHdg - currentHdg + 540) % 360) - 180;
+        // Proportional bank: ±1° error → small bank; saturate at ±45°
+        const bankDeg  = Math.max(-45, Math.min(45, err * 0.6));
+        const rollInput = bankDeg / 45; // normalise to -1..1
+        const ac = window.geofs?.aircraft?.instance;
+        if (!ac) return;
+        if (Array.isArray(ac.controls))           { ac.controls[0] = rollInput; }
+        else if (ac.controls?.roll !== undefined) { ac.controls.roll = rollInput; }
     } catch(e) {}
 }
 
