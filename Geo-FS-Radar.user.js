@@ -1,5 +1,8 @@
 
 // ═══════════════════════════════════════════════════
+// Geo-FS-Radar  v8.06
+// ═══════════════════════════════════════════════════
+
 // ILS & DISPLAY PREFS — adjustable via the settings menu
 // These are kept as a plain object so sliders can mutate them live.
 // ═══════════════════════════════════════════════════
@@ -3844,12 +3847,15 @@ function _apEnable() {
         if (!ap) return;
         // ── Confirmed-working GeoFS API (toggle + engaged guard) ──
         if (typeof ap.toggle === 'function') {
-            if (!ap.engaged) ap.toggle();
-            // Ensure HDG mode is active so heading commands are respected
-            if (typeof ap.setMode === 'function') ap.setMode('HDG');
-            // Sync the HDG mode button in the autopilot bar
-            const barHDG = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-HDG');
-            if (barHDG) barHDG.click();
+            if (!ap.engaged) {
+                ap.toggle();
+                // One-time setup: HDG mode + UI button — only on initial engagement,
+                // never on subsequent ticks (avoids repeated button clicks that would
+                // toggle the autopilot off again).
+                if (typeof ap.setMode === 'function') ap.setMode('HDG');
+                const barHDG = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-HDG');
+                if (barHDG) barHDG.click();
+            }
             return;
         }
         // ── Older / alternative API patterns ──
