@@ -1,5 +1,8 @@
 
 // ═══════════════════════════════════════════════════
+// Geo-FS-Radar  v8.06
+// ═══════════════════════════════════════════════════
+
 // ILS & DISPLAY PREFS — adjustable via the settings menu
 // These are kept as a plain object so sliders can mutate them live.
 // ═══════════════════════════════════════════════════
@@ -637,7 +640,7 @@ function updateNearestHUD(nearest, myData) {
 
     _hudNearestData = { nearest: displayAc, myData };
     nearestHUD.style.display    = 'block';
-    nearestHUD.style.pointerEvents = isTracking ? 'auto' : 'none';
+    nearestHUD.style.pointerEvents = 'auto';
 
     const cs  = displayAc.cs && displayAc.cs !== 'Foo' ? displayAc.cs : `Foo #${displayAc.id || '???'}`;
     const { distStr, brgStr } = _hudDistBrg(myData, displayAc);
@@ -770,6 +773,14 @@ function updateNearestHUD(nearest, myData) {
       letter-spacing:1px;cursor:pointer;transition:background .15s;">✕  STOP TRACKING</button>
   </div>` : '';
 
+    const trackBtn = !isTracking ? `
+  <div style="padding:4px 14px 8px;border-top:1px solid ${t.hudSep};">
+    <button id="radarTrackPlayerBtn" style="width:100%;padding:6px 0;
+      background:rgba(60,180,80,0.15);border:1px solid rgba(60,200,80,0.4);border-radius:6px;
+      color:rgba(100,230,110,0.95);font:bold ${UI.hudStopBtnFont}px ${FONT_SANS};
+      letter-spacing:1px;cursor:pointer;transition:background .15s;">▶  TRACK PLAYER</button>
+  </div>` : '';
+
     nearestHUD.innerHTML = `
 <div style="background:${t.hudBg};border:1.5px solid ${trackBorder};border-radius:10px;overflow:hidden;
   box-shadow:0 4px 20px rgba(0,0,0,0.75)${trackGlow};font-family:${FONT_MONO};">
@@ -808,6 +819,7 @@ function updateNearestHUD(nearest, myData) {
   ${isolateRow}
   ${chaseRow}
   ${stopBtn}
+  ${trackBtn}
 </div>`;
 
     const isolateRowEl = document.getElementById('radarIsolateRow');
@@ -824,6 +836,23 @@ function updateNearestHUD(nearest, myData) {
         stopEl.onmouseover = () => stopEl.style.background = T().hudBorder;
         stopEl.onmouseout  = () => stopEl.style.background = T().hudBg;
         stopEl.onclick     = (e) => { e.stopPropagation(); stopTracking(); };
+    }
+
+    // ── Track Player button (shown in NEARBY TRAFFIC mode) ──────────────
+    const trackPlayerEl = document.getElementById('radarTrackPlayerBtn');
+    if (trackPlayerEl) {
+        trackPlayerEl.onmouseover = () => trackPlayerEl.style.background = 'rgba(60,180,80,0.3)';
+        trackPlayerEl.onmouseout  = () => trackPlayerEl.style.background = 'rgba(60,180,80,0.15)';
+        trackPlayerEl.onclick = (e) => {
+            e.stopPropagation();
+            if (!displayAc) return;
+            _trackedAc     = displayAc;
+            _trackedId     = displayAc.id;
+            activePopupCs  = displayAc.cs;
+            _lastHudUpdate = 0;
+            _lastNearestCs = null;
+            updateNearestHUD(displayAc, myData);
+        };
     }
 
     // ── Chase/Escort toggle ─────────────────────────
@@ -3818,12 +3847,15 @@ function _apEnable() {
         if (!ap) return;
         // ── Confirmed-working GeoFS API (toggle + engaged guard) ──
         if (typeof ap.toggle === 'function') {
-            if (!ap.engaged) ap.toggle();
-            // Ensure HDG mode is active so heading commands are respected
-            if (typeof ap.setMode === 'function') ap.setMode('HDG');
-            // Sync the HDG mode button in the autopilot bar
-            const barHDG = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-HDG');
-            if (barHDG) barHDG.click();
+            if (!ap.engaged) {
+                ap.toggle();
+                // One-time setup: HDG mode + UI button — only on initial engagement,
+                // never on subsequent ticks (avoids repeated button clicks that would
+                // toggle the autopilot off again).
+                if (typeof ap.setMode === 'function') ap.setMode('HDG');
+                const barHDG = document.querySelector('.geofs-autopilot-bar .geofs-autopilot-HDG');
+                if (barHDG) barHDG.click();
+            }
             return;
         }
         // ── Older / alternative API patterns ──
