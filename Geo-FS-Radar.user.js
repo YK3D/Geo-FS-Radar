@@ -3840,6 +3840,17 @@ function _apSetSpeed(kts) {
     } catch(e) {}
 }
 
+function _apSetAltitude(ft) {
+    try {
+        const ap = window.geofs?.autopilot;
+        if (!ap || !isFinite(ft)) return;
+        const a = Math.round(ft);
+        if (ap.values != null && 'altitude' in ap.values) { ap.values.altitude = a; return; }
+        if ('altitude' in ap) { ap.altitude = a; return; }
+        if (typeof ap.setAltitude === 'function') { ap.setAltitude(a); return; }
+    } catch(e) {}
+}
+
 function _apCurrentSpeed() {
     try {
         const av = window.geofs?.animation?.values;
@@ -3882,9 +3893,11 @@ function _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdgDeg) 
 function _tickChaseEscort(myLat, myLon, myData) {
     if (!_chaseActive || !_trackedAc || !_trackedAc.co) return;
 
-    const trackedLat = _trackedAc.co[0];
-    const trackedLon = _trackedAc.co[1];
-    const trackedHdg = isFinite(parseFloat(_trackedAc.h)) ? parseFloat(_trackedAc.h) : 0;
+    const trackedLat   = _trackedAc.co[0];
+    const trackedLon   = _trackedAc.co[1];
+    const trackedHdg   = isFinite(parseFloat(_trackedAc.h)) ? parseFloat(_trackedAc.h) : 0;
+    const trackedAltFt = isFinite(parseFloat(_trackedAc.al)) ? parseFloat(_trackedAc.al)
+        : (_trackedAc.co.length >= 3 && isFinite(parseFloat(_trackedAc.co[2])) ? parseFloat(_trackedAc.co[2]) * 3.28084 : null);
 
     const now        = Date.now();
     const dtRaw      = (now - (_chasePid.lastTime || now)) / 1000;
@@ -3896,9 +3909,10 @@ function _tickChaseEscort(myLat, myLon, myData) {
 
     if (_chasePhase === 'chase') {
         // ── Phase 1: Chase — fly toward the tracked aircraft ──────────
-        // Head toward the tracked aircraft's current bearing
+        // Head toward the tracked aircraft's current bearing; match its altitude
         _apEnable();
         _apSetHeading(bearingDeg);
+        if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
         // PID speed: positive error = too far → speed up
         const errNm = distNm - _escortDistNm;
@@ -3920,9 +3934,10 @@ function _tickChaseEscort(myLat, myLon, myData) {
     } else {
         // ── Phase 2: Escort — maintain formation around the tracked aircraft ──
         if (_escortMode === null) {
-            // No formation selected yet — just maintain distance, match heading
+            // No formation selected yet — just maintain distance, match heading and altitude
             _apEnable();
             _apSetHeading(trackedHdg);
+            if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
             // Gentle PID to keep at escort distance
             const errNm = distNm - _escortDistNm;
             const pidOut = _pidStep(_chasePid, errNm, dt);
@@ -3946,6 +3961,7 @@ function _tickChaseEscort(myLat, myLon, myData) {
             // I need to go more LEFT → decrease heading (subtract correction)
             _apEnable();
             _apSetHeading(trackedHdg - hdgCorr);
+            if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
             // Speed: match tracked aircraft's speed (keep distance stable)
             const trackedSpd = isFinite(parseFloat(_trackedAc.s)) ? parseFloat(_trackedAc.s)
@@ -3966,6 +3982,7 @@ function _tickChaseEscort(myLat, myLon, myData) {
             const pidOut = _pidStep(_chasePid, -forwardErrNm, dt); // negate: ahead = slow
             _apEnable();
             _apSetHeading(trackedHdg);
+            if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
             const baseSpeed = isFinite(parseFloat(_trackedAc.s)) ? parseFloat(_trackedAc.s)
                 : (typeof _trackedAc._computedSpd === 'number' ? _trackedAc._computedSpd : _apCurrentSpeed());
             _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
