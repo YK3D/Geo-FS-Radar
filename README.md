@@ -1,7 +1,7 @@
-# GeoFS-Radar v10.00
+# GeoFS-Radar v11.00
 <img width="606" height="418" alt="Screenshot 2026-03-04 224124" src="https://github.com/user-attachments/assets/884aa0f0-df6f-467b-aff8-57d09fccb71d" />
 
-A Tampermonkey userscript for [GeoFS](https://www.geo-fs.com/geofs.php?v=3.9) that adds a live radar overlay, ILS approach system, TCAS collision warning, nearest-traffic HUD, aircraft tracker, and a fully customizable settings panel.
+A Tampermonkey userscript for [GeoFS](https://www.geo-fs.com/geofs.php?v=3.9) that adds a live radar overlay, ILS approach system, TCAS collision warning, nearest-traffic HUD, aircraft tracker, chase/escort autopilot, and a fully customizable settings panel.
 
 ---
 
@@ -26,6 +26,7 @@ A Tampermonkey userscript for [GeoFS](https://www.geo-fs.com/geofs.php?v=3.9) th
 | 🛬 ILS Approach | Full ILS HUD with CDI, glideslope, VS, AGL, bank angle |
 | ⚠️ TCAS Warning | Heading-vector intersection alarm with callsign + countdown |
 | 🎨 Customization | Sliders for every font, size, and UI element |
+| 🔰 Chase / Escort | Autopilot-driven chase and 4-way formation escort mode |
 
 <img width="50%" alt="Screenshot 2026-03-04 224124" src="https://github.com/user-attachments/assets/36224292-59d3-4c30-ad2a-f9e1ada94aef" /><img width="50%" alt="Screenshot 2026-03-04 214213" src="https://github.com/user-attachments/assets/e82842d5-7dc1-4d81-904b-472a3e0c7a28" />
 
@@ -135,6 +136,69 @@ The header reads **NEARBY TRAFFIC** when auto-tracking the nearest aircraft.
 
 ---
 
+## 🔰 Chase / Escort Mode
+
+The Chase/Escort system lets you autonomously intercept a tracked aircraft and then maintain a precise formation position around it using GeoFS autopilot.
+
+### Activation
+
+1. Track any aircraft (click a blip on the radar → it locks to the HUD).
+2. In the Nearest-Traffic HUD, toggle **Chase / Escort Player** on.
+
+### Phase 1 — Chasing
+
+| What happens | Details |
+|---|---|
+| Autopilot engages | Heading mode set automatically |
+| Heading → target bearing | Your heading is continuously updated to point at the tracked aircraft |
+| PID speed control | A PID controller adjusts your autopilot speed to close the gap |
+| Escort distance slider | Drag the **Escort distance** slider (0.1 – 5.0 NM) to set how close you want to arrive |
+| Phase transition | Once you are within **escort distance × 1.25**, the system switches to Escort phase |
+
+### Phase 2 — Escorting
+
+Once within range, 4 arrow buttons appear in the HUD.  Your heading is changed to match the tracked aircraft's heading.  Click an arrow to select your formation position:
+
+| Arrow | Formation position | Control method |
+|---|---|---|
+| **▲ Forward** | Directly ahead of target along its flight path | PID speed: speed up to move forward, slow down to fall back |
+| **▼ Back** | Directly behind target along its flight path | PID speed: speed up to close gap behind, slow down if too close |
+| **◀ Left** | Parallel on the left wing at escort distance | Heading fine-tune: heading corrected left/right to drift to the left side |
+| **▶ Right** | Parallel on the right wing at escort distance | Heading fine-tune: heading corrected left/right to drift to the right side |
+
+Click the active arrow again to deselect it (the system will hover at the current position).
+
+### Position Geometry
+
+Relative positions are computed using the **latitude and longitude** of both aircraft:
+
+- A flat-earth projection converts lat/lon offsets to **east/north metre vectors**.
+- Those vectors are projected onto the tracked aircraft's **forward axis** (`sin θ, cos θ`) and **lateral axis** (`cos θ, -sin θ`) where `θ` is the tracked aircraft's heading.
+- `forwardM > 0` = you are **ahead** of the tracked aircraft; `lateralM > 0` = you are to its **right**.
+- Formation targets: `forwardM = ±escortDistMetres` (forward/back), `lateralM = ∓escortDistMetres` (left/right).
+
+### PID Speed Controller
+
+The speed PID uses error in NM (current distance component minus target distance component):
+
+```
+error    = currentComponent − targetComponent
+integral += error × dt                          (anti-windup clamped ±200)
+derivative = (error − prevError) / dt
+output   = Kp×error + Ki×integral + Kd×derivative
+newSpeed = currentSpeed + output
+```
+
+Default gains: `Kp = 8`, `Ki = 0.05`, `Kd = 3`.  Speed is clamped between 60 kt and 600 kt.
+
+### Notes
+
+- Chase/Escort is automatically cancelled when you stop tracking (**STOP TRACKING** button or clicking an empty radar area).
+- The escort distance slider persists its value while tracking is active.
+- Formation arrows only appear in Escort phase (after arriving within range).
+
+---
+
 ## 🔒 Aircraft Tracker
 
 Click any blip → open popup → **Track** to lock the HUD onto a specific aircraft regardless of distance.
@@ -145,6 +209,7 @@ When tracking is active:
 - The tracked blip gets a glowing **yellow ring** on the radar.
 - The HUD border and accent colors turn amber.
 - An **Isolate aircraft** toggle appears in the HUD — when enabled, all other traffic disappears from the radar so you can focus solely on the tracked aircraft.
+- A **Chase / Escort Player** toggle appears below Isolate — enables the chase/escort autopilot system (see 🔰 Chase / Escort Mode section above).
 - A **✕ STOP TRACKING** button appears at the bottom of the HUD.
 
 **To stop tracking:** click **STOP TRACKING**, click an empty area on the radar, or press **Alt+Z**.
@@ -307,6 +372,19 @@ Traffic data comes from the GeoFS multiplayer REST API, polled at the configured
 ---
 
 ## Changelog
+
+### v11.00
+- **Chase / Escort mode** added to the Nearest-Traffic HUD when tracking a player.
+- Phase 1 (Chase): autopilot engages, heading set to bearing of target, PID speed controller closes the gap.
+- Phase 2 (Escort): once within escort distance, heading matches target; 4 formation arrow buttons appear.
+  - ◀ Left: parallel on the left wing — heading fine-tuned to maintain lateral offset.
+  - ▶ Right: parallel on the right wing — heading fine-tuned to maintain lateral offset.
+  - ▲ Forward: directly ahead along target's heading — PID speed to hold forward offset.
+  - ▼ Back: directly behind along target's heading — PID speed to hold rearward offset.
+- Escort distance slider (0.1–5.0 NM) shown in the HUD while chase is active.
+- Relative position geometry uses lat/lon → flat-earth east/north projection onto target's heading frame.
+- PID speed controller with anti-windup integral clamping; speed bounded 60–600 kt.
+- Chase state reset automatically when tracking is stopped.
 
 ### v10.00
 - ILS font sizes converted from hardcoded constants to live sliders (saved to `localStorage`).
