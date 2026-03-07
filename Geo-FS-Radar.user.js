@@ -3815,8 +3815,6 @@ function _apFireInputChange(el, value) {
         el.dispatchEvent(new Event(type, { bubbles: true })));
 }
 
-// Engage the autopilot ONCE. Subsequent calls while _apEngaged === true
-// are no-ops, which is what prevents the toggle flicker.
 function _apEnable() {
     if (_apEngaged) return;
     try {
@@ -3828,8 +3826,6 @@ function _apEnable() {
     } catch(e) {}
 }
 
-// Disengage the autopilot and clear the engagement flag.
-// Call this when chase/escort is stopped so _apEnable() works on the next session.
 function _apDisable() {
     if (!_apEngaged) return;
     try {
