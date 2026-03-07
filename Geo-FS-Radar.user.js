@@ -1,21 +1,16 @@
+// ═══════════════════════════════════════════════════
+// Geo-FS-Radar  v8.07
+// ═══════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════
-// Geo-FS-Radar  v8.06
-// ═══════════════════════════════════════════════════
-
-// ILS & DISPLAY PREFS — adjustable via the settings menu
-// These are kept as a plain object so sliders can mutate them live.
-// ═══════════════════════════════════════════════════
 const ilsPrefs = {
-    fontHeader:   12,   // ILS header label font size (px)
-    fontLabel:    9,    // ILS small section label font size (px)
-    fontValue:    15,   // ILS main data value font size (px)
-    fontPillLabel:9,    // ILS deviation pill label font size (px)
-    fontPillValue:13,   // ILS deviation pill value font size (px)
-    fontFooter:   10,   // ILS footer text font size (px)
-    fontBankValue:11,   // ILS bank angle canvas text font size (px)
+    fontHeader:   12,
+    fontLabel:    9,
+    fontValue:    15,
+    fontPillLabel:9,
+    fontPillValue:13,
+    fontFooter:   10,
+    fontBankValue:11,
 };
-// Load persisted ILS prefs
 try { Object.assign(ilsPrefs, JSON.parse(localStorage.getItem('radarIlsPrefs') || '{}')); } catch(e) {}
 function saveIlsPrefs() { localStorage.setItem('radarIlsPrefs', JSON.stringify(ilsPrefs)); }
 
@@ -23,43 +18,43 @@ function saveIlsPrefs() { localStorage.setItem('radarIlsPrefs', JSON.stringify(i
 // SECTION 1 — RADAR PREFERENCES
 // ═══════════════════════════════════════════════════
 
-    const _PREF_DEFAULTS = {
-        radarSizePx:        300,     // Radar canvas size in pixels
-        radarSizeUnit:      'px',    // Size unit: 'px' or '%'
-        minRangeKm:         0.5,     // Minimum radar range (km)
-        maxRangeKm:         50,      // Maximum radar range (km)
-        scrollIncKm:        0.5,     // Scroll wheel zoom step (km)
-        fetchDelay:         250,     // REST API poll interval (ms)
-        radarOpacity:       1.0,     // Radar canvas opacity 0–1
-        useNautical:        false,   // Distance units: false=metric, true=nautical miles
-        hideFooPlayers:     false,   // Hide aircraft with callsign "Foo"
-        hideGroundPlayers:  false,   // Hide aircraft detected as on the ground
-        showTrail:          false,   // Draw own-aircraft trail on radar
-        trailLengthSec:     60,      // Trail history retention (seconds)
-        trailWidth:         2,       // Trail line thickness (pixels)
-        tcasEnabled:        true,    // Show TCAS traffic warning overlay
-        tcasAudioEnabled:   true,    // Play audio with TCAS warning
-        tcasLookaheadS:     30,      // Seconds: how far ahead to project each path
-        tcasAltBandFt:      200,     // ±feet altitude band for threat detection
-        tcasMinAltFt:       200,     // Feet AGL: both aircraft must be above this
-        tcasMarginM:        300,     // Metres: intersection tolerance
-        tcasAudioCooldownMs:10000,   // Minimum ms between audio replays
-        tcasTimeTolPct:     8,       // ±% time tolerance: intersection must occur at similar t on both paths
-        altFilterEnabled:   false,   // Filter traffic by altitude band
-        altFilterMinFt:     0,       // Min altitude (ft) to show traffic
-        altFilterMaxFt:     50000,   // Max altitude (ft) to show traffic
-    };
+const _PREF_DEFAULTS = {
+    radarSizePx:        300,
+    radarSizeUnit:      'px',
+    minRangeKm:         0.5,
+    maxRangeKm:         50,
+    scrollIncKm:        0.5,
+    fetchDelay:         250,
+    radarOpacity:       1.0,
+    useNautical:        false,
+    hideFooPlayers:     false,
+    hideGroundPlayers:  false,
+    showTrail:          false,
+    trailLengthSec:     60,
+    trailWidth:         2,
+    tcasEnabled:        true,
+    tcasAudioEnabled:   true,
+    tcasLookaheadS:     30,
+    tcasAltBandFt:      200,
+    tcasMinAltFt:       200,
+    tcasMarginM:        300,
+    tcasAudioCooldownMs:10000,
+    tcasTimeTolPct:     8,
+    altFilterEnabled:   false,
+    altFilterMinFt:     0,
+    altFilterMaxFt:     50000,
+};
 
-    let prefs;
-    try {
-        prefs = Object.assign({}, _PREF_DEFAULTS, JSON.parse(localStorage.getItem('radarPrefs') || '{}'));
-    } catch(e) {
-        prefs = Object.assign({}, _PREF_DEFAULTS);
-    }
+let prefs;
+try {
+    prefs = Object.assign({}, _PREF_DEFAULTS, JSON.parse(localStorage.getItem('radarPrefs') || '{}'));
+} catch(e) {
+    prefs = Object.assign({}, _PREF_DEFAULTS);
+}
 
-    function savePrefs() {
-        localStorage.setItem('radarPrefs', JSON.stringify(prefs));
-    }
+function savePrefs() {
+    localStorage.setItem('radarPrefs', JSON.stringify(prefs));
+}
 
 function _pxFromPrefs() {
     if (prefs.radarSizeUnit === '%') {
@@ -78,8 +73,8 @@ let FETCH_DELAY_BASE = prefs.fetchDelay;
 
 function applyPrefs() {
     savePrefs();
-    radarSize        = _pxFromPrefs();        // Recompute canvas size from prefs
-    MIN_RANGE        = prefs.minRangeKm  * 1000; // Convert km → metres
+    radarSize        = _pxFromPrefs();
+    MIN_RANGE        = prefs.minRangeKm  * 1000;
     MAX_RANGE        = prefs.maxRangeKm  * 1000;
     SCROLL_INC       = prefs.scrollIncKm * 1000;
     FETCH_DELAY_BASE = prefs.fetchDelay;
@@ -88,7 +83,7 @@ function applyPrefs() {
     radarCanvas.height = radarSize;
     radarCanvas.style.width   = radarSize + 'px';
     radarCanvas.style.height  = radarSize + 'px';
-    radarCanvas.style.opacity = prefs.radarOpacity ?? 1; // Apply opacity pref
+    radarCanvas.style.opacity = prefs.radarOpacity ?? 1;
 
     radarRange = Math.max(MIN_RANGE, Math.min(MAX_RANGE, radarRange));
     updateRangeBox();
@@ -178,16 +173,15 @@ const UI = {
 };
 
 let radarRange = Math.max(MIN_RANGE, Math.min(MAX_RANGE,
-    parseInt(localStorage.getItem('radarRange') || '5000'))); // Current radar range in metres
-let isGamePaused = false; // True when GeoFS game is paused
+    parseInt(localStorage.getItem('radarRange') || '5000')));
+let isGamePaused = false;
 
-let _lastValidLat   = null;  // Last known valid player latitude
-let _lastValidLon   = null;  // Last known valid player longitude
-let _lastValidAltFt = 0;     // Last known valid player altitude (feet)
+let _lastValidLat   = null;
+let _lastValidLon   = null;
+let _lastValidAltFt = 0;
 
-// Trail state — stores own-aircraft position history for drawing
-const _trailPoints = []; // Array of {lat, lon, time} objects
-const TRAIL_MAX_PTS = 600; // Maximum number of trail points stored
+const _trailPoints = [];
+const TRAIL_MAX_PTS = 600;
 
 const settings = {
     showRings:          true,
@@ -225,7 +219,6 @@ function saveSettings() {
     applyTheme();
 }
 
-// ── Colour theme ─────────────────────────────────────
 const THEMES = {
     normal: {
         bg:            'rgba(0, 20, 0, 0.85)',
@@ -233,7 +226,7 @@ const THEMES = {
         ringLabel:     'rgba(0, 255, 0, 0.7)',
         grid:          'rgba(0, 255, 0, 0.15)',
         compass:       'rgba(0, 255, 0, 0.75)',
-        trailColor:    (a) => `rgba(255,140,0,${a})`,  // Orange trail
+        trailColor:    (a) => `rgba(255,140,0,${a})`,
         playerFill:    'rgba(0, 255, 0, 0.9)',
         playerLabel:   'rgba(0, 255, 0, 0.9)',
         blipFill:      'rgba(255, 60, 60, 1)',
@@ -297,7 +290,7 @@ const THEMES = {
         ringLabel:     'rgba(255, 80, 80, 0.85)',
         grid:          'rgba(220, 30, 30, 0.25)',
         compass:       'rgba(255, 70, 70, 0.9)',
-        trailColor:    (a) => `rgba(255,140,0,${a})`,  // Orange trail (night mode)
+        trailColor:    (a) => `rgba(255,140,0,${a})`,
         playerFill:    'rgba(255, 90, 90, 0.95)',
         playerLabel:   'rgba(255, 90, 90, 0.95)',
         blipFill:      'rgba(255, 140, 60, 1)',
@@ -487,9 +480,8 @@ document.body.appendChild(rangeBox);
 function updateRangeBox() {
     const el = document.getElementById('rangeVal');
     if (!el) return;
-    // Format range label based on distance unit preference
     if (prefs.useNautical) {
-        const nm = radarRange / 1852; // metres → nautical miles
+        const nm = radarRange / 1852;
         el.textContent = (nm < 10 ? nm.toFixed(1) : Math.round(nm)) + ' NM';
     } else {
         el.textContent = `${(radarRange/1000).toFixed(1)} km`;
@@ -560,17 +552,15 @@ function fmtHdg(deg) {
 }
 
 function fmtDist(nm) {
-    // Format a distance given in nautical miles
     if (prefs.useNautical) {
         return nm < 10 ? `${nm.toFixed(1)} NM` : `${Math.round(nm)} NM`;
     } else {
-        const m = nm * 1852; // nautical miles → metres
+        const m = nm * 1852;
         return m < 1000 ? `${Math.round(m)} m` : `${(m/1000).toFixed(1)} km`;
     }
 }
 
 function fmtDistMetric(meters) {
-    // Format a distance given in metres, respecting the nautical/metric pref
     if (prefs.useNautical) {
         const nm = meters / 1852;
         return nm < 10 ? `${nm.toFixed(1)} NM` : `${Math.round(nm)} NM`;
@@ -584,23 +574,23 @@ let _trackedAc      = null;
 let _trackedId      = null;
 
 // ── Chase / Escort state ──────────────────────────
-let _chaseActive  = false;          // Chase/escort mode engaged
-let _chasePhase   = 'chase';        // 'chase' | 'escort'
-let _escortMode   = null;           // null | 'left' | 'right' | 'forward' | 'back'
-let _escortDistNm = 0.5;            // Target escort distance in NM (slider value)
-let _chasePid     = { integral: 0, prevError: 0, lastTime: 0 }; // Speed PID state
-let _headingPid   = { integral: 0, prevError: 0, lastTime: 0 }; // Lateral heading PID state
+let _chaseActive  = false;
+let _chasePhase   = 'chase';
+let _escortMode   = null;
+let _escortDistNm = 0.5;
+let _chasePid     = { integral: 0, prevError: 0, lastTime: 0 };
+let _headingPid   = { integral: 0, prevError: 0, lastTime: 0 };
 
-// ── AP command-state (used to throttle API + DOM calls) ──
-let _apLastHdg     = -999;   // last heading sent to AP (deg); -999 = uninitialised
-let _apLastSpd     = -1;     // last speed sent to AP (kts)
-let _apLastAlt     = -9e9;   // last altitude sent to AP (ft)
-let _apUiSync      = 0;      // timestamp of last AP bar DOM sync
-let _apAirbrakesOn = false;  // current airbrake deployment state
-let _apLastEngageAttempt = 0; // timestamp of last _apEnable() call (debounce guard)
+// ── AP command-state ──────────────────────────────
+let _apLastHdg     = -999;
+let _apLastSpd     = -1;
+let _apLastAlt     = -9e9;
+let _apAirbrakesOn = false;
+let _apEngaged     = false;   // ← TOP-LEVEL: persists across draw frames
 
 function stopTracking() {
-    _apSetAirbrakes(false);   // always retract airbrakes when tracking ends
+    _apSetAirbrakes(false);
+    _apDisable();             // ← always disengage AP when tracking stops
     _trackedAc     = null;
     _trackedId     = null;
     activePopupCs  = null;
@@ -610,10 +600,9 @@ function stopTracking() {
     _escortMode    = null;
     _chasePid      = { integral: 0, prevError: 0, lastTime: 0 };
     _headingPid    = { integral: 0, prevError: 0, lastTime: 0 };
-    _apLastHdg          = -999;
-    _apLastSpd          = -1;
-    _apLastAlt          = -9e9;
-    _apLastEngageAttempt = 0;
+    _apLastHdg     = -999;
+    _apLastSpd     = -1;
+    _apLastAlt     = -9e9;
 }
 
 function refreshTracked() {
@@ -634,7 +623,6 @@ function _hudDistBrg(myData, ac) {
 }
 
 function updateNearestHUD(nearest, myData) {
-    // ILS takes priority — hide nearest HUD while ILS is active
     if (_ilsActive) {
         nearestHUD.style.display = 'none';
         _hudNearestData = null;
@@ -708,14 +696,12 @@ function updateNearestHUD(nearest, myData) {
     </div>
   </div>` : '';
 
-    // ── Chase / Escort HUD rows ──────────────────────────────────────────
     const chaseSwBg     = _chaseActive ? t.switchOn    : t.switchOff;
     const chaseKnobBg   = _chaseActive ? t.knobOn      : t.knobOff;
     const chaseKnobLeft = _chaseActive ? (UI.menuSwitchW - UI.menuKnobSize - 3) : 3;
     const chasePhaseLbl = _chasePhase === 'escort' ? 'ESCORTING' : 'CHASING';
     const chasePhaseCol = _chasePhase === 'escort' ? 'rgba(100,220,255,0.95)' : 'rgba(255,200,60,0.95)';
 
-    // Distance slider shown when chase is active
     const escortDistSlider = _chaseActive ? `
   <div style="padding:3px 14px 6px;border-top:1px solid ${t.hudSep};">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
@@ -727,13 +713,11 @@ function updateNearestHUD(nearest, myData) {
       style="width:100%;accent-color:rgba(255,180,30,0.9);margin:0;">
   </div>` : '';
 
-    // Phase label when active
     const chasePhaseRow = _chaseActive ? `
   <div style="padding:2px 14px 4px;text-align:center;">
     <span style="color:${chasePhaseCol};font-size:${UI.hudIsolateLabelFont - 1}px;letter-spacing:1px;font-weight:bold;">● ${chasePhaseLbl}</span>
   </div>` : '';
 
-    // Escort formation arrows — shown in escort phase with a formation selected indicator
     const escortArrowPanel = (_chaseActive && _chasePhase === 'escort') ? (() => {
         const arrowStyle = (mode) => {
             const isActive = _escortMode === mode;
@@ -851,7 +835,6 @@ function updateNearestHUD(nearest, myData) {
         stopEl.onclick     = (e) => { e.stopPropagation(); stopTracking(); };
     }
 
-    // ── Track Player button (shown in NEARBY TRAFFIC mode) ──────────────
     const trackPlayerEl = document.getElementById('radarTrackPlayerBtn');
     if (trackPlayerEl) {
         trackPlayerEl.onmouseover = () => trackPlayerEl.style.background = 'rgba(60,180,80,0.3)';
@@ -868,23 +851,22 @@ function updateNearestHUD(nearest, myData) {
         };
     }
 
-    // ── Chase/Escort toggle ─────────────────────────
     const chaseRowEl = document.getElementById('radarChaseRow');
     if (chaseRowEl) {
         chaseRowEl.onclick = (e) => {
             e.stopPropagation();
             _chaseActive = !_chaseActive;
             if (_chaseActive) {
-                // Reset state for fresh chase
                 _chasePhase = 'chase';
                 _escortMode = null;
                 _chasePid   = { integral: 0, prevError: 0, lastTime: 0 };
                 _headingPid = { integral: 0, prevError: 0, lastTime: 0 };
-                _apLastHdg          = -999;  // force re-command of all values on first tick
-                _apLastSpd          = -1;
-                _apLastAlt          = -9e9;
-                _apLastEngageAttempt = 0;    // allow immediate engage on first tick
+                _apLastHdg  = -999;
+                _apLastSpd  = -1;
+                _apLastAlt  = -9e9;
+                // _apEngaged stays false here — _apEnable() will fire on first tick
             } else {
+                _apDisable();
                 _apSetAirbrakes(false);
                 _chasePhase = 'chase';
                 _escortMode = null;
@@ -895,7 +877,6 @@ function updateNearestHUD(nearest, myData) {
         };
     }
 
-    // ── Escort distance slider ───────────────────────
     const distSlider = document.getElementById('radarEscortDistSlider');
     if (distSlider) {
         distSlider.addEventListener('input', (e) => {
@@ -907,14 +888,12 @@ function updateNearestHUD(nearest, myData) {
         distSlider.addEventListener('click', e => e.stopPropagation());
     }
 
-    // ── Escort formation arrow buttons ───────────────
     ['forward', 'back', 'left', 'right'].forEach(mode => {
         const el = document.getElementById(`radarEscort${mode.charAt(0).toUpperCase() + mode.slice(1)}`);
         if (!el) return;
         el.addEventListener('click', (e) => {
             e.stopPropagation();
             _escortMode = (_escortMode === mode) ? null : mode;
-            // Reset PID on mode change
             _chasePid   = { integral: 0, prevError: 0, lastTime: 0 };
             _headingPid = { integral: 0, prevError: 0, lastTime: 0 };
             _lastHudUpdate = 0;
@@ -925,12 +904,11 @@ function updateNearestHUD(nearest, myData) {
 }
 
 function repositionNearestHUD() {
-    const rl = parseInt(radarCanvas.style.left) || 5; // Radar left edge
-    const rt = parseInt(radarCanvas.style.top)  || 0; // Radar top edge
-    const spacing = 5; // Gap in px
-    // HUDs appear to the right of radar, below the 40px menu button + spacing
+    const rl = parseInt(radarCanvas.style.left) || 5;
+    const rt = parseInt(radarCanvas.style.top)  || 0;
+    const spacing = 5;
     const hudLeft = rl + radarSize + spacing;
-    const hudTop  = rt + 40 + spacing + 5; // Below the menu button (40px) + gap
+    const hudTop  = rt + 40 + spacing + 5;
     nearestHUD.style.left = hudLeft + 'px';
     nearestHUD.style.top  = hudTop  + 'px';
     repositionILSHUD();
@@ -1269,9 +1247,7 @@ function createMenu() {
         return { row, valSpan, valInput };
     }
 
-    // ── addSlider helper ─────────────────────────────
     function addSlider(opts) {
-        // opts: { label, get, set, min, max, step, fmt, onCommit }
         const { label, get, set, min, max, step, fmt, onCommit } = opts;
         const row = document.createElement('div');
         row.style.cssText = `padding:${UI.menuRowPadY-1}px 16px 2px;`;
@@ -1301,13 +1277,10 @@ function createMenu() {
         return { row, slider, valSpan };
     }
 
-    // ── Dual-handle range slider helper ─────────────
     function addRangeSlider(opts) {
-        // opts: { label, getMin, setMin, getMax, setMax, absMin, absMax, step, fmt, onCommit }
         const { label, getMin, setMin, getMax, setMax, absMin, absMax, step, fmt, onCommit } = opts;
         const wrap = document.createElement('div');
         wrap.style.cssText = `padding:${UI.menuRowPadY-1}px 16px 6px;`;
-
         const header = document.createElement('div');
         header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;';
         const lbl = document.createElement('span');
@@ -1319,22 +1292,16 @@ function createMenu() {
         function updateLabel() { valSpan.textContent = fmt(getMin()) + ' – ' + fmt(getMax()); }
         updateLabel();
         header.appendChild(lbl); header.appendChild(valSpan);
-
-        // Two overlapping range inputs for dual handle
         const trackWrap = document.createElement('div');
         trackWrap.style.cssText = 'position:relative;height:20px;';
-
         const sMin = document.createElement('input');
         sMin.type='range'; sMin.min=absMin; sMin.max=absMax; sMin.step=step; sMin.value=getMin();
         sMin.style.cssText = `position:absolute;width:100%;pointer-events:none;accent-color:rgba(0,200,0,0.8);`;
         sMin.style.appearance = 'none';
-
         const sMax = document.createElement('input');
         sMax.type='range'; sMax.min=absMin; sMax.max=absMax; sMax.step=step; sMax.value=getMax();
         sMax.style.cssText = `position:absolute;width:100%;pointer-events:none;accent-color:rgba(0,200,0,0.8);`;
         sMax.style.appearance = 'none';
-
-        // Custom styling for dual range — show both thumbs
         const style = document.createElement('style');
         style.textContent = `
             .radar-dual-range input[type=range] { -webkit-appearance:none; background:transparent; }
@@ -1343,10 +1310,8 @@ function createMenu() {
             .radar-dual-track { height:4px; background:rgba(0,60,0,0.8); border:1px solid rgba(0,200,0,0.3); border-radius:2px; margin-bottom:4px; }
         `;
         if (!document.getElementById('radarDualRangeStyle')) { style.id='radarDualRangeStyle'; document.head.appendChild(style); }
-
         trackWrap.classList.add('radar-dual-range');
         trackWrap.appendChild(sMin); trackWrap.appendChild(sMax);
-
         sMin.addEventListener('input', () => {
             let v = parseFloat(sMin.value);
             if (v >= parseFloat(sMax.value)) v = parseFloat(sMax.value) - step;
@@ -1359,12 +1324,10 @@ function createMenu() {
             v = Math.min(absMax, v); setMax(v); sMax.value = v;
             updateLabel(); if (onCommit) onCommit();
         });
-
         wrap.appendChild(header); wrap.appendChild(trackWrap);
         panel.appendChild(wrap);
     }
 
-    // ── Display ──────────────────────────────────────
     addSection('🖥️  Display');
     addToggle('Night Mode',               'nightMode',        () => applyTheme());
     addRadio ('Orientation',              'orientMode',       'north', 'track', 'N↑', 'TRK↑');
@@ -1373,7 +1336,6 @@ function createMenu() {
     addToggle('Ring Labels',              'showRingLabels');
     addSep();
 
-    // ── Traffic ───────────────────────────────────────
     addSection('✈️  Traffic');
     addToggle('Show Traffic',             'showTraffic');
     addToggle('Traffic Triangles',        'showBlipTriangle');
@@ -1387,9 +1349,7 @@ function createMenu() {
     });
     addSep();
 
-    // ── Filters ───────────────────────────────────────
     addSection('🔍  Filters');
-    // Hide Foo players toggle
     {
         const row = document.createElement('div');
         row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
@@ -1399,7 +1359,7 @@ function createMenu() {
         const lbl = document.createElement('span');
         lbl.dataset.menuRowlbl = '1';
         lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
-        lbl.textContent = 'Hide "Foo" Players';  // Hides aircraft with callsign Foo
+        lbl.textContent = 'Hide "Foo" Players';
         const sw = document.createElement('div');
         const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
         sw.style.cssText = `width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
@@ -1422,7 +1382,6 @@ function createMenu() {
         };
         panel.appendChild(row);
     }
-    // Hide ground players toggle
     {
         const row = document.createElement('div');
         row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
@@ -1432,7 +1391,7 @@ function createMenu() {
         const lbl = document.createElement('span');
         lbl.dataset.menuRowlbl = '1';
         lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
-        lbl.textContent = 'Hide Ground Traffic'; // Hides aircraft with very low altitude
+        lbl.textContent = 'Hide Ground Traffic';
         const sw = document.createElement('div');
         const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
         sw.style.cssText = `width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
@@ -1456,7 +1415,6 @@ function createMenu() {
         panel.appendChild(row);
     }
 
-    // ── Altitude Range Filter ─────────────────────────
     addToggle('Altitude Filter', 'altFilterEnabled');
     {
         const ALT_MIN = 0, ALT_MAX = 60000, STEP = 500;
@@ -1469,8 +1427,8 @@ function createMenu() {
         lblL.style.cssText = `color:rgba(180,240,180,0.7);font:${UI.menuRowFont-1}px ${FONT_SANS};`;
         const lblR = document.createElement('span');
         lblR.style.cssText = `color:rgba(180,240,180,0.7);font:${UI.menuRowFont-1}px ${FONT_SANS};`;
-        const fmtAlt = v => v >= 1000 ? (v/1000).toFixed(0)+'k ft' : v+' ft';
-        const updateAltLabels = () => { lblL.textContent = fmtAlt(prefs.altFilterMinFt); lblR.textContent = fmtAlt(prefs.altFilterMaxFt); };
+        const fmtAltF = v => v >= 1000 ? (v/1000).toFixed(0)+'k ft' : v+' ft';
+        const updateAltLabels = () => { lblL.textContent = fmtAltF(prefs.altFilterMinFt); lblR.textContent = fmtAltF(prefs.altFilterMaxFt); };
         updateAltLabels();
         labelRow.appendChild(lblL); labelRow.appendChild(lblR);
         wrap.appendChild(labelRow);
@@ -1518,17 +1476,14 @@ function createMenu() {
     }
     addSep();
 
-    // ── Map ───────────────────────────────────────────
     addSection('🗺️  Map');
     addToggle('Airports & Runways',       'showAirports');
     addSep();
 
-    // ── My Aircraft ───────────────────────────────────
     addSection('🛩️  My Aircraft');
     addInfoRow('Callsign', 'callsign');
     addInfoRow('Position', 'position');
     addToggle('Show My Callsign',         'showMyCallsign');
-    // Trail toggle
     {
         const row = document.createElement('div');
         row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
@@ -1538,7 +1493,7 @@ function createMenu() {
         const lbl = document.createElement('span');
         lbl.dataset.menuRowlbl = '1';
         lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
-        lbl.textContent = 'Show My Trail';  // Draws own position history on radar
+        lbl.textContent = 'Show My Trail';
         const sw = document.createElement('div');
         const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
         sw.style.cssText = `width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
@@ -1566,10 +1521,7 @@ function createMenu() {
         fmt:v=>v+'s', min:10, max:300, step:10, onCommit:savePrefs });
     addSep();
 
-    // ── Radar Preferences ────────────────────────────
     addSection('⚙️  Radar Settings');
-
-    // ── Distance Unit — 3-way radio (km/m | NM) ─────
     {
         const row = document.createElement('div');
         row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
@@ -1577,14 +1529,13 @@ function createMenu() {
         const lbl = document.createElement('span');
         lbl.dataset.menuRowlbl = '1';
         lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};flex:1;`;
-        lbl.textContent = 'Distance Unit'; // Controls whether distances show as km/m or NM
+        lbl.textContent = 'Distance Unit';
         const wrap = document.createElement('div');
         wrap.style.cssText = 'display:flex;gap:5px;';
         [['km / m', false], ['NM', true]].forEach(([label, isNm]) => {
             const b = document.createElement('button');
             b.textContent = label;
             const isActive = () => prefs.useNautical === isNm;
-            const t = T();
             b.style.cssText = `padding:4px 10px;font:bold ${UI.menuRadioFont}px ${FONT_SANS};
                 border-radius:5px;cursor:pointer;border:1px solid rgba(0,255,0,0.3);
                 transition:all .15s;
@@ -1607,20 +1558,18 @@ function createMenu() {
         panel.appendChild(row);
     }
 
-    // ── Radar Size — slider ───────────────────────────
     addSlider({
-        label:    'Radar Size',                             // Radar canvas diameter in pixels
+        label:    'Radar Size',
         get:      () => prefs.radarSizePx,
-        set:      v  => { prefs.radarSizePx = Math.round(v / 10) * 10; }, // Snap to 10px
+        set:      v  => { prefs.radarSizePx = Math.round(v / 10) * 10; },
         fmt:      v  => Math.round(v / 10) * 10 + ' px',
         min: 150, max: 900, step: 10,
         onCommit: applyPrefs,
     });
 
-    // ── Dual-handle range slider for Min/Max range with connecting line ────
     {
         const opts = {
-            label: 'Range Bounds',              // Controls both min and max radar zoom range
+            label: 'Range Bounds',
             getMin: () => prefs.minRangeKm,
             setMin: v  => { prefs.minRangeKm = v; },
             getMax: () => prefs.maxRangeKm,
@@ -1633,7 +1582,6 @@ function createMenu() {
         const { label, getMin, setMin, getMax, setMax, absMin, absMax, step, fmt, onCommit } = opts;
         const wrap = document.createElement('div');
         wrap.style.cssText = `padding:${UI.menuRowPadY-1}px 16px 8px;`;
-
         const header = document.createElement('div');
         header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;';
         const hLbl = document.createElement('span');
@@ -1646,21 +1594,15 @@ function createMenu() {
         updateRLabel();
         header.appendChild(hLbl); header.appendChild(valSpanR);
 
-        // Canvas-based dual thumb slider with a line between the two dots
-        const SLIDER_H = 28;      // Canvas height in pixels
-        const SLIDER_W_PAD = 10;  // Horizontal padding so thumb doesn't clip edge
-        const THUMB_R = 7;        // Thumb circle radius
-        const TRACK_Y = SLIDER_H / 2; // Vertical centre of track
-
+        const SLIDER_H = 28, SLIDER_W_PAD = 10, THUMB_R = 7, TRACK_Y = SLIDER_H / 2;
         const sliderCanvas = document.createElement('canvas');
         sliderCanvas.height = SLIDER_H;
         sliderCanvas.style.cssText = 'width:100%;display:block;cursor:pointer;';
-        // Set actual pixel width after appending (so offsetWidth is available)
 
-        function valToFrac(v) { return (v - absMin) / (absMax - absMin); } // 0–1 fraction
+        function valToFrac(v) { return (v - absMin) / (absMax - absMin); }
         function fracToVal(f) { return Math.round((absMin + f * (absMax - absMin)) / step) * step; }
 
-        let _dragging = null; // 'min' | 'max' | null — which thumb is being dragged
+        let _dragging = null;
 
         function drawRangeCanvas() {
             const W = sliderCanvas.width;
@@ -1668,32 +1610,22 @@ function createMenu() {
             sc.clearRect(0, 0, W, SLIDER_H);
             const minX = SLIDER_W_PAD + valToFrac(getMin()) * (W - SLIDER_W_PAD * 2);
             const maxX = SLIDER_W_PAD + valToFrac(getMax()) * (W - SLIDER_W_PAD * 2);
-
-            // Full track background
             sc.strokeStyle = 'rgba(0,60,0,0.8)'; sc.lineWidth = 4;
             sc.beginPath(); sc.moveTo(SLIDER_W_PAD, TRACK_Y); sc.lineTo(W - SLIDER_W_PAD, TRACK_Y); sc.stroke();
-
-            // Active range line between the two thumbs
             sc.strokeStyle = 'rgba(0,220,0,0.7)'; sc.lineWidth = 4;
             sc.beginPath(); sc.moveTo(minX, TRACK_Y); sc.lineTo(maxX, TRACK_Y); sc.stroke();
-
-            // Min thumb
             sc.beginPath(); sc.arc(minX, TRACK_Y, THUMB_R, 0, Math.PI * 2);
-            sc.fillStyle = _dragging === 'min' ? '#fff' : 'rgba(0,220,0,0.95)';
-            sc.fill();
+            sc.fillStyle = _dragging === 'min' ? '#fff' : 'rgba(0,220,0,0.95)'; sc.fill();
             sc.strokeStyle = '#0f0'; sc.lineWidth = 2; sc.stroke();
-
-            // Max thumb
             sc.beginPath(); sc.arc(maxX, TRACK_Y, THUMB_R, 0, Math.PI * 2);
-            sc.fillStyle = _dragging === 'max' ? '#fff' : 'rgba(0,220,0,0.95)';
-            sc.fill();
+            sc.fillStyle = _dragging === 'max' ? '#fff' : 'rgba(0,220,0,0.95)'; sc.fill();
             sc.strokeStyle = '#0f0'; sc.lineWidth = 2; sc.stroke();
         }
 
         function clientXToVal(e) {
             const rect = sliderCanvas.getBoundingClientRect();
             const W = sliderCanvas.width;
-            const scale = W / rect.width; // account for CSS width vs canvas pixel width
+            const scale = W / rect.width;
             const x = (e.clientX - rect.left) * scale;
             const f = Math.max(0, Math.min(1, (x - SLIDER_W_PAD) / (W - SLIDER_W_PAD * 2)));
             return fracToVal(f);
@@ -1707,26 +1639,20 @@ function createMenu() {
             const minX = SLIDER_W_PAD + valToFrac(getMin()) * (W - SLIDER_W_PAD * 2);
             const maxX = SLIDER_W_PAD + valToFrac(getMax()) * (W - SLIDER_W_PAD * 2);
             const dMin = Math.abs(x - minX), dMax = Math.abs(x - maxX);
-            _dragging = dMin <= dMax ? 'min' : 'max'; // Pick closer thumb
+            _dragging = dMin <= dMax ? 'min' : 'max';
             e.preventDefault();
         });
         document.addEventListener('mousemove', (e) => {
             if (!_dragging) return;
             let v = clientXToVal(e);
-            if (_dragging === 'min') {
-                v = Math.min(v, getMax() - step);
-                setMin(Math.max(absMin, v));
-            } else {
-                v = Math.max(v, getMin() + step);
-                setMax(Math.min(absMax, v));
-            }
+            if (_dragging === 'min') { v = Math.min(v, getMax() - step); setMin(Math.max(absMin, v)); }
+            else { v = Math.max(v, getMin() + step); setMax(Math.min(absMax, v)); }
             updateRLabel(); drawRangeCanvas();
         });
         document.addEventListener('mouseup', () => {
             if (_dragging) { _dragging = null; drawRangeCanvas(); if (onCommit) onCommit(); }
         });
 
-        // Resize observer to set canvas pixel width
         const ro = new ResizeObserver(() => {
             sliderCanvas.width = sliderCanvas.offsetWidth || 220;
             drawRangeCanvas();
@@ -1735,7 +1661,6 @@ function createMenu() {
         wrap.appendChild(header); wrap.appendChild(sliderCanvas);
         panel.appendChild(wrap);
 
-        // Draw after insert (width known)
         setTimeout(() => {
             sliderCanvas.width = sliderCanvas.offsetWidth || 220;
             ro.observe(sliderCanvas);
@@ -1743,9 +1668,8 @@ function createMenu() {
         }, 0);
     }
 
-    // ── Scroll Step — slider ──────────────────────────
     addSlider({
-        label:    'Scroll Step',                            // Range change per mouse wheel tick
+        label:    'Scroll Step',
         get:      () => prefs.scrollIncKm,
         set:      v  => { prefs.scrollIncKm = v; },
         fmt:      v  => v.toFixed(1) + ' km',
@@ -1753,9 +1677,8 @@ function createMenu() {
         onCommit: applyPrefs,
     });
 
-    // ── Update Delay — slider ─────────────────────────
     addSlider({
-        label:    'Update Delay',                           // REST API poll interval (ms)
+        label:    'Update Delay',
         get:      () => prefs.fetchDelay,
         set:      v  => { prefs.fetchDelay = v; },
         fmt:      v  => v + ' ms',
@@ -1763,7 +1686,6 @@ function createMenu() {
         onCommit: applyPrefs,
     });
 
-    // ── Radar Opacity slider — value is persisted and maintained permanently ─
     {
         const row = document.createElement('div');
         row.style.cssText = `padding:${UI.menuRowPadY-1}px 16px 2px;`;
@@ -1772,7 +1694,7 @@ function createMenu() {
         const lbl = document.createElement('span');
         lbl.dataset.menuRowlbl = '1';
         lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
-        lbl.textContent = 'Radar Opacity'; // Radar canvas transparency — saved permanently
+        lbl.textContent = 'Radar Opacity';
         const valSpan = document.createElement('span');
         valSpan.style.cssText = `color:rgba(0,255,0,0.95);font:bold ${UI.menuRowFont}px ${FONT_MONO};min-width:52px;text-align:right;`;
         valSpan.textContent = Math.round((prefs.radarOpacity ?? 1) * 100) + '%';
@@ -1781,72 +1703,54 @@ function createMenu() {
         slider.type = 'range'; slider.min = 0.1; slider.max = 1.0; slider.step = 0.05;
         slider.value = prefs.radarOpacity ?? 1;
         slider.style.cssText = `width:100%;margin:0;accent-color:rgba(0,200,0,0.8);`;
-        // Every movement immediately saves and applies the opacity
         slider.addEventListener('input', () => {
             const v = parseFloat(slider.value);
-            prefs.radarOpacity = v;               // Persist to prefs immediately
-            radarCanvas.style.opacity = v;         // Apply to canvas immediately
+            prefs.radarOpacity = v;
+            radarCanvas.style.opacity = v;
             valSpan.textContent = Math.round(v * 100) + '%';
-            savePrefs();                           // Write to localStorage
+            savePrefs();
         });
         row.appendChild(topRow); row.appendChild(slider);
         panel.appendChild(row);
     }
     addSep();
 
-    // ── API Status ────────────────────────────────────
     addSection('📡  API Status');
     addStatusRow();
 
-    // ═══════════════════════════════════════════════════
-    // CUSTOMIZATION TAB — second panel appended below
-    // Implemented as a second scrollable section
-    // ═══════════════════════════════════════════════════
     addSep();
     addSection('🎨  Customization');
 
-    // Helper: add a UI size slider that updates the UI object and redraws
     function addUISlider(label, key, min, max, step) {
         addSlider({
-            label,                          // Display label for this size control
+            label,
             get:  () => UI[key],
             set:  v  => { UI[key] = v; },
             fmt:  v  => v + 'px',
             min, max, step,
-            onCommit: () => { /* Sizes take effect on next draw */ },
+            onCommit: () => {},
         });
     }
 
-    // ── Blip sizes ──────────────────
     addUISlider('Blip Dot Size',        'blipDotR',       2,  14, 1);
     addUISlider('Traffic Triangle Size','blipTriTip',     6,  20, 1);
     addUISlider('Blip Label Font',      'blipLabelFont',  8,  18, 1);
     addSep();
-
-    // ── Player sizes ─────────────────
     addUISlider('Player Triangle Size', 'playerTriTip',   8,  24, 1);
     addUISlider('Player CS Font',       'playerCsFont',   10, 22, 1);
     addSep();
-
-    // ── HUD fonts ────────────────────
     addUISlider('HUD Callsign Font',    'hudCallsignFont', 12, 26, 1);
     addUISlider('HUD Data Font',        'hudDataFont',    10, 22, 1);
     addUISlider('HUD Label Font',       'hudSectionLabelFont', 10, 20, 1);
     addSep();
-
-    // ── Compass / Ring fonts ──────────
     addUISlider('Compass Font',         'compassFont',    16, 40, 1);
     addUISlider('Ring Label Font',      'ringLabelFont',  10, 22, 1);
     addSep();
-
-    // ── Popup fonts ───────────────────
     addUISlider('Popup Title Font',     'popupTitleFont', 12, 24, 1);
     addUISlider('Popup Body Font',      'popupBodyFont',  11, 20, 1);
     addSep();
-
-    // ── Trail width ───────────────────
     addSlider({
-        label:    'Trail Thickness',           // Trail line width in pixels
+        label:    'Trail Thickness',
         get:      () => prefs.trailWidth,
         set:      v  => { prefs.trailWidth = v; },
         fmt:      v  => v + ' px',
@@ -1855,7 +1759,6 @@ function createMenu() {
     });
     addSep();
 
-    // ── ILS Font sizes ────────────────
     addSection('🛬  ILS Display');
     function addILSFontSlider(label, key) {
         addSlider({
@@ -1864,7 +1767,7 @@ function createMenu() {
             set:  v  => { ilsPrefs[key] = v; },
             fmt:  v  => v + 'px',
             min: 7, max: 24, step: 1,
-            onCommit: saveIlsPrefs,   // Persist to localStorage
+            onCommit: saveIlsPrefs,
         });
     }
     addILSFontSlider('ILS Header Font',       'fontHeader');
@@ -1876,9 +1779,7 @@ function createMenu() {
     addILSFontSlider('ILS Bank Label Font',    'fontBankValue');
     addSep();
 
-    // ── TCAS ─────────────────────────
     addSection('⚠️  TCAS');
-    // TCAS enable toggle
     {
         const row = document.createElement('div');
         row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
@@ -1888,7 +1789,7 @@ function createMenu() {
         const lbl = document.createElement('span');
         lbl.dataset.menuRowlbl = '1';
         lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
-        lbl.textContent = 'TCAS Warning';  // Flash TRAFFIC + audio when on collision course
+        lbl.textContent = 'TCAS Warning';
         const sw  = document.createElement('div');
         const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
         sw.style.cssText = `width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
@@ -1912,8 +1813,6 @@ function createMenu() {
         };
         panel.appendChild(row);
     }
-
-    // ── TCAS Audio toggle (reads/writes prefs, not settings) ─────────────
     {
         const row = document.createElement('div');
         row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
@@ -1947,55 +1846,12 @@ function createMenu() {
         panel.appendChild(row);
     }
 
-    // ── TCAS tuning sliders ───────────────────────
-    addSlider({
-        label: 'Lookahead Time',                    // How far ahead (seconds) to project each path
-        get:   () => prefs.tcasLookaheadS,
-        set:   v  => { prefs.tcasLookaheadS = v; },
-        fmt:   v  => v + ' s',
-        min: 5, max: 120, step: 5,
-        onCommit: savePrefs,
-    });
-    addSlider({
-        label: 'Altitude Band',                     // ±feet altitude difference to consider a threat
-        get:   () => prefs.tcasAltBandFt,
-        set:   v  => { prefs.tcasAltBandFt = v; },
-        fmt:   v  => '±' + v + ' ft',
-        min: 50, max: 2000, step: 50,
-        onCommit: savePrefs,
-    });
-    addSlider({
-        label: 'Min Altitude (AGL)',                // Both aircraft must be above this to warn
-        get:   () => prefs.tcasMinAltFt,
-        set:   v  => { prefs.tcasMinAltFt = v; },
-        fmt:   v  => v + ' ft',
-        min: 0, max: 2000, step: 50,
-        onCommit: savePrefs,
-    });
-    addSlider({
-        label: 'Intersection Margin',               // How close (metres) paths must cross to trigger
-        get:   () => prefs.tcasMarginM,
-        set:   v  => { prefs.tcasMarginM = v; },
-        fmt:   v  => v + ' m',
-        min: 50, max: 2000, step: 50,
-        onCommit: savePrefs,
-    });
-    addSlider({
-        label: 'Audio Cooldown',                    // Minimum seconds between audio replays
-        get:   () => prefs.tcasAudioCooldownMs / 1000,
-        set:   v  => { prefs.tcasAudioCooldownMs = v * 1000; },
-        fmt:   v  => v + ' s',
-        min: 1, max: 60, step: 1,
-        onCommit: savePrefs,
-    });
-    addSlider({
-        label: 'Time Sync Tolerance',               // ±% — how closely both aircraft must hit the intersection at the same time
-        get:   () => prefs.tcasTimeTolPct,
-        set:   v  => { prefs.tcasTimeTolPct = v; },
-        fmt:   v  => '±' + v + '%',
-        min: 1, max: 30, step: 1,
-        onCommit: savePrefs,
-    });
+    addSlider({ label: 'Lookahead Time', get: () => prefs.tcasLookaheadS, set: v => { prefs.tcasLookaheadS = v; }, fmt: v => v + ' s', min: 5, max: 120, step: 5, onCommit: savePrefs });
+    addSlider({ label: 'Altitude Band',  get: () => prefs.tcasAltBandFt,  set: v => { prefs.tcasAltBandFt = v; }, fmt: v => '±' + v + ' ft', min: 50, max: 2000, step: 50, onCommit: savePrefs });
+    addSlider({ label: 'Min Altitude (AGL)', get: () => prefs.tcasMinAltFt, set: v => { prefs.tcasMinAltFt = v; }, fmt: v => v + ' ft', min: 0, max: 2000, step: 50, onCommit: savePrefs });
+    addSlider({ label: 'Intersection Margin', get: () => prefs.tcasMarginM, set: v => { prefs.tcasMarginM = v; }, fmt: v => v + ' m', min: 50, max: 2000, step: 50, onCommit: savePrefs });
+    addSlider({ label: 'Audio Cooldown', get: () => prefs.tcasAudioCooldownMs / 1000, set: v => { prefs.tcasAudioCooldownMs = v * 1000; }, fmt: v => v + ' s', min: 1, max: 60, step: 1, onCommit: savePrefs });
+    addSlider({ label: 'Time Sync Tolerance', get: () => prefs.tcasTimeTolPct, set: v => { prefs.tcasTimeTolPct = v; }, fmt: v => '±' + v + '%', min: 1, max: 30, step: 1, onCommit: savePrefs });
 
     document.body.appendChild(panel);
     repositionMenu();
@@ -2005,25 +1861,22 @@ function repositionMenu() {
     const btn   = document.getElementById('radarMenuBtn');
     const panel = document.getElementById('radarMenuPanel');
     if (!btn || !panel) return;
-    const rl = parseInt(radarCanvas.style.left) || 5; // Radar left edge in px
-    const rt = parseInt(radarCanvas.style.top)  || 0; // Radar top edge in px
-    const spacing = 5; // Gap between elements in px
+    const rl = parseInt(radarCanvas.style.left) || 5;
+    const rt = parseInt(radarCanvas.style.top)  || 0;
+    const spacing = 5;
 
-    // Place button to the RIGHT of the radar, at the top — never overlapping HUDs on the right side
     btn.style.left = (rl + radarSize + spacing) + 'px';
     btn.style.top  = rt + 'px';
 
-    // Place panel below the button
     const panelTop = rt + 40 + spacing;
     const windowHeight   = window.innerHeight;
-    const menuFullHeight = 640; // Estimated full panel height
-    const maxAllowedH    = windowHeight - panelTop - 60; // Leave 60 px bottom gap
+    const menuFullHeight = 640;
+    const maxAllowedH    = windowHeight - panelTop - 60;
     const panelHeight    = Math.min(menuFullHeight, maxAllowedH);
     panel.style.top    = panelTop + 'px';
     panel.style.height = panelHeight + 'px';
     panel.style.left   = (rl + radarSize + spacing) + 'px';
 
-    // If panel goes off-screen right, shift left
     const panelRight = parseInt(panel.style.left) + UI.menuW;
     if (panelRight > window.innerWidth) {
         panel.style.left = (window.innerWidth - UI.menuW - spacing) + 'px';
@@ -2132,7 +1985,6 @@ function hidePopup() { if (popup) popup.style.display = 'none'; }
 
 let activePopupCs = null;
 
-// ── Point-to-segment distance (for runway click detection) ────────────────
 function distToSegment(px, py, x1, y1, x2, y2) {
     const dx = x2 - x1, dy = y2 - y1;
     const lenSq = dx*dx + dy*dy;
@@ -2146,7 +1998,6 @@ radarCanvas.addEventListener('click', (e) => {
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
 
-    // ── Blip detection (aircraft) ──────────────────
     let closest = null, closestDist = 12;
     lastBlipPositions.forEach(b => {
         const d = Math.hypot(mx - b.x, my - b.y);
@@ -2169,7 +2020,6 @@ radarCanvas.addEventListener('click', (e) => {
         return;
     }
 
-    // ── Runway detection (ILS activation) ─────────
     let closestRwy = null, closestRwyDist = 14;
     _lastRunwayPositions.forEach(r => {
         const d = distToSegment(mx, my, r.x1, r.y1, r.x2, r.y2);
@@ -2483,7 +2333,7 @@ async function fetchAirportData() {
             const lat = parseFloat(row['latitude_deg']), lon = parseFloat(row['longitude_deg']);
             if (!isFinite(lat)||!isFinite(lon)) return;
             const icao = row['ident'] || row['gps_code'] || 'UNKN';
-            const elevFt = parseFloat(row['elevation_ft']) || 0; // ← airport elevation for ILS AGL
+            const elevFt = parseFloat(row['elevation_ft']) || 0;
             airportCache.push({ icao, name: row['name']||icao, lat, lon, elevFt });
             const rwys = rwByIdent[row['ident']] || [];
             if (rwys.length === 0) {
@@ -2510,15 +2360,13 @@ setInterval(fetchAirportData, AIRPORT_REFETCH);
 // ILS SYSTEM
 // ═══════════════════════════════════════════════════
 
-// ── State ─────────────────────────────────────────
-let _ilsRunway        = null;   // {lat1,lon1,lat2,lon2,name,airport,length}
+let _ilsRunway        = null;
 let _ilsAirportICAO   = null;
 let _ilsAirportElevFt = 0;
 let _ilsActive        = false;
 let _vsHistory        = [];
-let _lastRunwayPositions = [];  // [{x1,y1,x2,y2,rwyData,airportICAO}] for click detection
+let _lastRunwayPositions = [];
 
-// ── ILS HUD element ───────────────────────────────
 const ilsHUD = document.createElement('div');
 ilsHUD.id = 'radarILSHUD';
 ilsHUD.style.cssText = `
@@ -2527,13 +2375,11 @@ ilsHUD.style.cssText = `
 `;
 document.body.appendChild(ilsHUD);
 
-// ── CDI canvas (reused, not re-created each frame) ─
 const ilsCDICanvas = document.createElement('canvas');
 ilsCDICanvas.width  = 200;
 ilsCDICanvas.height = 200;
 const ilsCtx2 = ilsCDICanvas.getContext('2d');
 
-// ── Activate / Deactivate ─────────────────────────
 function activateILS(rwy, airportICAO) {
     _ilsRunway       = rwy;
     _ilsAirportICAO  = airportICAO;
@@ -2544,40 +2390,35 @@ function activateILS(rwy, airportICAO) {
     nearestHUD.style.display = 'none';
     ilsHUD.style.display = 'block';
     repositionILSHUD();
-    updateILSHUD(null); // render immediately with placeholder data
+    updateILSHUD(null);
 }
 
 function deactivateILS() {
     _ilsActive  = false;
     _ilsRunway  = null;
     ilsHUD.style.display = 'none';
-    // Restore nearest HUD if enabled
     updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
 }
 
 function repositionILSHUD() {
-    const rl = parseInt(radarCanvas.style.left) || 5; // Radar left edge
-    const rt = parseInt(radarCanvas.style.top)  || 0; // Radar top edge
+    const rl = parseInt(radarCanvas.style.left) || 5;
+    const rt = parseInt(radarCanvas.style.top)  || 0;
     const spacing = 5;
-    // ILS HUD sits in the same position as the Nearest HUD (they are mutually exclusive)
     ilsHUD.style.left = (rl + radarSize + spacing) + 'px';
     ilsHUD.style.top  = (rt + 40 + spacing + 5) + 'px';
 }
 
-// ── Vertical speed calculator ─────────────────────
 function computeVS(altFt) {
     const now = Date.now();
     _vsHistory.push({ altFt, time: now });
     _vsHistory = _vsHistory.filter(h => now - h.time < 8000);
     if (_vsHistory.length < 2) return null;
     const oldest = _vsHistory[0];
-    const dt = (now - oldest.time) / 60000; // minutes
+    const dt = (now - oldest.time) / 60000;
     if (dt < 0.005) return null;
-    return Math.round((altFt - oldest.altFt) / dt); // fpm
+    return Math.round((altFt - oldest.altFt) / dt);
 }
 
-// ── Determine which runway threshold to use ───────
-// Returns {tLat, tLon, oLat, oLon} where t = touchdown end, o = opposite
 function getApproachThreshold(playerLat, playerLon, playerHdg, rwy) {
     const brg1 = calcBearing(playerLat, playerLon, rwy.lat1, rwy.lon1);
     const brg2 = calcBearing(playerLat, playerLon, rwy.lat2, rwy.lon2);
@@ -2588,30 +2429,25 @@ function getApproachThreshold(playerLat, playerLon, playerHdg, rwy) {
         : { tLat: rwy.lat2, tLon: rwy.lon2, oLat: rwy.lat1, oLon: rwy.lon1 };
 }
 
-// ── Compute all ILS parameters ────────────────────
 function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpeedKts) {
     if (!_ilsRunway) return null;
 
     const { tLat, tLon, oLat, oLon } = getApproachThreshold(playerLat, playerLon, playerHdg, _ilsRunway);
 
-    // Convert to metres from threshold
     const [pDx, pDy] = latLonToMeters(tLat, tLon, playerLat, playerLon);
     const [rDx, rDy] = latLonToMeters(tLat, tLon, oLat, oLon);
     const rLen = Math.hypot(rDx, rDy);
     if (rLen < 1) return null;
 
     const rUx = rDx / rLen, rUy = rDy / rLen;
-    const along = pDx * rUx + pDy * rUy;   // positive = past threshold
-    const cross  = pDx * (-rUy) + pDy * rUx; // positive = right of centreline
-    const distToThreshM = -along;            // positive = still approaching
+    const along = pDx * rUx + pDy * rUy;
+    const cross  = pDx * (-rUy) + pDy * rUx;
+    const distToThreshM = -along;
 
-    // ── Read accurate values from geofs.animation.values (matches reference script) ──
-    const av = window.geofs?.animation?.values; // Pre-computed GeoFS flight data
+    const av = window.geofs?.animation?.values;
 
-    // Altitude AGL — use groundElevationFeet if available (same as reference script)
     let playerAltAGL;
     if (av && av.altitude !== undefined && av.groundElevationFeet !== undefined) {
-        // Same method as GeoFS Information Display: altitude - groundElevationFeet + wheel offset
         const wheelOffsetFt = (() => {
             try {
                 const cps = geofs.aircraft?.instance?.collisionPoints;
@@ -2621,29 +2457,23 @@ function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpee
         })();
         playerAltAGL = Math.round((av.altitude - av.groundElevationFeet) + wheelOffsetFt);
     } else {
-        playerAltAGL = playerAltFt - _ilsAirportElevFt; // Fallback: altitude above airport elevation
+        playerAltAGL = playerAltFt - _ilsAirportElevFt;
     }
 
-    // Ideal altitude at this distance on a 3° glideslope
     const GS_DEG    = 3.0;
     const idealAltFt = Math.max(0, distToThreshM) * Math.tan(GS_DEG * Math.PI / 180) * 3.28084;
-    const gsErrFt   = playerAltAGL - idealAltFt; // positive = above GS
+    const gsErrFt   = playerAltAGL - idealAltFt;
 
-    // Localizer angular error (degrees) — positive = aircraft right of centreline
     const locErrDeg = Math.atan2(cross, Math.max(100, Math.abs(distToThreshM))) * 180 / Math.PI;
-
-    // Glideslope angular error (degrees above 3° path)
     const gsErrDeg  = Math.atan2(gsErrFt / 3.28084, Math.max(100, Math.abs(distToThreshM))) * 180 / Math.PI;
 
-    // Vertical speed — prefer geofs.animation.values.verticalSpeed (fpm), same as reference script
     let vs = null;
     if (av && av.verticalSpeed !== undefined && isFinite(av.verticalSpeed)) {
-        vs = Math.round(av.verticalSpeed); // fpm directly from GeoFS
+        vs = Math.round(av.verticalSpeed);
     } else {
-        vs = computeVS(playerAltFt);       // Fallback: compute from altitude history
+        vs = computeVS(playerAltFt);
     }
 
-    // Speed — prefer animation.values.kias (knots IAS) or groundSpeed
     let speedKts = playerSpeedKts;
     if (av && av.kias !== undefined && isFinite(av.kias) && av.kias > 0) {
         speedKts = av.kias;
@@ -2651,26 +2481,23 @@ function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpee
         speedKts = av.groundSpeed;
     }
 
-    // Actual descent angle: atan2(-VS_fpm, groundspeed_fpm)
     let descentAngle = null;
     if (vs !== null && isFinite(vs) && speedKts > 10) {
-        const gsFtMin  = speedKts * 101.269;          // knots → ft/min
+        const gsFtMin  = speedKts * 101.269;
         descentAngle   = Math.atan2(-vs, gsFtMin) * 180 / Math.PI;
         descentAngle   = Math.round(descentAngle * 10) / 10;
     }
 
-    // Bank angle — prefer animation.values roll if available, else animationValue
     let bankDeg = null;
     try {
-        // geofs.animation.values doesn't expose roll directly; use animationValue.roll
         const rawRoll = av?.roll ?? geofs.aircraft?.instance?.animationValue?.roll ?? null;
         if (rawRoll !== null && isFinite(rawRoll)) {
-            bankDeg = Math.abs(rawRoll) <= 6.28 ? rawRoll * 180 / Math.PI : rawRoll; // radians → degrees
+            bankDeg = Math.abs(rawRoll) <= 6.28 ? rawRoll * 180 / Math.PI : rawRoll;
             bankDeg = Math.round(bankDeg * 10) / 10;
         }
     } catch(e) {}
 
-    const rwHdg = calcBearing(oLat, oLon, tLat, tLon); // Inbound course to threshold
+    const rwHdg = calcBearing(oLat, oLon, tLat, tLon);
 
     return {
         locErrDeg,
@@ -2689,23 +2516,20 @@ function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpee
     };
 }
 
-// ── Draw CDI instrument onto ilsCDICanvas ─────────
 function drawCDIInstrument(locErrDeg, gsErrDeg) {
     const W = 200, H = 200, cx = W / 2, cy = H / 2;
-    const DOT_SPACING = 30;   // px between reference dots
-    const LOC_FS = 2.5;       // degrees for full-scale localizer deflection
-    const GS_FS  = 0.7;       // degrees for full-scale glideslope deflection
-    const MAX_PX = DOT_SPACING * 2; // 2 dots = full scale pixel offset
+    const DOT_SPACING = 30;
+    const LOC_FS = 2.5;
+    const GS_FS  = 0.7;
+    const MAX_PX = DOT_SPACING * 2;
 
     const c = ilsCtx2;
     c.clearRect(0, 0, W, H);
 
-    // ── Background ──────────────────────────────────
     c.beginPath(); c.arc(cx, cy, W / 2 - 1, 0, Math.PI * 2);
     c.fillStyle = 'rgba(0,6,12,0.97)'; c.fill();
     c.strokeStyle = 'rgba(0,160,230,0.7)'; c.lineWidth = 2; c.stroke();
 
-    // ── Dashed crosshair guides ──────────────────────
     c.save();
     c.beginPath(); c.arc(cx, cy, W/2 - 3, 0, Math.PI*2); c.clip();
     c.strokeStyle = 'rgba(0,80,120,0.5)'; c.lineWidth = 1;
@@ -2717,31 +2541,22 @@ function drawCDIInstrument(locErrDeg, gsErrDeg) {
     c.setLineDash([]);
     c.restore();
 
-    // ── Reference dots (localizer = horizontal axis) ─
     [-2, -1, 1, 2].forEach(i => {
         c.beginPath(); c.arc(cx + i * DOT_SPACING, cy, 4.5, 0, Math.PI * 2);
         c.fillStyle = 'rgba(0,130,180,0.75)'; c.fill();
     });
 
-    // ── Reference dots (glideslope = vertical axis) ──
     [-2, -1, 1, 2].forEach(i => {
         c.beginPath(); c.arc(cx, cy + i * DOT_SPACING, 4.5, 0, Math.PI * 2);
         c.fillStyle = 'rgba(0,130,180,0.75)'; c.fill();
     });
 
-    // ── Compute needle deviations in pixels ──────────
-    // LOC needle moves LEFT when aircraft is RIGHT of course
-    const locPx = Math.max(-MAX_PX * 1.6, Math.min(MAX_PX * 1.6,
-        -(locErrDeg / LOC_FS) * MAX_PX));
-    // GS needle moves DOWN when aircraft is ABOVE glideslope
-    const gsPx  = Math.max(-MAX_PX * 1.6, Math.min(MAX_PX * 1.6,
-        (gsErrDeg / GS_FS) * MAX_PX));
+    const locPx = Math.max(-MAX_PX * 1.6, Math.min(MAX_PX * 1.6, -(locErrDeg / LOC_FS) * MAX_PX));
+    const gsPx  = Math.max(-MAX_PX * 1.6, Math.min(MAX_PX * 1.6,  (gsErrDeg / GS_FS)  * MAX_PX));
 
-    // Dot scale (0 = centred, 2 = full scale)
     const locDots = Math.abs(locErrDeg) / LOC_FS * 2;
     const gsDots  = Math.abs(gsErrDeg)  / GS_FS  * 2;
 
-    // Colour: green ≤1 dot, yellow ≤2, red >2
     function needleColor(dots) {
         if (dots < 1.0) return '#00ffaa';
         if (dots < 2.0) return '#ffcc00';
@@ -2750,29 +2565,21 @@ function drawCDIInstrument(locErrDeg, gsErrDeg) {
     const locColor = needleColor(locDots);
     const gsColor  = needleColor(gsDots);
 
-    // Clip to instrument circle
     c.save();
     c.beginPath(); c.arc(cx, cy, W/2 - 5, 0, Math.PI*2); c.clip();
 
-    // ── Localizer needle (vertical bar) ──────────────
     c.strokeStyle = locColor; c.lineWidth = 5;
     c.shadowColor = locColor; c.shadowBlur  = 10;
-    c.beginPath();
-    c.moveTo(cx + locPx, 16); c.lineTo(cx + locPx, H - 16);
-    c.stroke();
+    c.beginPath(); c.moveTo(cx + locPx, 16); c.lineTo(cx + locPx, H - 16); c.stroke();
     c.shadowBlur = 0;
 
-    // ── Glideslope needle (horizontal bar) ───────────
     c.strokeStyle = gsColor; c.lineWidth = 5;
     c.shadowColor = gsColor; c.shadowBlur  = 10;
-    c.beginPath();
-    c.moveTo(16, cy + gsPx); c.lineTo(W - 16, cy + gsPx);
-    c.stroke();
+    c.beginPath(); c.moveTo(16, cy + gsPx); c.lineTo(W - 16, cy + gsPx); c.stroke();
     c.shadowBlur = 0;
 
     c.restore();
 
-    // ── Centre fixed target ring ─────────────────────
     c.strokeStyle = 'rgba(255,255,255,0.9)'; c.lineWidth = 2;
     c.beginPath(); c.arc(cx, cy, 10, 0, Math.PI * 2); c.stroke();
     c.beginPath();
@@ -2782,7 +2589,6 @@ function drawCDIInstrument(locErrDeg, gsErrDeg) {
     c.moveTo(cx, cy + 12); c.lineTo(cx, cy + 16);
     c.stroke();
 
-    // ── Labels ───────────────────────────────────────
     c.font = 'bold 10px Arial';
     c.textAlign = 'left'; c.textBaseline = 'middle';
     c.fillStyle = 'rgba(0,160,210,0.8)';
@@ -2791,28 +2597,17 @@ function drawCDIInstrument(locErrDeg, gsErrDeg) {
     c.fillText('G/S', cx + 6, 5);
 }
 
-// ── Bank angle arc indicator (separate small canvas) ─
 function drawBankIndicator(bankDeg) {
-    // W×H canvas: arc is a semicircle, needle starts from bottom-centre (cy)
     const W = 200, H = 44;
-    const cx = W / 2; // Horizontal centre of the arc pivot point
-    const cy = H - 4; // Vertical pivot — bottom of canvas
-    const R  = 60;    // Arc radius in pixels
-
-    const bc = ilsBankCtx; // Bank canvas 2D context
+    const cx = W / 2, cy = H - 4, R  = 60;
+    const bc = ilsBankCtx;
     bc.clearRect(0, 0, W, H);
 
-    // ── Arc track background ─────────────────────────
     bc.strokeStyle = 'rgba(0,80,120,0.4)'; bc.lineWidth = 2;
-    bc.beginPath();
-    bc.arc(cx, cy, R, Math.PI, 2 * Math.PI); // Top semicircle
-    bc.stroke();
+    bc.beginPath(); bc.arc(cx, cy, R, Math.PI, 2 * Math.PI); bc.stroke();
 
-    // ── Tick marks: 0° bank = straight up (top of arc), ±L/R move along arc
-    // Angle mapping: 0° bank → angle=Math.PI*1.5 (12 o'clock), negative bank = left, positive = right
-    // We use: needleAngle = Math.PI*1.5 + (bankDeg / 90) * (Math.PI/2)
     [-45, -30, -20, -10, 0, 10, 20, 30, 45].forEach(deg => {
-        const angle  = Math.PI * 1.5 + (deg / 90) * (Math.PI / 2); // Map bank → arc angle
+        const angle  = Math.PI * 1.5 + (deg / 90) * (Math.PI / 2);
         const isMain = deg % 30 === 0 || deg === 0;
         const innerR = R - (isMain ? 10 : 6);
         bc.strokeStyle = isMain ? 'rgba(0,160,210,0.85)' : 'rgba(0,100,150,0.55)';
@@ -2823,41 +2618,33 @@ function drawBankIndicator(bankDeg) {
         bc.stroke();
     });
 
-    // ── Bank needle ─────────────────────────────────
-    // 0° bank → needle points straight up; positive bank → needle tips right; negative → left
-    const clampedBank  = Math.max(-45, Math.min(45, bankDeg || 0)); // Clamp to ±45°
-    const needleAngle  = Math.PI * 1.5 + (clampedBank / 90) * (Math.PI / 2); // Arc angle for needle
-    const bankColor    = Math.abs(clampedBank) < 15 ? '#00ffaa'       // Green: wings-level
-                       : Math.abs(clampedBank) < 30 ? '#ffcc00'       // Yellow: moderate bank
-                       : '#ff4444';                                    // Red: steep bank
+    const clampedBank  = Math.max(-45, Math.min(45, bankDeg || 0));
+    const needleAngle  = Math.PI * 1.5 + (clampedBank / 90) * (Math.PI / 2);
+    const bankColor    = Math.abs(clampedBank) < 15 ? '#00ffaa'
+                       : Math.abs(clampedBank) < 30 ? '#ffcc00' : '#ff4444';
 
     bc.strokeStyle = bankColor; bc.lineWidth = 3;
     bc.shadowColor = bankColor; bc.shadowBlur = 8;
     bc.beginPath();
-    bc.moveTo(cx, cy); // Start at pivot point (bottom centre)
+    bc.moveTo(cx, cy);
     bc.lineTo(cx + Math.cos(needleAngle) * (R - 4), cy + Math.sin(needleAngle) * (R - 4));
     bc.stroke();
     bc.shadowBlur = 0;
 
-    // ── Pivot dot ────────────────────────────────────
     bc.beginPath(); bc.arc(cx, cy, 4, 0, Math.PI * 2);
     bc.fillStyle = 'rgba(255,255,255,0.9)'; bc.fill();
 
-    // ── Bank value text ──────────────────────────────
     bc.font = `bold ${ilsPrefs.fontBankValue}px Arial`;
     bc.textAlign = 'center'; bc.textBaseline = 'bottom';
     bc.fillStyle = bankColor;
-    // L = left bank (negative), R = right bank (positive)
     bc.fillText((clampedBank <= 0 ? 'L' : 'R') + Math.abs(clampedBank).toFixed(1) + '°', cx, H - 0);
 }
 
-// Bank indicator canvas
 const ilsBankCanvas = document.createElement('canvas');
 ilsBankCanvas.width  = 200;
 ilsBankCanvas.height = 44;
 const ilsBankCtx = ilsBankCanvas.getContext('2d');
 
-// ── Build / refresh the ILS HUD ───────────────────
 let _ilsHUDBuilt = false;
 
 function updateILSHUD(ilsData) {
@@ -2870,12 +2657,9 @@ function updateILSHUD(ilsData) {
     const locErrDeg = ilsData?.locErrDeg ?? 0;
     const gsErrDeg  = ilsData?.gsErrDeg  ?? 0;
 
-    // Draw CDI instrument
     drawCDIInstrument(locErrDeg, gsErrDeg);
-    // Draw bank indicator
     drawBankIndicator(ilsData?.bankDeg ?? 0);
 
-    // Localizer / GS deviation colours for text
     const locDots = Math.abs(locErrDeg) / 2.5 * 2;
     const gsDots  = Math.abs(gsErrDeg)  / 0.7 * 2;
     function dotColor(dots) { return dots < 1 ? 'rgba(0,255,170,0.95)' : dots < 2 ? 'rgba(255,204,0,0.95)' : 'rgba(255,68,68,0.95)'; }
@@ -2897,7 +2681,6 @@ function updateILSHUD(ilsData) {
         ? (ilsData.gsErrFt >= 0 ? '+' + ilsData.gsErrFt : ilsData.gsErrFt) + ' ft  ' + (ilsData.gsErrFt > 0 ? 'ABOVE' : ilsData.gsErrFt < 0 ? 'BELOW' : 'ON GS')
         : '—';
 
-    // Localizer deviation description
     const locDev = ilsData
         ? (Math.abs(locErrDeg) < 0.1 ? 'ON LOC' : (locErrDeg > 0 ? 'RIGHT' : 'LEFT') + ' ' + locDots.toFixed(1) + ' dots')
         : '—';
@@ -2910,7 +2693,6 @@ function updateILSHUD(ilsData) {
     box-shadow:0 4px 22px rgba(0,0,0,0.8), 0 0 16px rgba(0,120,200,0.12);
     font-family:${FONT_MONO}; min-width:230px;
 ">
-  <!-- Header -->
   <div style="padding:9px 14px 7px; border-bottom:1px solid ${t.hudSep};
     display:flex; align-items:center; gap:8px;">
     <span style="display:inline-block;width:10px;height:10px;border-radius:50%;
@@ -2923,12 +2705,8 @@ function updateILSHUD(ilsData) {
       font-family:${FONT_SANS}; transition:background .15s;
     ">✕ CLOSE</button>
   </div>
-
-  <!-- CDI instrument -->
   <div id="ilsCDIWrap" style="display:flex;justify-content:center;padding:10px 0 4px;
     border-bottom:1px solid ${t.hudSep};"></div>
-
-  <!-- LOC / GS deviation pills -->
   <div style="display:flex; gap:8px; padding:6px 14px; border-bottom:1px solid ${t.hudSep};">
     <div style="flex:1; background:rgba(0,20,40,0.7); border-radius:6px; padding:5px 8px; text-align:center;">
       <div style="color:${t.hudLabel};font-size:${ilsPrefs.fontPillLabel}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">LOCALIZER</div>
@@ -2939,8 +2717,6 @@ function updateILSHUD(ilsData) {
       <div style="color:${gsColor};font-size:${ilsPrefs.fontPillValue}px;font-weight:bold;">${gsErrFtStr}</div>
     </div>
   </div>
-
-  <!-- Data grid -->
   <div style="padding:8px 14px; display:grid; grid-template-columns:1fr 1fr; gap:6px 10px;
     border-bottom:1px solid ${t.hudSep};">
     <div>
@@ -2960,27 +2736,21 @@ function updateILSHUD(ilsData) {
       <div style="color:rgba(255,220,80,0.95);font-size:${ilsPrefs.fontValue}px;font-weight:bold">${dAngStr}</div>
     </div>
   </div>
-
-  <!-- Bank indicator -->
   <div style="padding:6px 0 0; border-bottom:1px solid ${t.hudSep};">
     <div style="color:${t.hudLabel};font-size:${ilsPrefs.fontLabel}px;letter-spacing:1px;text-transform:uppercase;text-align:center;margin-bottom:2px">BANK ANGLE</div>
     <div id="ilsBankWrap" style="display:flex;justify-content:center;padding:0 0 4px;"></div>
   </div>
-
-  <!-- GS info footer -->
   <div style="padding:5px 14px 7px; display:flex; align-items:center; justify-content:space-between;">
     <span style="color:${t.hudLabel};font-size:${ilsPrefs.fontFooter}px;">3° G/S  ·  Click runway to close ILS</span>
     <span style="color:${bankColor};font-size:${ilsPrefs.fontPillValue}px;font-weight:bold;">${bankStr}</span>
   </div>
 </div>`;
 
-    // Inject the canvases
     const cdiWrap  = document.getElementById('ilsCDIWrap');
     if (cdiWrap)  cdiWrap.appendChild(ilsCDICanvas);
     const bankWrap = document.getElementById('ilsBankWrap');
     if (bankWrap) bankWrap.appendChild(ilsBankCanvas);
 
-    // Close button
     const closeBtn = document.getElementById('ilsCloseBtn');
     if (closeBtn) {
         closeBtn.onmouseover = () => closeBtn.style.background = 'rgba(0,160,230,0.15)';
@@ -2993,21 +2763,16 @@ function updateILSHUD(ilsData) {
 // SECTION 13b — TCAS WARNING SYSTEM
 // ═══════════════════════════════════════════════════
 
-// ── TCAS state ───────────────────────────────────
-let _tcasActive       = false;   // True when a TCAS warning is currently firing
-let _tcasFlashTimer   = null;    // setInterval handle for the flash animation
-let _tcasAudioCooldown = 0;      // Timestamp: don't replay audio before this time
+let _tcasActive       = false;
+let _tcasFlashTimer   = null;
+let _tcasAudioCooldown = 0;
 
-// ── TCAS tuning — all configurable via settings menu sliders ─────────────
-// Values are stored in prefs and accessed as prefs.tcasLookaheadS etc.
-// Defaults live in _PREF_DEFAULTS above.
 function _tcasLookahead()  { return prefs.tcasLookaheadS     || 30;    }
 function _tcasAltBand()    { return prefs.tcasAltBandFt       || 200;   }
 function _tcasMinAlt()     { return prefs.tcasMinAltFt        || 200;   }
 function _tcasMargin()     { return prefs.tcasMarginM         || 300;   }
 function _tcasCooldown()   { return prefs.tcasAudioCooldownMs || 10000; }
 
-// ── TCAS overlay div ─────────────────────────────
 const tcasOverlay = document.createElement('div');
 tcasOverlay.id = 'radarTCAS';
 tcasOverlay.style.cssText = `
@@ -3051,8 +2816,6 @@ tcasTimer.style.cssText = `
 tcasTimer.textContent = '';
 tcasInner.appendChild(tcasTimer);
 
-
-// ── TCAS audio (lazy-loaded once) ────────────────
 let _tcasAudio = null;
 function _getTCASAudio() {
     if (!_tcasAudio) {
@@ -3063,9 +2826,9 @@ function _getTCASAudio() {
 }
 
 function _playTCASAudio() {
-    if (!prefs.tcasAudioEnabled) return;          // Audio disabled in settings
+    if (!prefs.tcasAudioEnabled) return;
     const now = Date.now();
-    if (now < _tcasAudioCooldown) return;         // Still within cooldown window
+    if (now < _tcasAudioCooldown) return;
     _tcasAudioCooldown = now + _tcasCooldown();
     try {
         const audio = _getTCASAudio();
@@ -3078,11 +2841,9 @@ function _startTCAS(callsign, etaSec) {
     const isNew = !_tcasActive;
     _tcasActive = true;
     tcasOverlay.style.display = 'flex';
-    // Update info fields every call (threat may have changed)
     tcasCallsign.textContent = callsign ? callsign.toUpperCase() : '';
     tcasTimer.textContent    = (etaSec != null && isFinite(etaSec))
-        ? 'COLLISION IN ~' + Math.round(etaSec) + 's'
-        : '';
+        ? 'COLLISION IN ~' + Math.round(etaSec) + 's' : '';
     if (isNew) {
         _playTCASAudio();
         let _flashOn = true;
@@ -3101,36 +2862,14 @@ function _stopTCAS() {
     _tcasActive = false;
     tcasOverlay.style.display = 'none';
     if (_tcasFlashTimer) { clearInterval(_tcasFlashTimer); _tcasFlashTimer = null; }
-    // Stop audio immediately if playing
     try { if (_tcasAudio && !_tcasAudio.paused) { _tcasAudio.pause(); _tcasAudio.currentTime = 0; } } catch(e) {}
 }
 
-// Store my TCAS projected path endpoint for radar canvas drawing each frame
 let _tcasMyEndX = 0, _tcasMyEndY = 0, _tcasHasPath = false;
 
-// ── TCAS: simultaneous-time intersection check ───────────────────────────
-//
-// The key insight: two aircraft are on a collision course only if they reach
-// the SAME POINT at the SAME TIME — not just if their paths happen to cross.
-//
-// Algorithm:
-//   s = parameter along MY segment (0 = now, 1 = 30 s from now)
-//   t = parameter along THEIR segment (0 = now, 1 = 30 s from now)
-//
-//   At time fraction s, I am at position P(s) = my_start + s * my_vector
-//   At time fraction t, they are at Q(t) = their_start + t * their_vector
-//
-//   We find the s,t pair that minimises |P(s) - Q(t)|.
-//   IF that minimum distance <= _tcasMargin() metres
-//   AND |s - t| <= tcasTimeTolPct/100  (both at same relative time)
-//   THEN it's a genuine collision course — alarm fires.
-//
-// This correctly rejects cases like: my path crosses their path at t=0.1
-// but they won't be there until t=0.7. Those aircraft are NOT on a collision course.
 function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic, myCallsign) {
     if (!prefs.tcasEnabled) { _stopTCAS(); _tcasHasPath = false; return; }
 
-    // Must be airborne
     let myAGL = myAltFt;
     try {
         const av = window.geofs?.animation?.values;
@@ -3138,18 +2877,15 @@ function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic, myCallsign
     } catch(e) {}
     if (myAGL < _tcasMinAlt()) { _stopTCAS(); _tcasHasPath = false; return; }
 
-    // Must be moving to have a meaningful vector
     const mySpeedMs = (mySpeedKts || 0) * 0.514444;
     if (mySpeedMs < 10) { _stopTCAS(); _tcasHasPath = false; return; }
 
-    // My lookahead vector in flat-earth metres (east=X, north=Y)
     const myHdgRad   = myHdg * Math.PI / 180;
     const myPathDist = mySpeedMs * _tcasLookahead();
-    _tcasMyEndX  = myPathDist * Math.sin(myHdgRad);   // east
-    _tcasMyEndY  = myPathDist * Math.cos(myHdgRad);   // north
+    _tcasMyEndX  = myPathDist * Math.sin(myHdgRad);
+    _tcasMyEndY  = myPathDist * Math.cos(myHdgRad);
     _tcasHasPath = true;
 
-    // Time tolerance: |s - t| must be within this fraction (e.g. 0.08 = ±8%)
     const timeTol = (prefs.tcasTimeTolPct || 8) / 100;
 
     let threat         = false;
@@ -3159,28 +2895,23 @@ function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic, myCallsign
     for (const ac of traffic) {
         if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) continue;
 
-        // Skip aircraft with the same callsign as me (own aircraft seen via API)
         const acCs = (ac.cs || ac.callsign || '').toLowerCase().trim();
         const myCs = (_cachedCallsign || myCallsign || '').toLowerCase().trim();
         if (acCs && myCs && myCs !== 'you' && acCs === myCs) continue;
 
-        // Skip Foo players if that filter is active
         if (prefs.hideFooPlayers) {
             if (acCs === 'foo' || acCs.startsWith('foo ') || acCs === 'foo_') continue;
         }
 
-        // Both must be airborne
         const acAltFt = isFinite(parseFloat(ac.al)) ? parseFloat(ac.al)
             : (ac.co.length >= 3 && isFinite(ac.co[2]) ? parseFloat(ac.co[2]) * 3.28084 : null);
         if (acAltFt === null || acAltFt < _tcasMinAlt()) continue;
         if (Math.abs(myAltFt - acAltFt) > _tcasAltBand()) continue;
 
-        // Apply altitude display filter if enabled
         if (prefs.altFilterEnabled) {
             if (acAltFt < prefs.altFilterMinFt || acAltFt > prefs.altFilterMaxFt) continue;
         }
 
-        // Traffic must have a known heading and be moving
         const acH = isFinite(parseFloat(ac.h)) ? parseFloat(ac.h) : null;
         if (acH === null) continue;
         const acS = isFinite(parseFloat(ac.s)) ? parseFloat(ac.s)
@@ -3188,10 +2919,8 @@ function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic, myCallsign
         const acSpeedMs = acS * 0.514444;
         if (acSpeedMs < 10) continue;
 
-        // Traffic position in my local tangent plane
         const [acOffX, acOffY] = latLonToMeters(myLat, myLon, ac.co[0], ac.co[1]);
 
-        // Their lookahead vector
         const acHdgRad   = acH * Math.PI / 180;
         const acPathDist = acSpeedMs * _tcasLookahead();
         const acVecX     = acPathDist * Math.sin(acHdgRad);
@@ -3224,7 +2953,7 @@ function checkTCAS(myLat, myLon, myAltFt, myHdg, mySpeedKts, traffic, myCallsign
         if (dist <= _tcasMargin() && Math.abs(s - t) <= timeTol) {
             threat         = true;
             threatCallsign = ac.cs || ac.callsign || ac.id || null;
-            threatETA      = s * _tcasLookahead(); // seconds until closest approach
+            threatETA      = s * _tcasLookahead();
             break;
         }
     }
@@ -3253,539 +2982,11 @@ function worldToCanvas(dx, dy, cx, cy, rotRad) {
 }
 
 // ═══════════════════════════════════════════════════
-// SECTION 14 — RAF DRAW LOOP
-// ═══════════════════════════════════════════════════
-
-let _rafActive   = true;
-let _lastHeavyTs = 0;
-
-function _rafTick(ts) {
-    if (!_rafActive) return;
-    const now = performance.now();
-    if (now - _lastHeavyTs >= DRAW_INTERVAL && !isDragging) {
-        _lastHeavyTs = now;
-        drawRadar();
-    }
-    requestAnimationFrame(_rafTick);
-}
-requestAnimationFrame(_rafTick);
-
-// ═══════════════════════════════════════════════════
-// SECTION 15 — AIRPORT / RUNWAY DRAWING
-// ═══════════════════════════════════════════════════
-
-let _airportCache_lastLat   = null;
-let _airportCache_lastLon   = null;
-let _airportCache_lastRange = null;
-
-function drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad) {
-    if (!settings.showAirports) { _lastRunwayPositions = []; return { runways: 0, airports: 0 }; }
-
-    // Rebuild runway screen-position list every frame for accurate click detection
-    _lastRunwayPositions = [];
-
-    const moved = _airportCache_lastLat === null
-        || Math.abs(playerLat - _airportCache_lastLat) * 111000 > 1
-        || Math.abs(playerLon - _airportCache_lastLon) * 111000 * Math.cos(playerLat * Math.PI/180) > 1
-        || radarRange !== _airportCache_lastRange;
-
-    if (moved) {
-        _airportCache_lastLat   = playerLat;
-        _airportCache_lastLon   = playerLon;
-        _airportCache_lastRange = radarRange;
-    }
-
-    let _cachedGroups = drawAirportsAndRunways._cachedGroups || null;
-
-    if (moved || !_cachedGroups) {
-        const groups = {};
-        const inRangeICAOs = new Set();
-        airportCache.forEach(ap => {
-            const [adx, ady] = latLonToMeters(playerLat, playerLon, ap.lat, ap.lon);
-            if (Math.hypot(adx, ady) <= radarRange * 1.3) inRangeICAOs.add(ap.icao);
-        });
-
-        runwayCache.forEach(rwy => {
-            if (!inRangeICAOs.has(rwy.airport)) return;
-            const [dx1, dy1] = latLonToMeters(playerLat, playerLon, rwy.lat1, rwy.lon1);
-            const [dx2, dy2] = latLonToMeters(playerLat, playerLon, rwy.lat2, rwy.lon2);
-            const cDist = Math.hypot((dx1+dx2)/2, (dy1+dy2)/2);
-            if (cDist > radarRange * 1.2) return;
-            const [x1, y1] = worldToCanvas(dx1, dy1, cx, cy, rotRad);
-            const [x2, y2] = worldToCanvas(dx2, dy2, cx, cy, rotRad);
-            if (Math.hypot(x1-cx, y1-cy) > radarSize/2 && Math.hypot(x2-cx, y2-cy) > radarSize/2) return;
-            const icao = rwy.airport || 'UNKN';
-            if (!groups[icao]) {
-                const info = airportCache.find(a => a.icao === icao);
-                groups[icao] = { runways: [], name: info?.name || icao, icao, dist: cDist };
-            }
-            if (cDist < groups[icao].dist) groups[icao].dist = cDist;
-            groups[icao].runways.push({
-                x1, y1, x2, y2,
-                isPlaceholder: !!rwy.isPlaceholder,
-                rwyData: { lat1: rwy.lat1, lon1: rwy.lon1, lat2: rwy.lat2, lon2: rwy.lon2, name: rwy.name, airport: rwy.airport, length: rwy.length },
-            });
-        });
-
-        Object.values(groups).forEach(g => {
-            if (!g.runways.length) return;
-            const pts  = g.runways.flatMap(r => [{x:r.x1,y:r.y1},{x:r.x2,y:r.y2}]);
-            const centX = pts.reduce((s,p) => s+p.x, 0) / pts.length;
-            const centY = pts.reduce((s,p) => s+p.y, 0) / pts.length;
-            const maxR  = Math.max(...pts.map(p => Math.hypot(p.x-centX, p.y-centY)));
-            g.centX = centX; g.centY = centY; g.circleR = Math.max(maxR + 8, 14);
-        });
-
-        _cachedGroups = groups;
-        drawAirportsAndRunways._cachedGroups = groups;
-    }
-
-    // Recompute screen positions for this frame (orientation / range might have changed)
-    // We need fresh x/y for accurate clicks, so re-project from rwyData
-    Object.values(_cachedGroups).forEach(g => {
-        g.runways.forEach(r => {
-            if (r.rwyData && !r.isPlaceholder) {
-                const [dx1,dy1] = latLonToMeters(playerLat, playerLon, r.rwyData.lat1, r.rwyData.lon1);
-                const [dx2,dy2] = latLonToMeters(playerLat, playerLon, r.rwyData.lat2, r.rwyData.lon2);
-                const [x1,y1] = worldToCanvas(dx1, dy1, cx, cy, rotRad);
-                const [x2,y2] = worldToCanvas(dx2, dy2, cx, cy, rotRad);
-                r.x1 = x1; r.y1 = y1; r.x2 = x2; r.y2 = y2;
-                _lastRunwayPositions.push({ x1, y1, x2, y2, rwyData: r.rwyData, airportICAO: g.icao });
-            }
-        });
-    });
-
-    let nearbyRunways = 0;
-    Object.values(_cachedGroups).forEach(g => {
-        if (!g.centX) return;
-        const name = g.dist < radarRange * 0.5
-            ? (g.name.length > 22 ? g.name.slice(0, 22) + '…' : g.name) : g.icao;
-        const allPlaceholder = g.runways.length > 0 && g.runways.every(r => r.isPlaceholder);
-
-        if (allPlaceholder) {
-            ctx.beginPath(); ctx.arc(g.centX, g.centY, 5, 0, Math.PI*2);
-            ctx.fillStyle = 'rgba(50,150,255,0.9)'; ctx.fill();
-            ctx.strokeStyle = 'rgba(150,210,255,0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
-        } else {
-            ctx.strokeStyle = 'rgba(50,150,255,0.8)'; ctx.lineWidth = 1.5;
-            ctx.beginPath(); ctx.arc(g.centX, g.centY, g.circleR, 0, Math.PI*2); ctx.stroke();
-
-            g.runways.forEach(r => {
-                if (r.isPlaceholder) return;
-                nearbyRunways++;
-                const isActiveILS = _ilsActive && _ilsRunway && _ilsRunway === r.rwyData;
-
-                // Highlight ILS-selected runway in cyan
-                ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(r.x2, r.y2);
-                ctx.strokeStyle = isActiveILS ? 'rgba(0,240,255,0.95)' : 'rgba(255,255,255,0.95)';
-                ctx.lineWidth   = isActiveILS ? 10 : 8;
-                ctx.stroke();
-
-                ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(r.x2, r.y2);
-                ctx.strokeStyle = isActiveILS ? 'rgba(0,180,255,0.5)' : 'rgba(160,160,160,0.35)';
-                ctx.lineWidth   = 1.5;
-                ctx.stroke();
-
-                // ILS approach beacon on active runway
-                if (isActiveILS) {
-                    ctx.strokeStyle = 'rgba(0,220,255,0.6)'; ctx.lineWidth = 1;
-                    ctx.setLineDash([4, 6]);
-                    // Extended centerline 5nm ahead of threshold end being approached
-                    ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(
-                        r.x1 + (r.x1 - r.x2) * 0.6, r.y1 + (r.y1 - r.y2) * 0.6);
-                    ctx.stroke();
-                    ctx.beginPath(); ctx.moveTo(r.x2, r.y2); ctx.lineTo(
-                        r.x2 + (r.x2 - r.x1) * 0.6, r.y2 + (r.y2 - r.y1) * 0.6);
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-                }
-            });
-        }
-
-        const labelAnchorY = allPlaceholder ? (g.centY - 10) : (g.centY - g.circleR - 5);
-        ctx.font = `bold ${UI.airportLabelFont}px ${FONT_CANVAS}`;
-        ctx.textAlign = 'center';
-        const tw = ctx.measureText(name).width;
-        ctx.fillStyle = 'rgba(0,18,50,0.78)';
-        if (ctx.roundRect) ctx.roundRect(g.centX-tw/2-4, labelAnchorY-12, tw+8, 13, 3);
-        else ctx.rect(g.centX-tw/2-4, labelAnchorY-12, tw+8, 13);
-        ctx.fill();
-        ctx.fillStyle = 'rgba(80,180,255,1)';
-        ctx.fillText(name, g.centX, labelAnchorY - 1);
-
-        // "ILS" badge on airport with active runway
-        if (_ilsActive && _ilsAirportICAO === g.icao) {
-            ctx.font = 'bold 9px Arial';
-            const badge = ' ILS ';
-            const bw = ctx.measureText(badge).width + 4;
-            ctx.fillStyle = 'rgba(0,180,255,0.9)';
-            ctx.fillRect(g.centX - bw/2, labelAnchorY - 26, bw, 12);
-            ctx.fillStyle = '#000'; ctx.textAlign = 'center';
-            ctx.fillText(badge, g.centX, labelAnchorY - 16);
-        }
-    });
-
-    return { runways: nearbyRunways, airports: Object.keys(_cachedGroups).length };
-}
-
-// ═══════════════════════════════════════════════════
-// SECTION 16 — PLAYER TRIANGLE
-// ═══════════════════════════════════════════════════
-
-function drawPlayerTriangle(cx, cy, playerHeading, isGamePaused) {
-    if (!settings.showPlayerTriangle) return;
-    const angleRad = (settings.orientMode === 'north') ? (playerHeading * Math.PI / 180) : 0;
-    const cos = Math.cos(angleRad), sin = Math.sin(angleRad);
-    ctx.setTransform(cos, sin, -sin, cos, cx, cy);
-    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.setLineDash([]);
-    ctx.beginPath();
-    ctx.moveTo(0, -UI.playerTriTip);
-    ctx.lineTo( UI.playerTriBase,  UI.playerTriBaseOff);
-    ctx.lineTo(-UI.playerTriBase,  UI.playerTriBaseOff);
-    ctx.closePath();
-    ctx.fillStyle   = isGamePaused ? 'rgba(150,150,150,0.9)' : 'rgba(0,255,0,0.95)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2; ctx.stroke();
-    ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI * 2);
-    ctx.fillStyle = 'white'; ctx.fill();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
-}
-
-// ═══════════════════════════════════════════════════
-// SECTION 17 — MAIN DRAW
-// ═══════════════════════════════════════════════════
-
-let _lastMenuInfoUpdate = 0;
-let _lastHudUpdate      = 0;
-let _lastNearestCs      = null;
-let _cachedCallsign     = null;
-
-function drawRadar() {
-    const t  = T();
-    const cx = radarSize / 2, cy = radarSize / 2;
-
-    ctx.clearRect(0, 0, radarSize, radarSize);
-    ctx.beginPath(); ctx.arc(cx, cy, radarSize/2, 0, Math.PI*2);
-    ctx.fillStyle = t.bg; ctx.fill();
-
-    let player = null, playerHeading = 0, playerCallsign = 'YOU';
-    let playerLat = 0, playerLon = 0, playerAlt = 0, playerAltFt = 0;
-
-    try {
-        player = geofs.aircraft?.instance;
-        if (player) {
-            // Use geofs.animation.values for accurate, pre-computed flight data (same approach as GeoFS Information Display script)
-            const av = geofs.animation?.values;
-            playerHeading  = av?.heading360 ?? player.animationValue?.heading360 ?? 0;       // Heading in degrees 0–360
-            playerCallsign = player.callsign || 'YOU';                                         // Aircraft callsign string
-            playerLat      = player.llaLocation[0];                                            // Latitude in decimal degrees
-            playerLon      = player.llaLocation[1];                                            // Longitude in decimal degrees
-            playerAlt      = player.llaLocation[2];                                            // Altitude in metres
-            // Prefer animation.values.altitude (ft) for accuracy; fall back to metres→feet conversion
-            playerAltFt    = av?.altitude ?? (playerAlt * 3.28084);                           // Altitude in feet
-            if (isFinite(playerLat) && isFinite(playerLon) && (playerLat !== 0 || playerLon !== 0)) {
-                _lastValidLat   = playerLat;   // Cache last valid position
-                _lastValidLon   = playerLon;
-                _lastValidAltFt = playerAltFt;
-
-                // ── Trail recording ──────────────────────────
-                if (prefs.showTrail) {
-                    const now = Date.now();
-                    // Add a point every ~500 ms (skip if too close in time)
-                    if (_trailPoints.length === 0 || now - _trailPoints[_trailPoints.length-1].time > 500) {
-                        _trailPoints.push({ lat: playerLat, lon: playerLon, time: now });
-                    }
-                    // Trim points older than trailLengthSec
-                    const cutoff = now - (prefs.trailLengthSec * 1000);
-                    while (_trailPoints.length > 0 && _trailPoints[0].time < cutoff) _trailPoints.shift();
-                    // Also enforce max point count
-                    while (_trailPoints.length > TRAIL_MAX_PTS) _trailPoints.shift();
-                } else {
-                    _trailPoints.length = 0; // Clear trail when disabled
-                }
-            }
-        }
-    } catch(e) {}
-
-    const hasPos = !!player || (_lastValidLat !== null);
-    if (!player && _lastValidLat !== null) {
-        playerLat   = _lastValidLat;
-        playerLon   = _lastValidLon;
-        playerAltFt = _lastValidAltFt;
-    }
-
-    const _now = Date.now();
-    if (_now - _lastMenuInfoUpdate > MENU_INFO_UPDATE_INTERVAL) {
-        _lastMenuInfoUpdate = _now;
-        _cachedCallsign = detectCallsign();
-        if (_cachedCallsign) window.playerCallsign = _cachedCallsign;
-    }
-    const displayCallsign = _cachedCallsign || playerCallsign;
-    updateMenuInfoCallsign(displayCallsign, hasPos ? playerLat : null, hasPos ? playerLon : null);
-
-    const myData = hasPos ? { lat: playerLat, lon: playerLon, altFt: playerAltFt } : null;
-    const rotRad = settings.orientMode === 'track' ? (playerHeading * Math.PI / 180) : 0;
-
-    // ── Clip to circle ────────────────────────────
-    ctx.save();
-    ctx.beginPath(); ctx.arc(cx, cy, radarSize/2, 0, Math.PI*2); ctx.clip();
-
-    // ── Grid lines ────────────────────────────────
-    ctx.strokeStyle = t.grid; ctx.lineWidth = UI.gridLineW;
-    ctx.beginPath();
-    ctx.moveTo(cx, 0); ctx.lineTo(cx, radarSize);
-    ctx.moveTo(0, cy); ctx.lineTo(radarSize, cy);
-    ctx.stroke();
-
-    // ── Range rings ───────────────────────────────
-    if (settings.showRings) {
-        for (let i = 1; i <= 3; i++) {
-            const rr = (radarSize / 2) * (i / 3);
-            ctx.strokeStyle = t.ring; ctx.lineWidth = UI.ringLineW;
-            ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI*2); ctx.stroke();
-            if (settings.showRingLabels) {
-                const dist = radarRange * (i / 3);
-                const lbl  = dist >= 1000 ? (dist/1000).toFixed(dist%1000===0?0:1)+' km' : Math.round(dist)+' m';
-                ctx.font = `bold ${UI.ringLabelFont}px ${FONT_CANVAS}`;
-                const tw = ctx.measureText(lbl).width;
-                const lx = cx + 8, ly = cy - rr + 10;
-                ctx.fillStyle = 'rgba(0,0,0,0.65)';
-                ctx.fillRect(lx - 4, ly - 12, tw + 8, 17);
-                ctx.fillStyle = t.ringLabel; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-                ctx.fillText(lbl, lx, ly - 2);
-            }
-        }
-    }
-
-    // ── Compass ───────────────────────────────────
-    {
-        const dirs  = ['N','E','S','W'];
-        const edgeR = radarSize/2 - 16;
-        ctx.font = `bold ${UI.compassFont}px ${FONT_CANVAS}`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        dirs.forEach((d, i) => {
-            const geoBearing  = i * 90;
-            const screenAngle = settings.orientMode === 'track'
-                ? (geoBearing - playerHeading) * Math.PI / 180
-                : geoBearing * Math.PI / 180;
-            const px = cx + Math.sin(screenAngle) * edgeR;
-            const py = cy - Math.cos(screenAngle) * edgeR;
-            ctx.fillStyle = d === 'N' ? 'rgba(255,80,80,0.95)' : t.compass;
-            ctx.fillText(d, px, py);
-        });
-        if (settings.orientMode === 'track') {
-            ctx.font = `bold ${UI.compassHdgFont}px ${FONT_CANVAS}`;
-            ctx.fillStyle = 'rgba(180,180,180,0.55)';
-            ctx.fillText(`HDG ${Math.round(playerHeading).toString().padStart(3,'0')}°`, cx, 30);
-        }
-    }
-
-    // ── Airports & runways ────────────────────────
-    if (!isGamePaused && hasPos) {
-        drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad);
-    }
-
-    // ── Own-aircraft trail ────────────────────────
-    if (prefs.showTrail && hasPos && _trailPoints.length > 1) {
-        const now = Date.now();
-        ctx.save();
-        for (let i = 1; i < _trailPoints.length; i++) {
-            const pt  = _trailPoints[i];
-            const ptP = _trailPoints[i - 1];
-            // Age fraction 0 (oldest) → 1 (newest) for opacity fade
-            const ageFrac = (pt.time - _trailPoints[0].time) /
-                            Math.max(1, _trailPoints[_trailPoints.length-1].time - _trailPoints[0].time);
-            const alpha = 0.15 + ageFrac * 0.65; // fade from dim to bright
-            const [dx1, dy1] = latLonToMeters(playerLat, playerLon, ptP.lat, ptP.lon);
-            const [dx2, dy2] = latLonToMeters(playerLat, playerLon, pt.lat,  pt.lon);
-            const [sx1, sy1] = worldToCanvas(dx1, dy1, cx, cy, rotRad);
-            const [sx2, sy2] = worldToCanvas(dx2, dy2, cx, cy, rotRad);
-            ctx.strokeStyle = T().trailColor(alpha); // Use theme trail colour
-            ctx.lineWidth   = prefs.trailWidth || 2;  // Trail thickness from prefs
-            ctx.beginPath();
-            ctx.moveTo(sx1, sy1);
-            ctx.lineTo(sx2, sy2);
-            ctx.stroke();
-        }
-        ctx.restore();
-    }
-
-    // ── Other aircraft blips ──────────────────────
-    lastBlipPositions = [];
-    let nearestAc = null, nearestMeters = Infinity;
-
-    if (settings.showTraffic && !isGamePaused && aircraftListCache.length > 0 && hasPos) {
-        const myCs = _cachedCallsign || playerCallsign;
-        aircraftListCache.forEach(ac => {
-            if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
-            if (ac.cs && myCs && myCs !== 'YOU' && ac.cs.toLowerCase() === myCs.toLowerCase()) return;
-
-            // ── Hide players named "Foo" ──────────────
-            if (prefs.hideFooPlayers && ac.cs && (ac.cs === 'Foo' || ac.cs.toLowerCase() === 'foo')) return;
-
-            // ── Hide players on the ground ────────────
-            // A player is considered "on ground" if their AGL is very low (< 30 ft)
-            if (prefs.hideGroundPlayers) {
-                const acAltFt = isFinite(parseFloat(ac.al)) ? parseFloat(ac.al)
-                    : (ac.co.length >= 3 && isFinite(parseFloat(ac.co[2])) ? parseFloat(ac.co[2]) * 3.28084 : null);
-                if (acAltFt !== null && acAltFt < 200) return;
-            }
-
-            // ── Altitude filter ────────────────────────
-            if (prefs.altFilterEnabled) {
-                const acAltFt = isFinite(parseFloat(ac.al)) ? parseFloat(ac.al)
-                    : (ac.co.length >= 3 && isFinite(parseFloat(ac.co[2])) ? parseFloat(ac.co[2]) * 3.28084 : null);
-                if (acAltFt !== null && (acAltFt < prefs.altFilterMinFt || acAltFt > prefs.altFilterMaxFt)) return;
-            }
-            const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
-            const distM    = Math.hypot(dx, dy);
-            if (distM < nearestMeters) { nearestMeters = distM; nearestAc = ac; }
-            if (distM > radarRange) return;
-            ctx.save();
-            try {
-                if (_trackedId && settings.isolateTracked && ac.id !== _trackedId) { ctx.restore(); return; }
-                const [rx, ry] = worldToCanvas(dx, dy, cx, cy, rotRad);
-                if (Math.hypot(rx-cx, ry-cy) > radarSize/2) { ctx.restore(); return; }
-                lastBlipPositions.push({ x:rx, y:ry, ac, distance:distM, myData });
-                const isTrackedBlip = !!_trackedId && ac.id === _trackedId;
-                ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.setLineDash([]);
-                const acH  = parseFloat(ac.h);
-                const _apiSpd  = parseFloat(ac.s);
-                const _compSpd = typeof ac._computedSpd === 'number' ? ac._computedSpd : NaN;
-                const acS = isFinite(_apiSpd) ? _apiSpd : (isFinite(_compSpd) ? _compSpd : NaN);
-                if (settings.showVectors && isFinite(acH) && isFinite(acS)) {
-                    const speedMs = acS * 0.514444;
-                    const vecLen  = Math.min((speedMs * 30) / radarRange * (radarSize / 2), radarSize/2);
-                    const hRad    = (acH * Math.PI / 180) - rotRad;
-                    const vx = rx + Math.sin(hRad) * vecLen, vy = ry - Math.cos(hRad) * vecLen;
-                    ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(vx, vy);
-                    ctx.strokeStyle = T().vector; ctx.lineWidth = UI.vectorLineW;
-                    ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
-                }
-                const blipColor  = isTrackedBlip ? 'rgba(255,220,60,1)' : T().blipFill;
-                const blipStroke = isTrackedBlip ? 'rgba(255,240,120,0.9)' : 'rgba(255,255,255,0.7)';
-                if (isTrackedBlip) {
-                    ctx.beginPath();
-                    ctx.arc(rx, ry, (settings.showBlipTriangle && isFinite(acH) ? UI.blipTriTip : UI.blipDotR) + 7, 0, Math.PI*2);
-                    ctx.strokeStyle = 'rgba(255,220,60,0.4)'; ctx.lineWidth = 2.5; ctx.stroke();
-                }
-                if (settings.showBlipTriangle && isFinite(acH)) {
-                    const angle = (acH * Math.PI / 180) - rotRad;
-                    ctx.save(); ctx.translate(rx, ry); ctx.rotate(angle);
-                    ctx.beginPath(); ctx.moveTo(0,-UI.blipTriTip); ctx.lineTo(UI.blipTriBase,UI.blipTriTip*0.55); ctx.lineTo(-UI.blipTriBase,UI.blipTriTip*0.55); ctx.closePath();
-                    ctx.fillStyle = blipColor; ctx.fill();
-                    ctx.strokeStyle = blipStroke; ctx.lineWidth = isTrackedBlip ? 2 : 1.5; ctx.stroke();
-                    ctx.restore();
-                } else {
-                    const blipR = isTrackedBlip ? UI.blipDotRActive : UI.blipDotR;
-                    ctx.fillStyle = blipColor; ctx.beginPath(); ctx.arc(rx, ry, blipR, 0, Math.PI*2); ctx.fill();
-                    ctx.strokeStyle = blipStroke; ctx.lineWidth = isTrackedBlip ? 2 : 1; ctx.stroke();
-                }
-                const blipBottom = settings.showBlipTriangle && isFinite(acH) ? ry+UI.blipTriTip+4 : ry+(isTrackedBlip?UI.blipDotRActive:UI.blipDotR)+4;
-                let labelY = blipBottom;
-                ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-                ctx.font = `bold ${UI.blipLabelFont}px ${FONT_CANVAS}`;
-                function drawTag(text, color, yOff) {
-                    const tw = ctx.measureText(text).width, padX = UI.blipLabelPadX, rowH = UI.blipLabelRowH;
-                    ctx.fillStyle = 'rgba(0,0,0,0.72)';
-                    ctx.fillRect(rx-tw/2-padX, yOff, tw+padX*2, rowH-1);
-                    ctx.fillStyle = color; ctx.fillText(text, rx, yOff+2);
-                    return yOff + rowH;
-                }
-                if (settings.showCallsign && ac.cs) labelY = drawTag(ac.cs.substring(0,12), T().blipLabel, labelY);
-                const rawAlt = isFinite(parseFloat(ac.al)) ? parseFloat(ac.al) : (ac.co.length>=3 && isFinite(parseFloat(ac.co[2])) ? parseFloat(ac.co[2])*3.28084 : null);
-                const altFmt = rawAlt !== null ? fmtAlt(rawAlt) : null;
-                if (settings.showAltitude && altFmt !== null) labelY = drawTag(altFmt, T().blipAlt, labelY);
-                const spdFmt = isFinite(acS) ? fmtSpd(acS) : null;
-                if (settings.showSpeed && spdFmt !== null) labelY = drawTag(spdFmt, T().blipSpeed, labelY);
-                if (settings.showBlipDist) labelY = drawTag(fmtDistMetric(distM), T().blipLabel, labelY);
-            } catch(e) {
-            } finally { ctx.restore(); }
-        });
-    }
-
-    ctx.restore(); // end circle clip
-
-    // ── TCAS collision check ───────────────────────
-    if (hasPos && !isGamePaused && settings.showTraffic) {
-        let mySpeedKts = 0;
-        try {
-            const av = geofs.animation?.values;
-            mySpeedKts = av?.groundSpeed ?? av?.kias ?? 0;
-        } catch(e) {}
-        checkTCAS(playerLat, playerLon, playerAltFt, playerHeading, mySpeedKts, aircraftListCache, _cachedCallsign || playerCallsign);
-    } else {
-        _stopTCAS();
-    }
-
-    // ── Player callsign tag ───────────────────────
-    let _playerTagBottomY = cy + UI.playerTriBaseOff + UI.playerTriTip + 13;
-    if (settings.showMyCallsign && displayCallsign) {
-        const lbl = displayCallsign.substring(0, 12);
-        ctx.font = `bold ${UI.playerCsFont}px ${FONT_CANVAS}`;
-        const tw = ctx.measureText(lbl).width;
-        const ty = _playerTagBottomY;
-        ctx.fillStyle   = isGamePaused ? 'rgba(80,80,80,0.85)' : 'rgba(0,80,0,0.85)';
-        ctx.strokeStyle = T().playerLabel; ctx.lineWidth = 1;
-        ctx.fillRect(cx-tw/2-7, ty-11, tw+14, 22);
-        ctx.strokeRect(cx-tw/2-7, ty-11, tw+14, 22);
-        ctx.fillStyle = T().playerLabel;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(lbl, cx, ty);
-    }
-
-    // ── Paused overlay ────────────────────────────
-    if (isGamePaused) {
-        ctx.fillStyle = T().pauseText;
-        ctx.font = `bold ${UI.pausedFont}px ${FONT_CANVAS}`;
-        ctx.textAlign = 'center';
-        ctx.fillText('PAUSED', cx, radarSize - 30);
-    }
-
-    // ── Player triangle — always on top ───────────
-    drawPlayerTriangle(cx, cy, playerHeading, isGamePaused);
-
-    // ── TCAS projected path line — starts at nose of player triangle ─────
-    // Line = nose tip → nose tip + (speed × TCAS_LOOKAHEAD_S) metres along heading.
-    if (_tcasHasPath && prefs.tcasEnabled && hasPos && !isGamePaused) {
-        const scale    = (radarSize / 2) / radarRange; // canvas px per metre
-        const isNorthUp = settings.orientMode === 'north';
-        const fwdAngle  = isNorthUp ? (playerHeading * Math.PI / 180) : 0;
-        const cosFwd = Math.cos(fwdAngle), sinFwd = Math.sin(fwdAngle);
-
-        // Triangle nose tip in canvas coords (always UI.playerTriTip px forward from centre)
-        const tipX = cx + sinFwd * UI.playerTriTip;
-        const tipY = cy - cosFwd * UI.playerTriTip;
-
-        // Convert path metres (east/north) → canvas pixels using the blip-loop rotation
-        const cosR = Math.cos(-rotRad), sinR = Math.sin(-rotRad);
-        // Rotate east/north into screen-right / screen-up
-        const scrRight =  _tcasMyEndX * cosR + _tcasMyEndY * sinR;
-        const scrUp    = -_tcasMyEndX * sinR + _tcasMyEndY * cosR;
-        // End point: centre + rotated path, no extra tip offset (tip is already baked into tipX/Y start)
-        const ex = cx + scrRight * scale;
-        const ey = cy - scrUp   * scale;
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(tipX, tipY);
-        ctx.lineTo(ex, ey);
-        ctx.setLineDash([7, 5]);
-        ctx.lineWidth   = 1.5;
-        ctx.strokeStyle = _tcasActive
-            ? 'rgba(255,60,60,0.70)'
-            : 'rgba(255,190,0,0.32)';
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.restore();
-    }
-
-// ═══════════════════════════════════════════════════
 // SECTION 18 — CHASE / ESCORT AUTOPILOT SYSTEM
 // ═══════════════════════════════════════════════════
+// ALL of this is TOP-LEVEL — NOT inside drawRadar().
+// _apEngaged is declared in Section 3 above.
 
-// ── PID constants ────────────────────────────────
 const CHASE_PID_KP        =  8.0;
 const CHASE_PID_KI        =  0.05;
 const CHASE_PID_KD        =  3.0;
@@ -3800,11 +3001,7 @@ const AP_HDG_THRESH       = 1;
 const AP_SPD_THRESH       = 5;
 const AP_ALT_THRESH       = 50;
 
-// ── Engagement state ─────────────────────────────
-let _apEngaged = false;
-
-// ── Autopilot wrappers ───────────────────────────
-
+// Engage AP once. No-op if already on.
 function _apEnable() {
     if (_apEngaged) return;
     try {
@@ -3816,6 +3013,7 @@ function _apEnable() {
     } catch(e) {}
 }
 
+// Disengage AP and clear flag.
 function _apDisable() {
     if (!_apEngaged) return;
     try {
@@ -3903,8 +3101,6 @@ function _apCurrentSpeed() {
     } catch(e) { return 200; }
 }
 
-// ── PID step helpers ─────────────────────────────
-
 function _pidStep(pid, error, dt) {
     pid.integral += error * dt;
     pid.integral  = Math.max(-200, Math.min(200, pid.integral));
@@ -3920,8 +3116,6 @@ function _hdgPidStep(pid, error, dt) {
     return Math.max(-CHASE_HDG_MAX_CORR, Math.min(CHASE_HDG_MAX_CORR, CHASE_HDG_KP * error));
 }
 
-// ── Geometry helper ──────────────────────────────
-
 function _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdgDeg) {
     const [vEast, vNorth] = latLonToMeters(trackedLat, trackedLon, myLat, myLon);
     const θ = trackedHdgDeg * Math.PI / 180;
@@ -3929,8 +3123,6 @@ function _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdgDeg) 
     const lateralM =  vEast * Math.cos(θ) - vNorth * Math.sin(θ);
     return { forwardM, lateralM };
 }
-
-// ── Main chase/escort tick ───────────────────────
 
 function _tickChaseEscort(myLat, myLon, myData) {
     if (!_chaseActive || !_trackedAc || !_trackedAc.co) return;
@@ -3950,11 +3142,10 @@ function _tickChaseEscort(myLat, myLon, myData) {
     const bearingDeg  = calcBearing(myLat, myLon, trackedLat, trackedLon);
     const escortDistM = _escortDistNm * 1852;
 
-    // Ensure AP is on — no-op if already engaged
+    // Engage AP once — subsequent calls are no-ops
     _apEnable();
 
     if (_chasePhase === 'chase') {
-        // ── Phase 1: Chase ───────────────────────────────────────────
         _apSetHeading(bearingDeg);
         if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
@@ -3981,7 +3172,6 @@ function _tickChaseEscort(myLat, myLon, myData) {
         }
 
     } else {
-        // ── Phase 2: Escort ──────────────────────────────────────────
         if (_escortMode === null) {
             _apSetHeading(trackedHdg);
             if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
@@ -3996,7 +3186,6 @@ function _tickChaseEscort(myLat, myLon, myData) {
             myLat, myLon, trackedLat, trackedLon, trackedHdg);
 
         if (_escortMode === 'left' || _escortMode === 'right') {
-            // ── Parallel formation ───────────────────────────────────
             const targetLateral = (_escortMode === 'left') ? -escortDistM : +escortDistM;
             const lateralErr    = (lateralM - targetLateral) / 1852;
             const hdgCorr       = _hdgPidStep(_headingPid, lateralErr, dt);
@@ -4012,7 +3201,6 @@ function _tickChaseEscort(myLat, myLon, myData) {
                 Math.min(CHASE_MAX_SPEED_KT, trackedSpd + spdAdj)));
 
         } else if (_escortMode === 'forward' || _escortMode === 'back') {
-            // ── Collinear formation ──────────────────────────────────
             const targetForward = (_escortMode === 'forward') ? +escortDistM : -escortDistM;
             const forwardErrNm  = (forwardM - targetForward) / 1852;
             const pidOut        = _pidStep(_chasePid, -forwardErrNm, dt);
@@ -4030,14 +3218,548 @@ function _tickChaseEscort(myLat, myLon, myData) {
 }
 
 // ═══════════════════════════════════════════════════
-// SECTION 19 — REPOSITION INTERVAL
+// SECTION 14 — RAF DRAW LOOP
+// ═══════════════════════════════════════════════════
+
+let _rafActive   = true;
+let _lastHeavyTs = 0;
+
+function _rafTick(ts) {
+    if (!_rafActive) return;
+    const now = performance.now();
+    if (now - _lastHeavyTs >= DRAW_INTERVAL && !isDragging) {
+        _lastHeavyTs = now;
+        drawRadar();
+    }
+    requestAnimationFrame(_rafTick);
+}
+requestAnimationFrame(_rafTick);
+
+// ═══════════════════════════════════════════════════
+// SECTION 15 — AIRPORT / RUNWAY DRAWING
+// ═══════════════════════════════════════════════════
+
+let _airportCache_lastLat   = null;
+let _airportCache_lastLon   = null;
+let _airportCache_lastRange = null;
+
+function drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad) {
+    if (!settings.showAirports) { _lastRunwayPositions = []; return { runways: 0, airports: 0 }; }
+
+    _lastRunwayPositions = [];
+
+    const moved = _airportCache_lastLat === null
+        || Math.abs(playerLat - _airportCache_lastLat) * 111000 > 1
+        || Math.abs(playerLon - _airportCache_lastLon) * 111000 * Math.cos(playerLat * Math.PI/180) > 1
+        || radarRange !== _airportCache_lastRange;
+
+    if (moved) {
+        _airportCache_lastLat   = playerLat;
+        _airportCache_lastLon   = playerLon;
+        _airportCache_lastRange = radarRange;
+    }
+
+    let _cachedGroups = drawAirportsAndRunways._cachedGroups || null;
+
+    if (moved || !_cachedGroups) {
+        const groups = {};
+        const inRangeICAOs = new Set();
+        airportCache.forEach(ap => {
+            const [adx, ady] = latLonToMeters(playerLat, playerLon, ap.lat, ap.lon);
+            if (Math.hypot(adx, ady) <= radarRange * 1.3) inRangeICAOs.add(ap.icao);
+        });
+
+        runwayCache.forEach(rwy => {
+            if (!inRangeICAOs.has(rwy.airport)) return;
+            const [dx1, dy1] = latLonToMeters(playerLat, playerLon, rwy.lat1, rwy.lon1);
+            const [dx2, dy2] = latLonToMeters(playerLat, playerLon, rwy.lat2, rwy.lon2);
+            const cDist = Math.hypot((dx1+dx2)/2, (dy1+dy2)/2);
+            if (cDist > radarRange * 1.2) return;
+            const [x1, y1] = worldToCanvas(dx1, dy1, cx, cy, rotRad);
+            const [x2, y2] = worldToCanvas(dx2, dy2, cx, cy, rotRad);
+            if (Math.hypot(x1-cx, y1-cy) > radarSize/2 && Math.hypot(x2-cx, y2-cy) > radarSize/2) return;
+            const icao = rwy.airport || 'UNKN';
+            if (!groups[icao]) {
+                const info = airportCache.find(a => a.icao === icao);
+                groups[icao] = { runways: [], name: info?.name || icao, icao, dist: cDist };
+            }
+            if (cDist < groups[icao].dist) groups[icao].dist = cDist;
+            groups[icao].runways.push({
+                x1, y1, x2, y2,
+                isPlaceholder: !!rwy.isPlaceholder,
+                rwyData: { lat1: rwy.lat1, lon1: rwy.lon1, lat2: rwy.lat2, lon2: rwy.lon2, name: rwy.name, airport: rwy.airport, length: rwy.length },
+            });
+        });
+
+        Object.values(groups).forEach(g => {
+            if (!g.runways.length) return;
+            const pts  = g.runways.flatMap(r => [{x:r.x1,y:r.y1},{x:r.x2,y:r.y2}]);
+            const centX = pts.reduce((s,p) => s+p.x, 0) / pts.length;
+            const centY = pts.reduce((s,p) => s+p.y, 0) / pts.length;
+            const maxR  = Math.max(...pts.map(p => Math.hypot(p.x-centX, p.y-centY)));
+            g.centX = centX; g.centY = centY; g.circleR = Math.max(maxR + 8, 14);
+        });
+
+        _cachedGroups = groups;
+        drawAirportsAndRunways._cachedGroups = groups;
+    }
+
+    Object.values(_cachedGroups).forEach(g => {
+        g.runways.forEach(r => {
+            if (r.rwyData && !r.isPlaceholder) {
+                const [dx1,dy1] = latLonToMeters(playerLat, playerLon, r.rwyData.lat1, r.rwyData.lon1);
+                const [dx2,dy2] = latLonToMeters(playerLat, playerLon, r.rwyData.lat2, r.rwyData.lon2);
+                const [x1,y1] = worldToCanvas(dx1, dy1, cx, cy, rotRad);
+                const [x2,y2] = worldToCanvas(dx2, dy2, cx, cy, rotRad);
+                r.x1 = x1; r.y1 = y1; r.x2 = x2; r.y2 = y2;
+                _lastRunwayPositions.push({ x1, y1, x2, y2, rwyData: r.rwyData, airportICAO: g.icao });
+            }
+        });
+    });
+
+    let nearbyRunways = 0;
+    Object.values(_cachedGroups).forEach(g => {
+        if (!g.centX) return;
+        const name = g.dist < radarRange * 0.5
+            ? (g.name.length > 22 ? g.name.slice(0, 22) + '…' : g.name) : g.icao;
+        const allPlaceholder = g.runways.length > 0 && g.runways.every(r => r.isPlaceholder);
+
+        if (allPlaceholder) {
+            ctx.beginPath(); ctx.arc(g.centX, g.centY, 5, 0, Math.PI*2);
+            ctx.fillStyle = 'rgba(50,150,255,0.9)'; ctx.fill();
+            ctx.strokeStyle = 'rgba(150,210,255,0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
+        } else {
+            ctx.strokeStyle = 'rgba(50,150,255,0.8)'; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.arc(g.centX, g.centY, g.circleR, 0, Math.PI*2); ctx.stroke();
+
+            g.runways.forEach(r => {
+                if (r.isPlaceholder) return;
+                nearbyRunways++;
+                const isActiveILS = _ilsActive && _ilsRunway && _ilsRunway === r.rwyData;
+
+                ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(r.x2, r.y2);
+                ctx.strokeStyle = isActiveILS ? 'rgba(0,240,255,0.95)' : 'rgba(255,255,255,0.95)';
+                ctx.lineWidth   = isActiveILS ? 10 : 8;
+                ctx.stroke();
+
+                ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(r.x2, r.y2);
+                ctx.strokeStyle = isActiveILS ? 'rgba(0,180,255,0.5)' : 'rgba(160,160,160,0.35)';
+                ctx.lineWidth   = 1.5;
+                ctx.stroke();
+
+                if (isActiveILS) {
+                    ctx.strokeStyle = 'rgba(0,220,255,0.6)'; ctx.lineWidth = 1;
+                    ctx.setLineDash([4, 6]);
+                    ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(
+                        r.x1 + (r.x1 - r.x2) * 0.6, r.y1 + (r.y1 - r.y2) * 0.6);
+                    ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(r.x2, r.y2); ctx.lineTo(
+                        r.x2 + (r.x2 - r.x1) * 0.6, r.y2 + (r.y2 - r.y1) * 0.6);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            });
+        }
+
+        const labelAnchorY = allPlaceholder ? (g.centY - 10) : (g.centY - g.circleR - 5);
+        ctx.font = `bold ${UI.airportLabelFont}px ${FONT_CANVAS}`;
+        ctx.textAlign = 'center';
+        const tw = ctx.measureText(name).width;
+        ctx.fillStyle = 'rgba(0,18,50,0.78)';
+        if (ctx.roundRect) ctx.roundRect(g.centX-tw/2-4, labelAnchorY-12, tw+8, 13, 3);
+        else ctx.rect(g.centX-tw/2-4, labelAnchorY-12, tw+8, 13);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(80,180,255,1)';
+        ctx.fillText(name, g.centX, labelAnchorY - 1);
+
+        if (_ilsActive && _ilsAirportICAO === g.icao) {
+            ctx.font = 'bold 9px Arial';
+            const badge = ' ILS ';
+            const bw = ctx.measureText(badge).width + 4;
+            ctx.fillStyle = 'rgba(0,180,255,0.9)';
+            ctx.fillRect(g.centX - bw/2, labelAnchorY - 26, bw, 12);
+            ctx.fillStyle = '#000'; ctx.textAlign = 'center';
+            ctx.fillText(badge, g.centX, labelAnchorY - 16);
+        }
+    });
+
+    return { runways: nearbyRunways, airports: Object.keys(_cachedGroups).length };
+}
+
+// ═══════════════════════════════════════════════════
+// SECTION 16 — PLAYER TRIANGLE
+// ═══════════════════════════════════════════════════
+
+function drawPlayerTriangle(cx, cy, playerHeading, isGamePaused) {
+    if (!settings.showPlayerTriangle) return;
+    const angleRad = (settings.orientMode === 'north') ? (playerHeading * Math.PI / 180) : 0;
+    const cos = Math.cos(angleRad), sin = Math.sin(angleRad);
+    ctx.setTransform(cos, sin, -sin, cos, cx, cy);
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(0, -UI.playerTriTip);
+    ctx.lineTo( UI.playerTriBase,  UI.playerTriBaseOff);
+    ctx.lineTo(-UI.playerTriBase,  UI.playerTriBaseOff);
+    ctx.closePath();
+    ctx.fillStyle   = isGamePaused ? 'rgba(150,150,150,0.9)' : 'rgba(0,255,0,0.95)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'white'; ctx.fill();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+}
+
+// ═══════════════════════════════════════════════════
+// SECTION 17 — MAIN DRAW
+// ═══════════════════════════════════════════════════
+
+let _lastMenuInfoUpdate = 0;
+let _lastHudUpdate      = 0;
+let _lastNearestCs      = null;
+let _cachedCallsign     = null;
+
+function drawRadar() {
+    const t  = T();
+    const cx = radarSize / 2, cy = radarSize / 2;
+
+    ctx.clearRect(0, 0, radarSize, radarSize);
+    ctx.beginPath(); ctx.arc(cx, cy, radarSize/2, 0, Math.PI*2);
+    ctx.fillStyle = t.bg; ctx.fill();
+
+    let player = null, playerHeading = 0, playerCallsign = 'YOU';
+    let playerLat = 0, playerLon = 0, playerAlt = 0, playerAltFt = 0;
+
+    try {
+        player = geofs.aircraft?.instance;
+        if (player) {
+            const av = geofs.animation?.values;
+            playerHeading  = av?.heading360 ?? player.animationValue?.heading360 ?? 0;
+            playerCallsign = player.callsign || 'YOU';
+            playerLat      = player.llaLocation[0];
+            playerLon      = player.llaLocation[1];
+            playerAlt      = player.llaLocation[2];
+            playerAltFt    = av?.altitude ?? (playerAlt * 3.28084);
+            if (isFinite(playerLat) && isFinite(playerLon) && (playerLat !== 0 || playerLon !== 0)) {
+                _lastValidLat   = playerLat;
+                _lastValidLon   = playerLon;
+                _lastValidAltFt = playerAltFt;
+
+                if (prefs.showTrail) {
+                    const now = Date.now();
+                    if (_trailPoints.length === 0 || now - _trailPoints[_trailPoints.length-1].time > 500) {
+                        _trailPoints.push({ lat: playerLat, lon: playerLon, time: now });
+                    }
+                    const cutoff = now - (prefs.trailLengthSec * 1000);
+                    while (_trailPoints.length > 0 && _trailPoints[0].time < cutoff) _trailPoints.shift();
+                    while (_trailPoints.length > TRAIL_MAX_PTS) _trailPoints.shift();
+                } else {
+                    _trailPoints.length = 0;
+                }
+            }
+        }
+    } catch(e) {}
+
+    const hasPos = !!player || (_lastValidLat !== null);
+    if (!player && _lastValidLat !== null) {
+        playerLat   = _lastValidLat;
+        playerLon   = _lastValidLon;
+        playerAltFt = _lastValidAltFt;
+    }
+
+    const _now = Date.now();
+    if (_now - _lastMenuInfoUpdate > MENU_INFO_UPDATE_INTERVAL) {
+        _lastMenuInfoUpdate = _now;
+        _cachedCallsign = detectCallsign();
+        if (_cachedCallsign) window.playerCallsign = _cachedCallsign;
+    }
+    const displayCallsign = _cachedCallsign || playerCallsign;
+    updateMenuInfoCallsign(displayCallsign, hasPos ? playerLat : null, hasPos ? playerLon : null);
+
+    const myData = hasPos ? { lat: playerLat, lon: playerLon, altFt: playerAltFt } : null;
+    const rotRad = settings.orientMode === 'track' ? (playerHeading * Math.PI / 180) : 0;
+
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, radarSize/2, 0, Math.PI*2); ctx.clip();
+
+    ctx.strokeStyle = t.grid; ctx.lineWidth = UI.gridLineW;
+    ctx.beginPath();
+    ctx.moveTo(cx, 0); ctx.lineTo(cx, radarSize);
+    ctx.moveTo(0, cy); ctx.lineTo(radarSize, cy);
+    ctx.stroke();
+
+    if (settings.showRings) {
+        for (let i = 1; i <= 3; i++) {
+            const rr = (radarSize / 2) * (i / 3);
+            ctx.strokeStyle = t.ring; ctx.lineWidth = UI.ringLineW;
+            ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI*2); ctx.stroke();
+            if (settings.showRingLabels) {
+                const dist = radarRange * (i / 3);
+                const lbl  = dist >= 1000 ? (dist/1000).toFixed(dist%1000===0?0:1)+' km' : Math.round(dist)+' m';
+                ctx.font = `bold ${UI.ringLabelFont}px ${FONT_CANVAS}`;
+                const tw = ctx.measureText(lbl).width;
+                const lx = cx + 8, ly = cy - rr + 10;
+                ctx.fillStyle = 'rgba(0,0,0,0.65)';
+                ctx.fillRect(lx - 4, ly - 12, tw + 8, 17);
+                ctx.fillStyle = t.ringLabel; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+                ctx.fillText(lbl, lx, ly - 2);
+            }
+        }
+    }
+
+    {
+        const dirs  = ['N','E','S','W'];
+        const edgeR = radarSize/2 - 16;
+        ctx.font = `bold ${UI.compassFont}px ${FONT_CANVAS}`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        dirs.forEach((d, i) => {
+            const geoBearing  = i * 90;
+            const screenAngle = settings.orientMode === 'track'
+                ? (geoBearing - playerHeading) * Math.PI / 180
+                : geoBearing * Math.PI / 180;
+            const px = cx + Math.sin(screenAngle) * edgeR;
+            const py = cy - Math.cos(screenAngle) * edgeR;
+            ctx.fillStyle = d === 'N' ? 'rgba(255,80,80,0.95)' : t.compass;
+            ctx.fillText(d, px, py);
+        });
+        if (settings.orientMode === 'track') {
+            ctx.font = `bold ${UI.compassHdgFont}px ${FONT_CANVAS}`;
+            ctx.fillStyle = 'rgba(180,180,180,0.55)';
+            ctx.fillText(`HDG ${Math.round(playerHeading).toString().padStart(3,'0')}°`, cx, 30);
+        }
+    }
+
+    if (!isGamePaused && hasPos) {
+        drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad);
+    }
+
+    if (prefs.showTrail && hasPos && _trailPoints.length > 1) {
+        ctx.save();
+        for (let i = 1; i < _trailPoints.length; i++) {
+            const pt  = _trailPoints[i];
+            const ptP = _trailPoints[i - 1];
+            const ageFrac = (pt.time - _trailPoints[0].time) /
+                            Math.max(1, _trailPoints[_trailPoints.length-1].time - _trailPoints[0].time);
+            const alpha = 0.15 + ageFrac * 0.65;
+            const [dx1, dy1] = latLonToMeters(playerLat, playerLon, ptP.lat, ptP.lon);
+            const [dx2, dy2] = latLonToMeters(playerLat, playerLon, pt.lat,  pt.lon);
+            const [sx1, sy1] = worldToCanvas(dx1, dy1, cx, cy, rotRad);
+            const [sx2, sy2] = worldToCanvas(dx2, dy2, cx, cy, rotRad);
+            ctx.strokeStyle = T().trailColor(alpha);
+            ctx.lineWidth   = prefs.trailWidth || 2;
+            ctx.beginPath(); ctx.moveTo(sx1, sy1); ctx.lineTo(sx2, sy2); ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    lastBlipPositions = [];
+    let nearestAc = null, nearestMeters = Infinity;
+
+    if (settings.showTraffic && !isGamePaused && aircraftListCache.length > 0 && hasPos) {
+        const myCs = _cachedCallsign || playerCallsign;
+        aircraftListCache.forEach(ac => {
+            if (!ac.co || !Array.isArray(ac.co) || ac.co.length < 2) return;
+            if (ac.cs && myCs && myCs !== 'YOU' && ac.cs.toLowerCase() === myCs.toLowerCase()) return;
+
+            if (prefs.hideFooPlayers && ac.cs && (ac.cs === 'Foo' || ac.cs.toLowerCase() === 'foo')) return;
+
+            if (prefs.hideGroundPlayers) {
+                const acAltFt = isFinite(parseFloat(ac.al)) ? parseFloat(ac.al)
+                    : (ac.co.length >= 3 && isFinite(parseFloat(ac.co[2])) ? parseFloat(ac.co[2]) * 3.28084 : null);
+                if (acAltFt !== null && acAltFt < 200) return;
+            }
+
+            if (prefs.altFilterEnabled) {
+                const acAltFt = isFinite(parseFloat(ac.al)) ? parseFloat(ac.al)
+                    : (ac.co.length >= 3 && isFinite(parseFloat(ac.co[2])) ? parseFloat(ac.co[2]) * 3.28084 : null);
+                if (acAltFt !== null && (acAltFt < prefs.altFilterMinFt || acAltFt > prefs.altFilterMaxFt)) return;
+            }
+            const [dx, dy] = latLonToMeters(playerLat, playerLon, ac.co[0], ac.co[1]);
+            const distM    = Math.hypot(dx, dy);
+            if (distM < nearestMeters) { nearestMeters = distM; nearestAc = ac; }
+            if (distM > radarRange) return;
+            ctx.save();
+            try {
+                if (_trackedId && settings.isolateTracked && ac.id !== _trackedId) { ctx.restore(); return; }
+                const [rx, ry] = worldToCanvas(dx, dy, cx, cy, rotRad);
+                if (Math.hypot(rx-cx, ry-cy) > radarSize/2) { ctx.restore(); return; }
+                lastBlipPositions.push({ x:rx, y:ry, ac, distance:distM, myData });
+                const isTrackedBlip = !!_trackedId && ac.id === _trackedId;
+                ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.setLineDash([]);
+                const acH  = parseFloat(ac.h);
+                const _apiSpd  = parseFloat(ac.s);
+                const _compSpd = typeof ac._computedSpd === 'number' ? ac._computedSpd : NaN;
+                const acS = isFinite(_apiSpd) ? _apiSpd : (isFinite(_compSpd) ? _compSpd : NaN);
+                if (settings.showVectors && isFinite(acH) && isFinite(acS)) {
+                    const speedMs = acS * 0.514444;
+                    const vecLen  = Math.min((speedMs * 30) / radarRange * (radarSize / 2), radarSize/2);
+                    const hRad    = (acH * Math.PI / 180) - rotRad;
+                    const vx = rx + Math.sin(hRad) * vecLen, vy = ry - Math.cos(hRad) * vecLen;
+                    ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(vx, vy);
+                    ctx.strokeStyle = T().vector; ctx.lineWidth = UI.vectorLineW;
+                    ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
+                }
+                const blipColor  = isTrackedBlip ? 'rgba(255,220,60,1)' : T().blipFill;
+                const blipStroke = isTrackedBlip ? 'rgba(255,240,120,0.9)' : 'rgba(255,255,255,0.7)';
+                if (isTrackedBlip) {
+                    ctx.beginPath();
+                    ctx.arc(rx, ry, (settings.showBlipTriangle && isFinite(acH) ? UI.blipTriTip : UI.blipDotR) + 7, 0, Math.PI*2);
+                    ctx.strokeStyle = 'rgba(255,220,60,0.4)'; ctx.lineWidth = 2.5; ctx.stroke();
+                }
+                if (settings.showBlipTriangle && isFinite(acH)) {
+                    const angle = (acH * Math.PI / 180) - rotRad;
+                    ctx.save(); ctx.translate(rx, ry); ctx.rotate(angle);
+                    ctx.beginPath(); ctx.moveTo(0,-UI.blipTriTip); ctx.lineTo(UI.blipTriBase,UI.blipTriTip*0.55); ctx.lineTo(-UI.blipTriBase,UI.blipTriTip*0.55); ctx.closePath();
+                    ctx.fillStyle = blipColor; ctx.fill();
+                    ctx.strokeStyle = blipStroke; ctx.lineWidth = isTrackedBlip ? 2 : 1.5; ctx.stroke();
+                    ctx.restore();
+                } else {
+                    const blipR = isTrackedBlip ? UI.blipDotRActive : UI.blipDotR;
+                    ctx.fillStyle = blipColor; ctx.beginPath(); ctx.arc(rx, ry, blipR, 0, Math.PI*2); ctx.fill();
+                    ctx.strokeStyle = blipStroke; ctx.lineWidth = isTrackedBlip ? 2 : 1; ctx.stroke();
+                }
+                const blipBottom = settings.showBlipTriangle && isFinite(acH) ? ry+UI.blipTriTip+4 : ry+(isTrackedBlip?UI.blipDotRActive:UI.blipDotR)+4;
+                let labelY = blipBottom;
+                ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+                ctx.font = `bold ${UI.blipLabelFont}px ${FONT_CANVAS}`;
+                function drawTag(text, color, yOff) {
+                    const tw = ctx.measureText(text).width, padX = UI.blipLabelPadX, rowH = UI.blipLabelRowH;
+                    ctx.fillStyle = 'rgba(0,0,0,0.72)';
+                    ctx.fillRect(rx-tw/2-padX, yOff, tw+padX*2, rowH-1);
+                    ctx.fillStyle = color; ctx.fillText(text, rx, yOff+2);
+                    return yOff + rowH;
+                }
+                if (settings.showCallsign && ac.cs) labelY = drawTag(ac.cs.substring(0,12), T().blipLabel, labelY);
+                const rawAlt = isFinite(parseFloat(ac.al)) ? parseFloat(ac.al) : (ac.co.length>=3 && isFinite(parseFloat(ac.co[2])) ? parseFloat(ac.co[2])*3.28084 : null);
+                const altFmt = rawAlt !== null ? fmtAlt(rawAlt) : null;
+                if (settings.showAltitude && altFmt !== null) labelY = drawTag(altFmt, T().blipAlt, labelY);
+                const spdFmt = isFinite(acS) ? fmtSpd(acS) : null;
+                if (settings.showSpeed && spdFmt !== null) labelY = drawTag(spdFmt, T().blipSpeed, labelY);
+                if (settings.showBlipDist) labelY = drawTag(fmtDistMetric(distM), T().blipLabel, labelY);
+            } catch(e) {
+            } finally { ctx.restore(); }
+        });
+    }
+
+    ctx.restore(); // end circle clip
+
+    if (hasPos && !isGamePaused && settings.showTraffic) {
+        let mySpeedKts = 0;
+        try {
+            const av = geofs.animation?.values;
+            mySpeedKts = av?.groundSpeed ?? av?.kias ?? 0;
+        } catch(e) {}
+        checkTCAS(playerLat, playerLon, playerAltFt, playerHeading, mySpeedKts, aircraftListCache, _cachedCallsign || playerCallsign);
+    } else {
+        _stopTCAS();
+    }
+
+    let _playerTagBottomY = cy + UI.playerTriBaseOff + UI.playerTriTip + 13;
+    if (settings.showMyCallsign && displayCallsign) {
+        const lbl = displayCallsign.substring(0, 12);
+        ctx.font = `bold ${UI.playerCsFont}px ${FONT_CANVAS}`;
+        const tw = ctx.measureText(lbl).width;
+        const ty = _playerTagBottomY;
+        ctx.fillStyle   = isGamePaused ? 'rgba(80,80,80,0.85)' : 'rgba(0,80,0,0.85)';
+        ctx.strokeStyle = T().playerLabel; ctx.lineWidth = 1;
+        ctx.fillRect(cx-tw/2-7, ty-11, tw+14, 22);
+        ctx.strokeRect(cx-tw/2-7, ty-11, tw+14, 22);
+        ctx.fillStyle = T().playerLabel;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(lbl, cx, ty);
+    }
+
+    if (isGamePaused) {
+        ctx.fillStyle = T().pauseText;
+        ctx.font = `bold ${UI.pausedFont}px ${FONT_CANVAS}`;
+        ctx.textAlign = 'center';
+        ctx.fillText('PAUSED', cx, radarSize - 30);
+    }
+
+    drawPlayerTriangle(cx, cy, playerHeading, isGamePaused);
+
+    if (_tcasHasPath && prefs.tcasEnabled && hasPos && !isGamePaused) {
+        const scale    = (radarSize / 2) / radarRange;
+        const isNorthUp = settings.orientMode === 'north';
+        const fwdAngle  = isNorthUp ? (playerHeading * Math.PI / 180) : 0;
+        const cosFwd = Math.cos(fwdAngle), sinFwd = Math.sin(fwdAngle);
+
+        const tipX = cx + sinFwd * UI.playerTriTip;
+        const tipY = cy - cosFwd * UI.playerTriTip;
+
+        const cosR = Math.cos(-rotRad), sinR = Math.sin(-rotRad);
+        const scrRight =  _tcasMyEndX * cosR + _tcasMyEndY * sinR;
+        const scrUp    = -_tcasMyEndX * sinR + _tcasMyEndY * cosR;
+        const ex = cx + scrRight * scale;
+        const ey = cy - scrUp   * scale;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(tipX, tipY);
+        ctx.lineTo(ex, ey);
+        ctx.setLineDash([7, 5]);
+        ctx.lineWidth   = 1.5;
+        ctx.strokeStyle = _tcasActive
+            ? 'rgba(255,60,60,0.70)'
+            : 'rgba(255,190,0,0.32)';
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+
+    // ── Chase / Escort autopilot tick ─────────────
+    if (_chaseActive && hasPos && !isGamePaused && _trackedAc) {
+        _tickChaseEscort(playerLat, playerLon, myData);
+    }
+
+    // ── Update ILS HUD if active ──────────────────
+    if (_ilsActive && hasPos && !isGamePaused) {
+        let playerSpeedKts = 0;
+        try {
+            const av = geofs.animation?.values;
+            const rawSpd = av?.kias ?? av?.groundSpeed ?? geofs.aircraft?.instance?.animationValue?.speed;
+            if (rawSpd != null && isFinite(parseFloat(rawSpd))) playerSpeedKts = parseFloat(rawSpd);
+        } catch(e) {}
+        const ilsData = computeILSData(playerLat, playerLon, playerHeading, playerAltFt, playerSpeedKts);
+        updateILSHUD(ilsData);
+    }
+
+    // ── Update Tracking / Nearest HUD ────────────
+    if (!isGamePaused && !_ilsActive) {
+        const _hudNow = Date.now();
+        if (_trackedId) {
+            const freshTracked = refreshTracked();
+            const trackKey = freshTracked ? freshTracked.id : _trackedId;
+            if (trackKey !== _lastNearestCs || _hudNow - _lastHudUpdate > HUD_UPDATE_INTERVAL) {
+                _lastNearestCs = trackKey;
+                _lastHudUpdate = _hudNow;
+                updateNearestHUD(nearestAc, myData);
+            }
+        } else if (nearestAc) {
+            if (nearestAc.id !== _lastNearestCs || _hudNow - _lastHudUpdate > HUD_UPDATE_INTERVAL) {
+                _lastNearestCs = nearestAc.id;
+                _lastHudUpdate = _hudNow;
+                updateNearestHUD(nearestAc, myData);
+            }
+        } else {
+            if (_lastNearestCs !== null) {
+                _lastNearestCs = null;
+                updateNearestHUD(null, null);
+            }
+        }
+    } else if (isGamePaused && !_ilsActive) {
+        if (_lastNearestCs !== null) {
+            _lastNearestCs = null;
+            updateNearestHUD(null, null);
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════
+// SECTION 19 — REPOSITION INTERVAL & INIT
 // ═══════════════════════════════════════════════════
 
 setInterval(repositionUI, REPOSITION_INTERVAL);
-
-// ═══════════════════════════════════════════════════
-// SECTION 19 — INIT
-// ═══════════════════════════════════════════════════
 
 setTimeout(() => {
     createMenu();
