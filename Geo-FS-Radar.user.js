@@ -3557,43 +3557,45 @@ function _tickChaseEscort(myLat, myLon, myData) {
 
     _apEnable();
 
+    // ── UNIVERSAL OVERSHOOT GUARD ─────────────────────────────────────────────────
+    // If I am anywhere ahead of the tracked aircraft in their forward axis (forwardM > 0),
+    // lock heading to their heading and hold full airbrakes regardless of phase.
+    // Remains active until forwardM ≤ 0 (target draws level with or passes me).
+    const { forwardM: _fwdCheck } = _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdg);
+    if (_fwdCheck > 0) {
+        _apSetHeading(trackedHdg);
+        _apSetSpeed(CHASE_MIN_SPEED_KT);
+        _apSetAirbrakes(true);
+        return;
+    }
+
     // ── CHASE PHASE ───────────────────────────────────────────────────────────────
     if (_chasePhase === 'chase') {
         const bearingDeg  = calcBearing(myLat, myLon, trackedLat, trackedLon);
         _apSetHeading(bearingDeg);
         if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
-        // Geometric overshoot: have I passed the target (I am ahead of them in their forward axis)?
-        const { forwardM: chaseForwardM } = _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdg);
-        const reallyOvershot = chaseForwardM > 0; // I am in front of the target
-
-        if (reallyOvershot) {
-            // Passed them — hold their heading, brake until we've fallen back to formation distance
-            _apSetHeading(trackedHdg);
-            _apSetSpeed(CHASE_MIN_SPEED_KT);
-            _apSetAirbrakes(true);
-        } else {
-            _apSetAirbrakes(false);
-            const finalApproachM = _escortDistM + 1000;
-            if (distM <= finalApproachM) {
-                // Final approach zone: match target speed + 50 kt, but if already too fast apply brakes
-                const approachSpd = Math.min(CHASE_MAX_SPEED_KT, trackedSpd + 50);
-                const mySpd = _apCurrentSpeed();
-                if (mySpd > approachSpd + AP_SPD_THRESH) {
-                    _apSetSpeed(approachSpd);
-                    _apSetAirbrakes(true);
-                } else {
-                    _apSetSpeed(approachSpd);
-                    _apSetAirbrakes(false);
-                }
+        // Geometric overshoot handled globally above; we only reach here if not ahead of target.
+        _apSetAirbrakes(false);
+        const finalApproachM = _escortDistM + 1000;
+        if (distM <= finalApproachM) {
+            // Final approach zone: match target speed + 50 kt; if already too fast apply brakes
+            const approachSpd = Math.min(CHASE_MAX_SPEED_KT, trackedSpd + 50);
+            const mySpd = _apCurrentSpeed();
+            if (mySpd > approachSpd + AP_SPD_THRESH) {
+                _apSetSpeed(approachSpd);
+                _apSetAirbrakes(true);
             } else {
-                // Normal chase — ramp speed down toward target as we close
-                const decelZoneNm = escDistNm * CHASE_DECEL_ZONE;
-                const closeRatio  = Math.max(0, Math.min(1, distNm / decelZoneNm));
-                const chaseSpd    = Math.round(
-                    CHASE_MIN_SPEED_KT + (CHASE_MAX_SPEED_KT - CHASE_MIN_SPEED_KT) * closeRatio);
-                _apSetSpeed(chaseSpd);
+                _apSetSpeed(approachSpd);
+                _apSetAirbrakes(false);
             }
+        } else {
+            // Normal chase — ramp speed down toward target as we close
+            const decelZoneNm = escDistNm * CHASE_DECEL_ZONE;
+            const closeRatio  = Math.max(0, Math.min(1, distNm / decelZoneNm));
+            const chaseSpd    = Math.round(
+                CHASE_MIN_SPEED_KT + (CHASE_MAX_SPEED_KT - CHASE_MIN_SPEED_KT) * closeRatio);
+            _apSetSpeed(chaseSpd);
         }
 
         if (distNm <= escDistNm * CHASE_ARRIVAL_RATIO && altWithinBand) {
@@ -3653,13 +3655,9 @@ function _tickChaseEscort(myLat, myLon, myData) {
         const slotDist      = Math.hypot(slotVec[0], slotVec[1]);
         const bearingToSlot = calcBearing(myLat, myLon, tgtLat, tgtLon);
 
-        // Overshoot = I have passed the target in their forward axis (I am in front of them).
-        const { forwardM: escFwdM } = _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdg);
-        const escortOvershot = escFwdM > 0;
-
-        // Heading: overshoot forces trackedHdg so we decelerate on the same course and fall back.
-        // Within formation distance: match player heading. Outside (still closing): steer to slot.
-        const cmdHdg = (escortOvershot || distM <= _escortDistM) ? trackedHdg : bearingToSlot;
+        // Heading: within formation distance match player heading, otherwise steer to slot.
+        // (Overshoot case — being ahead — is handled globally above and never reaches here.)
+        const cmdHdg = (distM <= _escortDistM) ? trackedHdg : bearingToSlot;
         _apSetHeading(cmdHdg);
 
         // Altitude: always track the player's current altitude
@@ -3672,16 +3670,10 @@ function _tickChaseEscort(myLat, myLon, myData) {
         const desiredSpd = Math.max(CHASE_MIN_SPEED_KT,
             Math.min(CHASE_MAX_SPEED_KT, trackedSpd + pidOut));
 
-        if (escortOvershot) {
-            // Passed the target — hold their heading, brake until distM > escortDistM
-            _apSetSpeed(CHASE_MIN_SPEED_KT);
-            _apSetAirbrakes(true);
-        } else if (slotDist < 50) {
-            // On-slot — match tracked player's speed, heading, altitude exactly
-            _apSetAirbrakes(false);
+        if (slotDist < 50) {
+            // On-slot — match tracked player's speed exactly
             _apSetSpeed(trackedSpd);
         } else {
-            _apSetAirbrakes(false);
             _apSetSpeed(desiredSpd);
         }
     }
