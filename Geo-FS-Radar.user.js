@@ -3652,21 +3652,9 @@ function _tickChaseEscort(myLat, myLon, myData) {
         const slotDist      = Math.hypot(slotVec[0], slotVec[1]);
         const bearingToSlot = calcBearing(myLat, myLon, tgtLat, tgtLon);
 
-        // Heading: blend from bearing-to-slot toward tracked player's heading as we close.
-        // Beyond 200 m from slot: steer directly to slot.
-        // Within 200 m: linearly blend toward trackedHdg so we match their course on arrival.
-        // Within 30 m (on-slot): use trackedHdg exactly.
-        let cmdHdg;
-        if (slotDist <= 30) {
-            cmdHdg = trackedHdg;
-        } else if (slotDist <= 200) {
-            const t = (slotDist - 30) / (200 - 30); // 1 = far edge, 0 = near edge
-            // Blend angles correctly (shortest arc)
-            let diff = ((trackedHdg - bearingToSlot + 540) % 360) - 180;
-            cmdHdg = bearingToSlot + diff * (1 - t);
-        } else {
-            cmdHdg = bearingToSlot;
-        }
+        // Heading: if within formation distance, match tracked player's heading exactly.
+        // Outside formation distance, steer toward the slot to close in.
+        const cmdHdg = (distM <= _escortDistM) ? trackedHdg : bearingToSlot;
         _apSetHeading(cmdHdg);
 
         // Altitude: always track the player's current altitude
