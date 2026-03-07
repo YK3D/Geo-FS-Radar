@@ -466,17 +466,57 @@ const ctx = radarCanvas.getContext('2d');
 const rangeBox = document.createElement('div');
 rangeBox.id = 'radarRangeBox';
 rangeBox.style.cssText = `
-    position:fixed; width:${UI.rangeBoxW}px; height:${UI.rangeBoxH}px;
+    position:fixed; width:${UI.rangeBoxW + 60}px; height:${UI.rangeBoxH}px;
     background:rgba(0,40,0,0.82); border:1.5px solid rgba(0,255,0,0.6);
     border-radius:14px; box-shadow:0 0 12px rgba(0,255,0,0.35);
-    z-index:2147483646; display:flex; flex-direction:column;
-    align-items:center; justify-content:center; pointer-events:none;
+    z-index:2147483646; display:flex; flex-direction:row;
+    align-items:center; justify-content:space-between; pointer-events:auto;
+    padding:0 6px; gap:4px;
 `;
 rangeBox.innerHTML = `
-    <span id="rangeVal" style="font:bold ${UI.rangeBoxFont}px ${FONT_SANS};text-shadow:0 0 5px rgba(0,255,0,0.6)">${(radarRange/1000).toFixed(1)} km</span>
-    <span style="font:11px ${FONT_SANS};opacity:.8;margin-top:2px">RANGE</span>
+    <button id="radarRangeMinus" title="Decrease range by 5 km" style="
+        background:rgba(0,60,0,0.85);border:1px solid rgba(0,255,0,0.4);border-radius:8px;
+        color:#0f0;font:bold 17px ${FONT_SANS};width:26px;height:26px;cursor:pointer;
+        display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1;
+        transition:background .12s;">−</button>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;">
+        <span id="rangeVal" style="font:bold ${UI.rangeBoxFont}px ${FONT_SANS};text-shadow:0 0 5px rgba(0,255,0,0.6)">${(radarRange/1000).toFixed(1)} km</span>
+        <span style="font:11px ${FONT_SANS};opacity:.8;margin-top:2px">RANGE</span>
+    </div>
+    <button id="radarRangePlus" title="Increase range by 5 km" style="
+        background:rgba(0,60,0,0.85);border:1px solid rgba(0,255,0,0.4);border-radius:8px;
+        color:#0f0;font:bold 17px ${FONT_SANS};width:26px;height:26px;cursor:pointer;
+        display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1;
+        transition:background .12s;">+</button>
 `;
 document.body.appendChild(rangeBox);
+
+// Range ±5 km buttons
+setTimeout(() => {
+    const btnM = document.getElementById('radarRangeMinus');
+    const btnP = document.getElementById('radarRangePlus');
+    const RANGE_JUMP = 5000; // 5 km
+    if (btnM) {
+        btnM.onmouseover = () => btnM.style.background = 'rgba(0,100,0,0.9)';
+        btnM.onmouseout  = () => btnM.style.background = 'rgba(0,60,0,0.85)';
+        btnM.onclick = (e) => {
+            e.stopPropagation();
+            radarRange = Math.max(MIN_RANGE, radarRange - RANGE_JUMP);
+            localStorage.setItem('radarRange', String(radarRange));
+            updateRangeBox();
+        };
+    }
+    if (btnP) {
+        btnP.onmouseover = () => btnP.style.background = 'rgba(0,100,0,0.9)';
+        btnP.onmouseout  = () => btnP.style.background = 'rgba(0,60,0,0.85)';
+        btnP.onclick = (e) => {
+            e.stopPropagation();
+            radarRange = Math.min(MAX_RANGE, radarRange + RANGE_JUMP);
+            localStorage.setItem('radarRange', String(radarRange));
+            updateRangeBox();
+        };
+    }
+}, 0);
 
 function updateRangeBox() {
     const el = document.getElementById('rangeVal');
@@ -553,11 +593,27 @@ nearestHUD.addEventListener('click', (e) => {
         _lastHudUpdate = 0;
         _lastNearestCs = null;
         updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+    } else if (action === 'finetune') {
+        const axis = target.dataset.ftAxis;
+        const dir  = parseInt(target.dataset.ftDir);
+        if (axis === 'fwd') _ftFwdOffset += dir * FT_STEP;
+        if (axis === 'lat') _ftLatOffset += dir * FT_STEP;
+        _lastHudUpdate = 0;
+        _lastNearestCs = null;
+        updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+    } else if (action === 'finetune-reset') {
+        _ftFwdOffset = 0;
+        _ftLatOffset = 0;
+        _lastHudUpdate = 0;
+        _lastNearestCs = null;
+        updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
     } else if (action === 'escort-mode') {
         const mode = target.dataset.escortMode;
-        _escortMode = (_escortMode === mode) ? null : mode;
-        _chasePid   = { integral: 0, prevError: 0, lastTime: 0 };
-        _headingPid = { integral: 0, prevError: 0, lastTime: 0 };
+        _escortMode  = (_escortMode === mode) ? null : mode;
+        _ftFwdOffset = 0;
+        _ftLatOffset = 0;
+        _chasePid    = { integral: 0, prevError: 0, lastTime: 0 };
+        _headingPid  = { integral: 0, prevError: 0, lastTime: 0 };
         _lastHudUpdate = 0;
         _lastNearestCs = null;
         updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
@@ -566,9 +622,10 @@ nearestHUD.addEventListener('click', (e) => {
 nearestHUD.addEventListener('input', (e) => {
     const target = e.target;
     if (target.id === 'radarEscortDistSlider') {
-        _escortDistNm = parseFloat(target.value);
+        _escortDistM = parseFloat(target.value);
+        _escortDistNm = _escortDistM / 1852;
         const lbl = document.getElementById('radarEscortDistLbl');
-        if (lbl) lbl.textContent = _escortDistNm.toFixed(1) + ' NM';
+        if (lbl) lbl.textContent = _escortDistM.toFixed(0) + ' m';
     }
 });
 
@@ -642,7 +699,14 @@ let _trackedId      = null;
 let _chaseActive  = false;
 let _chasePhase   = 'chase';
 let _escortMode   = null;
-let _escortDistNm = 0.5;
+let _escortDistNm = 0.5;   // legacy alias — actual value stored in _escortDistM
+let _escortDistM  = 500;   // escort / formation distance in metres (100–5000)
+
+// Fine-tune offset applied on top of the formation position (metres, target-relative frame)
+// +fwdOffset = ahead of target, +latOffset = to the right of target
+let _ftFwdOffset = 0;
+let _ftLatOffset = 0;
+const FT_STEP = 20; // metres per nudge
 let _chasePid     = { integral: 0, prevError: 0, lastTime: 0 };
 let _headingPid   = { integral: 0, prevError: 0, lastTime: 0 };
 
@@ -715,24 +779,16 @@ function updateNearestHUD(nearest, myData) {
     let etaStr = null;
     if (_chaseActive && myData && displayAc.co && displayAc.co.length >= 2) {
         try {
-            const distNm = calcDistNm(myData.lat, myData.lon, displayAc.co[0], displayAc.co[1]);
-            const av = geofs.animation?.values;
-            const mySpd = av?.groundSpeed ?? av?.kias ?? 0;
-            const trackedSpd = isFinite(parseFloat(displayAc.s)) ? parseFloat(displayAc.s)
-                : (typeof displayAc._computedSpd === 'number' ? displayAc._computedSpd : 0);
-            const bearingRad = calcBearing(myData.lat, myData.lon, displayAc.co[0], displayAc.co[1]) * Math.PI / 180;
-            const targetHdgRad = isFinite(parseFloat(displayAc.h)) ? parseFloat(displayAc.h) * Math.PI / 180 : 0;
-            const relativeRecessionKt = trackedSpd * Math.cos(targetHdgRad - bearingRad);
-            const closingSpeedKt = mySpd - relativeRecessionKt;
             if (_chasePhase === 'escort') {
                 etaStr = 'ARRIVED';
-            } else if (closingSpeedKt > 5) {
-                const etaMin = (distNm / closingSpeedKt) * 60;
+            } else {
+                const distNm = calcDistNm(myData.lat, myData.lon, displayAc.co[0], displayAc.co[1]);
+                const av = geofs.animation?.values;
+                const mySpd = Math.max(1, av?.groundSpeed ?? av?.kias ?? 0); // kts
+                const etaMin = (distNm / mySpd) * 60;
                 if (etaMin < 1) etaStr = Math.round(etaMin * 60) + 's';
                 else if (etaMin < 60) etaStr = etaMin.toFixed(1) + ' min';
                 else etaStr = (etaMin / 60).toFixed(1) + ' hr';
-            } else {
-                etaStr = '—';
             }
         } catch(e) { etaStr = '—'; }
     }
@@ -796,13 +852,41 @@ function updateNearestHUD(nearest, myData) {
     const escortDistSlider = _chaseActive ? `
   <div style="padding:3px 14px 6px;border-top:1px solid ${t.hudSep};">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
-      <span style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont}px;">Escort distance</span>
-      <span id="radarEscortDistLbl" style="color:rgba(255,200,60,0.95);font-size:${UI.hudIsolateLabelFont}px;font-weight:bold;">${_escortDistNm.toFixed(1)} NM</span>
+      <span style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont}px;">Formation distance</span>
+      <span id="radarEscortDistLbl" style="color:rgba(255,200,60,0.95);font-size:${UI.hudIsolateLabelFont}px;font-weight:bold;">${_escortDistM.toFixed(0)} m</span>
     </div>
-    <input id="radarEscortDistSlider" type="range" min="0.1" max="5.0" step="0.1"
-      value="${_escortDistNm}"
+    <input id="radarEscortDistSlider" type="range" min="100" max="5000" step="50"
+      value="${_escortDistM}"
       style="width:100%;accent-color:rgba(255,180,30,0.9);margin:0;">
   </div>` : '';
+
+    // Fine-tune nudge panel — shown only during escort phase
+    const fineTunePanel = (_chaseActive && _chasePhase === 'escort') ? (() => {
+        const btnBase = `padding:5px 0;border-radius:5px;cursor:pointer;font-size:13px;
+            text-align:center;user-select:none;flex:1;border:1px solid ${t.hudBorder};
+            color:${t.hudLabel};background:rgba(0,40,0,0.5);transition:background .1s;`;
+        return `
+  <div style="padding:3px 14px 6px;border-top:1px solid ${t.hudSep};">
+    <div style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont - 1}px;text-align:center;margin-bottom:5px;letter-spacing:0.5px;">FINE TUNE (${FT_STEP} m / nudge)</div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <div style="display:flex;justify-content:center;">
+        <div data-hud-action="finetune" data-ft-axis="fwd" data-ft-dir="1" style="${btnBase}max-width:52px;">▲ FWD</div>
+      </div>
+      <div style="display:flex;gap:4px;">
+        <div data-hud-action="finetune" data-ft-axis="lat" data-ft-dir="-1" style="${btnBase}">◀ LEFT</div>
+        <div data-hud-action="finetune-reset" style="${btnBase}font-size:10px;letter-spacing:0.3px;">RESET</div>
+        <div data-hud-action="finetune" data-ft-axis="lat" data-ft-dir="1" style="${btnBase}">RIGHT ▶</div>
+      </div>
+      <div style="display:flex;justify-content:center;">
+        <div data-hud-action="finetune" data-ft-axis="fwd" data-ft-dir="-1" style="${btnBase}max-width:52px;">▼ BCK</div>
+      </div>
+      ${(_ftFwdOffset !== 0 || _ftLatOffset !== 0) ? `
+      <div style="text-align:center;color:rgba(255,200,60,0.8);font-size:${UI.hudIsolateLabelFont-2}px;">
+        FWD ${_ftFwdOffset > 0 ? '+' : ''}${_ftFwdOffset}m  LAT ${_ftLatOffset > 0 ? '+' : ''}${_ftLatOffset}m
+      </div>` : ''}
+    </div>
+  </div>`;
+    })() : '';
 
     const chasePhaseRow = _chaseActive ? `
   <div style="padding:2px 14px 4px;text-align:center;">
@@ -851,6 +935,7 @@ function updateNearestHUD(nearest, myData) {
   </div>
   ${chasePhaseRow}
   ${escortDistSlider}
+  ${fineTunePanel}
   ${escortArrowPanel}` : '';
 
     const stopBtn = isTracking ? `
@@ -1883,9 +1968,10 @@ function createMenu() {
         const devBody = document.createElement('div');
         devBody.style.cssText = 'display:none;';
 
-        function addDevSlider(label, getF, setF, min, max, step, fmt) {
+        function addDevSlider(label, getF, setF, min, max, step, fmt, desc) {
             const row = document.createElement('div');
             row.style.cssText = `padding:${UI.menuRowPadY-1}px 16px 2px;`;
+            if (desc) row.title = desc;
             const topRow = document.createElement('div');
             topRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;';
             const lbl = document.createElement('span');
@@ -1895,6 +1981,14 @@ function createMenu() {
             val.style.cssText = `color:rgba(255,200,80,0.95);font:bold ${UI.menuRowFont-1}px ${FONT_MONO};min-width:52px;text-align:right;`;
             val.textContent = fmt(getF());
             topRow.appendChild(lbl); topRow.appendChild(val);
+            if (desc) {
+                const hint = document.createElement('div');
+                hint.style.cssText = `color:rgba(120,180,120,0.6);font:${UI.menuRowFont-2}px ${FONT_SANS};padding-bottom:2px;line-height:1.3;`;
+                hint.textContent = desc;
+                row.appendChild(topRow); row.appendChild(hint);
+            } else {
+                row.appendChild(topRow);
+            }
             const sldr = document.createElement('input');
             sldr.type = 'range'; sldr.min = min; sldr.max = max; sldr.step = step;
             sldr.value = getF();
@@ -1904,21 +1998,32 @@ function createMenu() {
                 val.textContent = fmt(getF());
                 _saveChaseParams();
             });
-            row.appendChild(topRow); row.appendChild(sldr);
+            row.appendChild(sldr);
             devBody.appendChild(row);
         }
 
-        addDevSlider('PID Kp',           () => CHASE_PID_KP,       v => { CHASE_PID_KP = v; },       0.1, 30,   0.1,  v => v.toFixed(1));
-        addDevSlider('PID Ki',           () => CHASE_PID_KI,       v => { CHASE_PID_KI = v; },       0,   0.5,  0.001,v => v.toFixed(3));
-        addDevSlider('PID Kd',           () => CHASE_PID_KD,       v => { CHASE_PID_KD = v; },       0,   20,   0.1,  v => v.toFixed(1));
-        addDevSlider('Hdg Kp',           () => CHASE_HDG_KP,       v => { CHASE_HDG_KP = v; },       1,   60,   0.5,  v => v.toFixed(1));
-        addDevSlider('Hdg Max Corr (°)', () => CHASE_HDG_MAX_CORR, v => { CHASE_HDG_MAX_CORR = v; }, 5,   90,   1,    v => Math.round(v) + '°');
-        addDevSlider('Arrival Ratio',    () => CHASE_ARRIVAL_RATIO,v => { CHASE_ARRIVAL_RATIO = v; },0.5, 3,    0.05, v => v.toFixed(2));
-        addDevSlider('Decel Zone (×)',   () => CHASE_DECEL_ZONE,   v => { CHASE_DECEL_ZONE = v; },   1,   30,   0.5,  v => v.toFixed(1));
-        addDevSlider('Overshoot R',      () => CHASE_OVERSHOOT_R,  v => { CHASE_OVERSHOOT_R = v; },  0.1, 1.5,  0.01, v => v.toFixed(2));
-        addDevSlider('AP Hdg Thresh (°)',() => AP_HDG_THRESH,      v => { AP_HDG_THRESH = v; },      0.1, 10,   0.1,  v => v.toFixed(1) + '°');
-        addDevSlider('AP Spd Thresh (kt)',() => AP_SPD_THRESH,     v => { AP_SPD_THRESH = v; },      1,   30,   1,    v => Math.round(v) + ' kt');
-        addDevSlider('AP Alt Thresh (ft)',() => AP_ALT_THRESH,     v => { AP_ALT_THRESH = v; },      10,  500,  10,   v => Math.round(v) + ' ft');
+        addDevSlider('PID Kp',           () => CHASE_PID_KP,       v => { CHASE_PID_KP = v; },       0.1, 30,   0.1,  v => v.toFixed(1),
+            'Proportional gain — how strongly speed corrects per unit of distance error. Higher = snappier but risks oscillation.');
+        addDevSlider('PID Ki',           () => CHASE_PID_KI,       v => { CHASE_PID_KI = v; },       0,   0.5,  0.001,v => v.toFixed(3),
+            'Integral gain — removes steady-state error that Kp alone can\'t fix. Keep very small (≤0.1) to avoid wind-up.');
+        addDevSlider('PID Kd',           () => CHASE_PID_KD,       v => { CHASE_PID_KD = v; },       0,   20,   0.1,  v => v.toFixed(1),
+            'Derivative gain — damps overshoot by reacting to rate of change. Higher = smoother approach but slower response.');
+        addDevSlider('Hdg Kp',           () => CHASE_HDG_KP,       v => { CHASE_HDG_KP = v; },       1,   60,   0.5,  v => v.toFixed(1),
+            'Heading proportional gain — multiplies lateral error (NM) into a heading correction. Higher = tighter formation but can over-bank.');
+        addDevSlider('Hdg Max Corr (°)', () => CHASE_HDG_MAX_CORR, v => { CHASE_HDG_MAX_CORR = v; }, 5,   90,   1,    v => Math.round(v) + '°',
+            'Maximum heading correction applied for lateral offset. Limits how hard the AP banks to correct position.');
+        addDevSlider('Arrival Ratio',    () => CHASE_ARRIVAL_RATIO,v => { CHASE_ARRIVAL_RATIO = v; },0.5, 3,    0.05, v => v.toFixed(2),
+            'Chase→Escort transition distance = escort dist × this ratio. 1.25 = transition when within 125% of escort distance.');
+        addDevSlider('Decel Zone (×)',   () => CHASE_DECEL_ZONE,   v => { CHASE_DECEL_ZONE = v; },   1,   30,   0.5,  v => v.toFixed(1),
+            'Speed ramp-down starts at escort dist × this value. E.g. 8 = begin slowing at 8× the escort distance away.');
+        addDevSlider('Overshoot R',      () => CHASE_OVERSHOOT_R,  v => { CHASE_OVERSHOOT_R = v; },  0.1, 1.5,  0.01, v => v.toFixed(2),
+            'Airbrake threshold in chase: deploy spoilers if dist < escort dist × this. 0.85 = brakes at 85% of escort distance.');
+        addDevSlider('AP Hdg Thresh (°)',() => AP_HDG_THRESH,      v => { AP_HDG_THRESH = v; },      0.1, 10,   0.1,  v => v.toFixed(1) + '°',
+            'Minimum heading change before a new AP heading command is sent. Prevents jitter from tiny updates.');
+        addDevSlider('AP Spd Thresh (kt)',() => AP_SPD_THRESH,     v => { AP_SPD_THRESH = v; },      1,   30,   1,    v => Math.round(v) + ' kt',
+            'Minimum speed change before a new AP speed command is sent. Prevents constant micro-adjustments.');
+        addDevSlider('AP Alt Thresh (ft)',() => AP_ALT_THRESH,     v => { AP_ALT_THRESH = v; },      10,  500,  10,   v => Math.round(v) + ' ft',
+            'Minimum altitude change before a new AP altitude command is sent. Reduces altitude hunting.');
 
         // Reset button
         const resetRow = document.createElement('div');
@@ -3317,12 +3422,28 @@ function _hdgPidStep(pid, error, dt) {
     return Math.max(-CHASE_HDG_MAX_CORR, Math.min(CHASE_HDG_MAX_CORR, CHASE_HDG_KP * error));
 }
 
+// Returns my position in the target's reference frame (metres).
+// forwardM > 0 = I am ahead of target, lateralM > 0 = I am to target's right.
 function _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdgDeg) {
     const [vEast, vNorth] = latLonToMeters(trackedLat, trackedLon, myLat, myLon);
     const θ = trackedHdgDeg * Math.PI / 180;
-    const forwardM =  vEast * Math.sin(θ) + vNorth * Math.cos(θ);
-    const lateralM =  vEast * Math.cos(θ) - vNorth * Math.sin(θ);
+    // Project onto target's forward (θ) and right (θ+90°) axes
+    const forwardM =  vNorth * Math.cos(θ) + vEast * Math.sin(θ);
+    const lateralM = -vNorth * Math.sin(θ) + vEast * Math.cos(θ);
     return { forwardM, lateralM };
+}
+
+// Compute a lat/lon point that is (fwdM metres ahead, latM metres right) of a reference point
+// in the reference heading frame, then return [lat, lon].
+function _offsetLatLon(refLat, refLon, hdgDeg, fwdM, latM) {
+    const R = 6371000;
+    const θ = hdgDeg * Math.PI / 180;
+    // North/East displacement
+    const northM =  fwdM * Math.cos(θ) - latM * Math.sin(θ);
+    const eastM  =  fwdM * Math.sin(θ) + latM * Math.cos(θ);
+    const dLat = northM / R;
+    const dLon = eastM  / (R * Math.cos(refLat * Math.PI / 180));
+    return [refLat + dLat * 180 / Math.PI, refLon + dLon * 180 / Math.PI];
 }
 
 function _tickChaseEscort(myLat, myLon, myData) {
@@ -3334,28 +3455,36 @@ function _tickChaseEscort(myLat, myLon, myData) {
     const trackedAltFt = isFinite(parseFloat(_trackedAc.al)) ? parseFloat(_trackedAc.al)
         : (_trackedAc.co.length >= 3 && isFinite(parseFloat(_trackedAc.co[2]))
             ? parseFloat(_trackedAc.co[2]) * 3.28084 : null);
+    const trackedSpd   = isFinite(parseFloat(_trackedAc.s)) ? parseFloat(_trackedAc.s)
+        : (typeof _trackedAc._computedSpd === 'number' ? _trackedAc._computedSpd : _apCurrentSpeed());
 
     const now   = Date.now();
     const dtRaw = (now - (_chasePid.lastTime || now)) / 1000;
     const dt    = Math.min(2, Math.max(0.05, dtRaw));
 
-    const distNm      = calcDistNm(myLat, myLon, trackedLat, trackedLon);
-    const bearingDeg  = calcBearing(myLat, myLon, trackedLat, trackedLon);
-    const escortDistM = _escortDistNm * 1852;
+    const distNm = calcDistNm(myLat, myLon, trackedLat, trackedLon);
+    const distM  = distNm * 1852;
 
-    // Engage AP once — subsequent calls are no-ops
+    // Escort distance in NM (for threshold comparisons)
+    const escDistNm = _escortDistM / 1852;
+
+    // Re-chase threshold: if we drift more than 3× escort distance away, revert to chase
+    const rechaseThreshNm = escDistNm * 3.0;
+
     _apEnable();
 
+    // ── CHASE PHASE ───────────────────────────────────────────────────────────────
     if (_chasePhase === 'chase') {
+        const bearingDeg  = calcBearing(myLat, myLon, trackedLat, trackedLon);
         _apSetHeading(bearingDeg);
         if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
-        const decelZoneNm = _escortDistNm * CHASE_DECEL_ZONE;
+        const decelZoneNm = escDistNm * CHASE_DECEL_ZONE;
         const closeRatio  = Math.max(0, Math.min(1, distNm / decelZoneNm));
         const chaseSpd    = Math.round(
             CHASE_MIN_SPEED_KT + (CHASE_MAX_SPEED_KT - CHASE_MIN_SPEED_KT) * closeRatio);
 
-        if (distNm < _escortDistNm * CHASE_OVERSHOOT_R) {
+        if (distNm < escDistNm * CHASE_OVERSHOOT_R) {
             _apSetSpeed(CHASE_MIN_SPEED_KT);
             _apSetAirbrakes(true);
         } else {
@@ -3363,7 +3492,7 @@ function _tickChaseEscort(myLat, myLon, myData) {
             _apSetAirbrakes(false);
         }
 
-        if (distNm <= _escortDistNm * CHASE_ARRIVAL_RATIO) {
+        if (distNm <= escDistNm * CHASE_ARRIVAL_RATIO) {
             _chasePhase = 'escort';
             _apSetAirbrakes(false);
             _chasePid   = { integral: 0, prevError: 0, lastTime: now };
@@ -3372,48 +3501,89 @@ function _tickChaseEscort(myLat, myLon, myData) {
             _lastNearestCs = null;
         }
 
+    // ── ESCORT PHASE ─────────────────────────────────────────────────────────────
     } else {
-        if (_escortMode === null) {
-            _apSetHeading(trackedHdg);
-            if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
-            const errNm  = distNm - _escortDistNm;
-            const pidOut = _pidStep(_chasePid, errNm, dt);
-            _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
-                Math.min(CHASE_MAX_SPEED_KT, _apCurrentSpeed() + pidOut)));
+        // Re-chase if we've drifted too far
+        if (distNm > rechaseThreshNm) {
+            _chasePhase = 'chase';
+            _apSetAirbrakes(false);
+            _chasePid   = { integral: 0, prevError: 0, lastTime: now };
+            _headingPid = { integral: 0, prevError: 0, lastTime: now };
+            _lastHudUpdate = 0;
+            _lastNearestCs = null;
             return;
         }
 
-        const { forwardM, lateralM } = _relativePosition(
-            myLat, myLon, trackedLat, trackedLon, trackedHdg);
+        // Determine desired formation offset in target-relative frame (metres)
+        // +fwd = ahead of target, +lat = to target's right
+        let tgtFwdM = 0;
+        let tgtLatM = 0;
+        if (_escortMode === null) {
+            // Direct trailing: stay at escortDistM directly behind target
+            tgtFwdM = -_escortDistM;
+            tgtLatM = 0;
+        } else if (_escortMode === 'forward') {
+            tgtFwdM = +_escortDistM;
+            tgtLatM = 0;
+        } else if (_escortMode === 'back') {
+            tgtFwdM = -_escortDistM;
+            tgtLatM = 0;
+        } else if (_escortMode === 'left') {
+            // Left of target from target's perspective = negative lateral
+            tgtFwdM = 0;
+            tgtLatM = -_escortDistM;
+        } else if (_escortMode === 'right') {
+            tgtFwdM = 0;
+            tgtLatM = +_escortDistM;
+        }
 
-        if (_escortMode === 'left' || _escortMode === 'right') {
-            const targetLateral = (_escortMode === 'left') ? -escortDistM : +escortDistM;
-            const lateralErr    = (lateralM - targetLateral) / 1852;
-            const hdgCorr       = _hdgPidStep(_headingPid, lateralErr, dt);
+        // Apply fine-tune offsets
+        tgtFwdM += _ftFwdOffset;
+        tgtLatM += _ftLatOffset;
 
-            _apSetHeading(trackedHdg - hdgCorr);
-            if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
+        // Compute the absolute lat/lon of the desired formation slot
+        const [tgtLat, tgtLon] = _offsetLatLon(trackedLat, trackedLon, trackedHdg, tgtFwdM, tgtLatM);
 
-            const trackedSpd = isFinite(parseFloat(_trackedAc.s)) ? parseFloat(_trackedAc.s)
-                : (typeof _trackedAc._computedSpd === 'number'
-                    ? _trackedAc._computedSpd : _apCurrentSpeed());
-            const spdAdj = CHASE_PID_KP * (distNm - _escortDistNm) * 0.3;
-            _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
-                Math.min(CHASE_MAX_SPEED_KT, trackedSpd + spdAdj)));
+        // Distance and bearing from MY position to that slot
+        const slotDistM   = latLonToMeters(myLat, myLon, tgtLat, tgtLon);
+        const slotDist    = Math.hypot(slotDistM[0], slotDistM[1]);
+        const bearingToSlot = calcBearing(myLat, myLon, tgtLat, tgtLon);
 
-        } else if (_escortMode === 'forward' || _escortMode === 'back') {
-            const targetForward = (_escortMode === 'forward') ? +escortDistM : -escortDistM;
-            const forwardErrNm  = (forwardM - targetForward) / 1852;
-            const pidOut        = _pidStep(_chasePid, -forwardErrNm, dt);
+        // Steer directly toward the slot
+        _apSetHeading(bearingToSlot);
+        if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
-            _apSetHeading(trackedHdg);
-            if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
+        // Speed: match target speed + PID correction for slot distance error
+        // slotDist in metres — positive = need to close, negative = need to back off
+        const slotDistNm = slotDist / 1852;
 
-            const baseSpeed = isFinite(parseFloat(_trackedAc.s)) ? parseFloat(_trackedAc.s)
-                : (typeof _trackedAc._computedSpd === 'number'
-                    ? _trackedAc._computedSpd : _apCurrentSpeed());
-            _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
-                Math.min(CHASE_MAX_SPEED_KT, baseSpeed + pidOut)));
+        // Determine if we're overshot past the slot
+        const { forwardM, lateralM } = _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdg);
+        const myFwdM = forwardM, myLatM = lateralM;
+        // Check overshoot: am I on the wrong side of the slot in the dominant axis?
+        let overshot = false;
+        if (_escortMode === 'forward' && myFwdM > tgtFwdM + _escortDistM * 0.15) overshot = true;
+        if (_escortMode === 'back'    && myFwdM < tgtFwdM - _escortDistM * 0.15) overshot = true;
+        if (_escortMode === 'left'    && myLatM < tgtLatM - _escortDistM * 0.15) overshot = true;
+        if (_escortMode === 'right'   && myLatM > tgtLatM + _escortDistM * 0.15) overshot = true;
+        if (_escortMode === null      && myFwdM < tgtFwdM - _escortDistM * 0.15) overshot = true;
+
+        const errNm  = slotDistNm; // always positive — we want it to be zero
+        // When close (< 0.05 NM to slot), hold target speed; when far, add proportional correction
+        const pidOut = _pidStep(_chasePid, errNm, dt);
+        const desiredSpd = Math.max(CHASE_MIN_SPEED_KT,
+            Math.min(CHASE_MAX_SPEED_KT, trackedSpd + pidOut));
+
+        if (overshot) {
+            _apSetSpeed(CHASE_MIN_SPEED_KT);
+            _apSetAirbrakes(true);
+        } else if (slotDist < 50) {
+            // Arrived at slot — hold target speed exactly
+            _apSetAirbrakes(false);
+            _apSetSpeed(trackedSpd);
+        } else {
+            _apSetAirbrakes(false);
+            _apSetSpeed(desiredSpd);
         }
     }
 }
