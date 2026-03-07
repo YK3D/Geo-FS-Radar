@@ -3792,28 +3792,18 @@ const CHASE_PID_KD        =  3.0;
 const CHASE_HDG_KP        = 20.0;
 const CHASE_HDG_MAX_CORR  = 35;
 const CHASE_MIN_SPEED_KT  = 60;
-const CHASE_MAX_SPEED_KT  = 1000;
+const CHASE_MAX_SPEED_KT  = 600;
 const CHASE_ARRIVAL_RATIO = 1.25;
 const CHASE_DECEL_ZONE    = 8;
 const CHASE_OVERSHOOT_R   = 0.85;
-const AP_UI_SYNC_MS       = 400;
 const AP_HDG_THRESH       = 1;
 const AP_SPD_THRESH       = 5;
 const AP_ALT_THRESH       = 50;
 
-// ── Engagement state — prevents repeated toggle() calls ─────────────
-// This is THE fix for the flicker: _apEngaged tracks whether we have
-// already turned the AP on. _apEnable() is now a no-op if already engaged.
+// ── Engagement state ─────────────────────────────
 let _apEngaged = false;
 
 // ── Autopilot wrappers ───────────────────────────
-
-function _apFireInputChange(el, value) {
-    if (!el) return;
-    el.value = value;
-    ['input', 'change'].forEach(type =>
-        el.dispatchEvent(new Event(type, { bubbles: true })));
-}
 
 function _apEnable() {
     if (_apEngaged) return;
@@ -3843,19 +3833,11 @@ function _apSetHeading(hdg) {
         if (Math.abs(((h - _apLastHdg + 540) % 360) - 180) < AP_HDG_THRESH) return;
         _apLastHdg = h;
         if (typeof ap.setCourse === 'function') { ap.setCourse(h); return; }
-        const animVals = window.geofs?.animation?.values;
-        if (ap.values != null && ap.values !== animVals) {
+        if (ap.values != null) {
             if ('heading'    in ap.values) ap.values.heading    = h;
             if ('heading360' in ap.values) ap.values.heading360 = h;
             return;
         }
-        if (typeof ap.setHDG     === 'function') { ap.setHDG(h); return; }
-        if (typeof ap.setHeading === 'function') { ap.setHeading(h); return; }
-        if (typeof ap.set        === 'function') { ap.set('heading', h); return; }
-        if ('selectedHeading' in ap) { ap.selectedHeading = h; return; }
-        if ('targetHeading'   in ap) { ap.targetHeading   = h; return; }
-        if ('hdg'             in ap) { ap.hdg             = h; return; }
-        if ('heading'         in ap) { ap.heading         = h; return; }
         _apSteerByBank(h);
     } catch(e) {}
 }
@@ -3864,7 +3846,7 @@ function _apSteerByBank(targetHdg) {
     try {
         const av = window.geofs?.animation?.values;
         const currentHdg = av?.heading360 ?? 0;
-        const err = ((targetHdg - currentHdg + 540) % 360) - 180;
+        const err       = ((targetHdg - currentHdg + 540) % 360) - 180;
         const bankDeg   = Math.max(-45, Math.min(45, err * 0.6));
         const rollInput = bankDeg / 45;
         const ac = window.geofs?.aircraft?.instance;
@@ -3883,7 +3865,7 @@ function _apSetSpeed(kts) {
         _apLastSpd = s;
         if (typeof ap.setSpeed === 'function') { ap.setSpeed(s); return; }
         if (ap.values != null && 'speed' in ap.values) { ap.values.speed = s; return; }
-        if ('speed' in ap) { ap.speed = s; return; }
+        if ('speed' in ap) { ap.speed = s; }
     } catch(e) {}
 }
 
@@ -3896,26 +3878,8 @@ function _apSetAltitude(ft) {
         _apLastAlt = a;
         if (typeof ap.setAltitude === 'function') { ap.setAltitude(a); return; }
         if (ap.values != null && 'altitude' in ap.values) { ap.values.altitude = a; return; }
-        if ('altitude' in ap) { ap.altitude = a; return; }
+        if ('altitude' in ap) { ap.altitude = a; }
     } catch(e) {}
-}
-
-function _apSyncBar() {
-    const now = Date.now();
-    if (now - _apUiSync < AP_UI_SYNC_MS) return;
-    _apUiSync = now;
-    if (_apLastHdg > -900) {
-        _apFireInputChange(document.querySelector('.geofs-autopilot-bar .geofs-autopilot-course'), _apLastHdg);
-        _apFireInputChange(document.querySelector('.geofs-autopilot .geofs-autopilot-course'), _apLastHdg);
-    }
-    if (_apLastSpd >= 0) {
-        _apFireInputChange(document.querySelector('.geofs-autopilot-bar .geofs-autopilot-knots'), _apLastSpd);
-        _apFireInputChange(document.querySelector('.geofs-autopilot-kias'), _apLastSpd);
-    }
-    if (_apLastAlt > -9e8) {
-        _apFireInputChange(document.querySelector('.geofs-autopilot-bar .geofs-autopilot-altitude'), _apLastAlt);
-        _apFireInputChange(document.querySelector('.geofs-autopilot .geofs-autopilot-altitude'), _apLastAlt);
-    }
 }
 
 function _apSetAirbrakes(deploy) {
@@ -3961,21 +3925,19 @@ function _hdgPidStep(pid, error, dt) {
 function _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdgDeg) {
     const [vEast, vNorth] = latLonToMeters(trackedLat, trackedLon, myLat, myLon);
     const θ = trackedHdgDeg * Math.PI / 180;
-    const forwardM  =  vEast * Math.sin(θ) + vNorth * Math.cos(θ);
-    const lateralM  =  vEast * Math.cos(θ) - vNorth * Math.sin(θ);
+    const forwardM =  vEast * Math.sin(θ) + vNorth * Math.cos(θ);
+    const lateralM =  vEast * Math.cos(θ) - vNorth * Math.sin(θ);
     return { forwardM, lateralM };
 }
 
 // ── Main chase/escort tick ───────────────────────
-// _apEnable() is called each tick but is a no-op after first engagement —
-// the AP stays on until _apDisable() is explicitly called on disengage.
 
 function _tickChaseEscort(myLat, myLon, myData) {
     if (!_chaseActive || !_trackedAc || !_trackedAc.co) return;
 
     const trackedLat   = _trackedAc.co[0];
     const trackedLon   = _trackedAc.co[1];
-    const trackedHdg   = isFinite(parseFloat(_trackedAc.h)) ? parseFloat(_trackedAc.h) : 0;
+    const trackedHdg   = isFinite(parseFloat(_trackedAc.h))  ? parseFloat(_trackedAc.h)  : 0;
     const trackedAltFt = isFinite(parseFloat(_trackedAc.al)) ? parseFloat(_trackedAc.al)
         : (_trackedAc.co.length >= 3 && isFinite(parseFloat(_trackedAc.co[2]))
             ? parseFloat(_trackedAc.co[2]) * 3.28084 : null);
@@ -3988,8 +3950,11 @@ function _tickChaseEscort(myLat, myLon, myData) {
     const bearingDeg  = calcBearing(myLat, myLon, trackedLat, trackedLon);
     const escortDistM = _escortDistNm * 1852;
 
+    // Ensure AP is on — no-op if already engaged
+    _apEnable();
+
     if (_chasePhase === 'chase') {
-        _apEnable(); // no-op if already engaged
+        // ── Phase 1: Chase ───────────────────────────────────────────
         _apSetHeading(bearingDeg);
         if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
@@ -4016,8 +3981,7 @@ function _tickChaseEscort(myLat, myLon, myData) {
         }
 
     } else {
-        _apEnable(); // no-op if already engaged
-
+        // ── Phase 2: Escort ──────────────────────────────────────────
         if (_escortMode === null) {
             _apSetHeading(trackedHdg);
             if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
@@ -4025,7 +3989,6 @@ function _tickChaseEscort(myLat, myLon, myData) {
             const pidOut = _pidStep(_chasePid, errNm, dt);
             _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
                 Math.min(CHASE_MAX_SPEED_KT, _apCurrentSpeed() + pidOut)));
-            _apSyncBar();
             return;
         }
 
@@ -4033,6 +3996,7 @@ function _tickChaseEscort(myLat, myLon, myData) {
             myLat, myLon, trackedLat, trackedLon, trackedHdg);
 
         if (_escortMode === 'left' || _escortMode === 'right') {
+            // ── Parallel formation ───────────────────────────────────
             const targetLateral = (_escortMode === 'left') ? -escortDistM : +escortDistM;
             const lateralErr    = (lateralM - targetLateral) / 1852;
             const hdgCorr       = _hdgPidStep(_headingPid, lateralErr, dt);
@@ -4043,12 +4007,12 @@ function _tickChaseEscort(myLat, myLon, myData) {
             const trackedSpd = isFinite(parseFloat(_trackedAc.s)) ? parseFloat(_trackedAc.s)
                 : (typeof _trackedAc._computedSpd === 'number'
                     ? _trackedAc._computedSpd : _apCurrentSpeed());
-            const distErrNm = distNm - _escortDistNm;
-            const spdAdj    = CHASE_PID_KP * distErrNm * 0.3;
+            const spdAdj = CHASE_PID_KP * (distNm - _escortDistNm) * 0.3;
             _apSetSpeed(Math.max(CHASE_MIN_SPEED_KT,
                 Math.min(CHASE_MAX_SPEED_KT, trackedSpd + spdAdj)));
 
         } else if (_escortMode === 'forward' || _escortMode === 'back') {
+            // ── Collinear formation ──────────────────────────────────
             const targetForward = (_escortMode === 'forward') ? +escortDistM : -escortDistM;
             const forwardErrNm  = (forwardM - targetForward) / 1852;
             const pidOut        = _pidStep(_chasePid, -forwardErrNm, dt);
@@ -4063,7 +4027,6 @@ function _tickChaseEscort(myLat, myLon, myData) {
                 Math.min(CHASE_MAX_SPEED_KT, baseSpeed + pidOut)));
         }
     }
-    _apSyncBar();
 }
 
 // ═══════════════════════════════════════════════════
