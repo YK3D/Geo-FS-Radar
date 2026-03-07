@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════
-// Geo-FS-Radar  v8.07
+// Geo-FS-Radar  v8.08
 // ═══════════════════════════════════════════════════
 
 const ilsPrefs = {
@@ -30,6 +30,7 @@ const _PREF_DEFAULTS = {
     hideFooPlayers:     false,
     hideGroundPlayers:  false,
     showTrail:          false,
+    hideAirbases:       false,
     trailLengthSec:     60,
     trailWidth:         2,
     tcasEnabled:        true,
@@ -507,6 +508,70 @@ nearestHUD.style.cssText = `
 `;
 document.body.appendChild(nearestHUD);
 
+// Event delegation — all HUD button/toggle clicks route here.
+// Using the stable outer container avoids the first-click-to-focus issue
+// that occurs when handlers are attached to freshly innerHTML'd elements.
+nearestHUD.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const target = e.target.closest('[data-hud-action]');
+    if (!target) return;
+    const action = target.dataset.hudAction;
+
+    if (action === 'stop-tracking') {
+        stopTracking();
+    } else if (action === 'track-player') {
+        const acId = target.dataset.acId;
+        if (!acId || !_hudNearestData) return;
+        const ac = _hudNearestData.nearest;
+        if (!ac) return;
+        _trackedAc    = ac;
+        _trackedId    = ac.id;
+        activePopupCs = ac.cs;
+        _lastHudUpdate = 0;
+        _lastNearestCs = null;
+        updateNearestHUD(ac, _hudNearestData.myData);
+    } else if (action === 'toggle-isolate') {
+        settings.isolateTracked = !settings.isolateTracked;
+        saveSettings();
+        updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+    } else if (action === 'toggle-chase') {
+        _chaseActive = !_chaseActive;
+        if (_chaseActive) {
+            _chasePhase = 'chase';
+            _escortMode = null;
+            _chasePid   = { integral: 0, prevError: 0, lastTime: 0 };
+            _headingPid = { integral: 0, prevError: 0, lastTime: 0 };
+            _apLastHdg  = -999;
+            _apLastSpd  = -1;
+            _apLastAlt  = -9e9;
+        } else {
+            _apDisable();
+            _apSetAirbrakes(false);
+            _chasePhase = 'chase';
+            _escortMode = null;
+        }
+        _lastHudUpdate = 0;
+        _lastNearestCs = null;
+        updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+    } else if (action === 'escort-mode') {
+        const mode = target.dataset.escortMode;
+        _escortMode = (_escortMode === mode) ? null : mode;
+        _chasePid   = { integral: 0, prevError: 0, lastTime: 0 };
+        _headingPid = { integral: 0, prevError: 0, lastTime: 0 };
+        _lastHudUpdate = 0;
+        _lastNearestCs = null;
+        updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+    }
+});
+nearestHUD.addEventListener('input', (e) => {
+    const target = e.target;
+    if (target.id === 'radarEscortDistSlider') {
+        _escortDistNm = parseFloat(target.value);
+        const lbl = document.getElementById('radarEscortDistLbl');
+        if (lbl) lbl.textContent = _escortDistNm.toFixed(1) + ' NM';
+    }
+});
+
 function bearingCompass(deg) {
     const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
     return dirs[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
@@ -646,6 +711,32 @@ function updateNearestHUD(nearest, myData) {
     const cs  = displayAc.cs && displayAc.cs !== 'Foo' ? displayAc.cs : `Foo #${displayAc.id || '???'}`;
     const { distStr, brgStr } = _hudDistBrg(myData, displayAc);
 
+    // ETA — only shown while chase is active
+    let etaStr = null;
+    if (_chaseActive && myData && displayAc.co && displayAc.co.length >= 2) {
+        try {
+            const distNm = calcDistNm(myData.lat, myData.lon, displayAc.co[0], displayAc.co[1]);
+            const av = geofs.animation?.values;
+            const mySpd = av?.groundSpeed ?? av?.kias ?? 0;
+            const trackedSpd = isFinite(parseFloat(displayAc.s)) ? parseFloat(displayAc.s)
+                : (typeof displayAc._computedSpd === 'number' ? displayAc._computedSpd : 0);
+            const bearingRad = calcBearing(myData.lat, myData.lon, displayAc.co[0], displayAc.co[1]) * Math.PI / 180;
+            const targetHdgRad = isFinite(parseFloat(displayAc.h)) ? parseFloat(displayAc.h) * Math.PI / 180 : 0;
+            const relativeRecessionKt = trackedSpd * Math.cos(targetHdgRad - bearingRad);
+            const closingSpeedKt = mySpd - relativeRecessionKt;
+            if (_chasePhase === 'escort') {
+                etaStr = 'ARRIVED';
+            } else if (closingSpeedKt > 5) {
+                const etaMin = (distNm / closingSpeedKt) * 60;
+                if (etaMin < 1) etaStr = Math.round(etaMin * 60) + 's';
+                else if (etaMin < 60) etaStr = etaMin.toFixed(1) + ' min';
+                else etaStr = (etaMin / 60).toFixed(1) + ' hr';
+            } else {
+                etaStr = '—';
+            }
+        } catch(e) { etaStr = '—'; }
+    }
+
     const nearAl = (() => {
         const v = parseFloat(displayAc.al);
         if (isFinite(v)) return v;
@@ -685,12 +776,12 @@ function updateNearestHUD(nearest, myData) {
     const isolateRow = isTracking ? `
   <div style="padding:5px 14px 6px;border-top:1px solid ${t.hudSep};
     display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
-    id="radarIsolateRow">
+    data-hud-action="toggle-isolate">
     <span style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont}px;letter-spacing:0.5px;">Isolate aircraft</span>
-    <div id="radarIsolateSw" style="width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
+    <div style="width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
       border-radius:${UI.menuSwitchH/2}px;position:relative;background:${isolateSwBg};
-      border:1px solid ${t.switchBorder};transition:background .2s;flex-shrink:0;">
-      <div id="radarIsolateKnob" style="position:absolute;top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+      border:1px solid ${t.switchBorder};transition:background .2s;flex-shrink:0;pointer-events:none;">
+      <div style="position:absolute;top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
         left:${isolateKnobLeft}px;width:${UI.menuKnobSize}px;height:${UI.menuKnobSize}px;
         border-radius:50%;background:${isolateKnobBg};transition:left .2s,background .2s;"></div>
     </div>
@@ -733,13 +824,13 @@ function updateNearestHUD(nearest, myData) {
     <div style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont - 1}px;text-align:center;margin-bottom:5px;letter-spacing:0.5px;">ESCORT POSITION</div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:auto auto auto;gap:4px;max-width:140px;margin:0 auto;">
       <div></div>
-      <div id="radarEscortFwd" style="${btnBase}${arrowStyle('forward')}text-align:center;" title="Ahead of target">▲</div>
+      <div data-hud-action="escort-mode" data-escort-mode="forward" style="${btnBase}${arrowStyle('forward')}text-align:center;" title="Ahead of target">▲</div>
       <div></div>
-      <div id="radarEscortLeft" style="${btnBase}${arrowStyle('left')}text-align:center;" title="Left wing">◀</div>
+      <div data-hud-action="escort-mode" data-escort-mode="left" style="${btnBase}${arrowStyle('left')}text-align:center;" title="Left wing">◀</div>
       <div style="display:flex;align-items:center;justify-content:center;color:${t.hudLabel};font-size:10px;letter-spacing:0.5px;">FORM</div>
-      <div id="radarEscortRight" style="${btnBase}${arrowStyle('right')}text-align:center;" title="Right wing">▶</div>
+      <div data-hud-action="escort-mode" data-escort-mode="right" style="${btnBase}${arrowStyle('right')}text-align:center;" title="Right wing">▶</div>
       <div></div>
-      <div id="radarEscortBack" style="${btnBase}${arrowStyle('back')}text-align:center;" title="Behind target">▼</div>
+      <div data-hud-action="escort-mode" data-escort-mode="back" style="${btnBase}${arrowStyle('back')}text-align:center;" title="Behind target">▼</div>
       <div></div>
     </div>
   </div>`;
@@ -748,12 +839,12 @@ function updateNearestHUD(nearest, myData) {
     const chaseRow = isTracking ? `
   <div style="padding:5px 14px 6px;border-top:1px solid ${t.hudSep};
     display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
-    id="radarChaseRow">
+    data-hud-action="toggle-chase">
     <span style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont}px;letter-spacing:0.5px;">Chase / Escort Player</span>
-    <div id="raderChaseSw" style="width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
+    <div style="width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
       border-radius:${UI.menuSwitchH/2}px;position:relative;background:${chaseSwBg};
-      border:1px solid ${t.switchBorder};transition:background .2s;flex-shrink:0;">
-      <div id="radarChaseKnob" style="position:absolute;top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+      border:1px solid ${t.switchBorder};transition:background .2s;flex-shrink:0;pointer-events:none;">
+      <div style="position:absolute;top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
         left:${chaseKnobLeft}px;width:${UI.menuKnobSize}px;height:${UI.menuKnobSize}px;
         border-radius:50%;background:${chaseKnobBg};transition:left .2s,background .2s;"></div>
     </div>
@@ -764,7 +855,7 @@ function updateNearestHUD(nearest, myData) {
 
     const stopBtn = isTracking ? `
   <div style="padding:4px 14px 8px;">
-    <button id="radarStopTrackBtn" style="width:100%;padding:6px 0;
+    <button data-hud-action="stop-tracking" style="width:100%;padding:6px 0;
       background:${t.hudBg};border:1px solid ${t.hudBorder};border-radius:6px;
       color:${t.hudLabel};font:bold ${UI.hudStopBtnFont}px ${FONT_SANS};
       letter-spacing:1px;cursor:pointer;transition:background .15s;">✕  STOP TRACKING</button>
@@ -772,7 +863,7 @@ function updateNearestHUD(nearest, myData) {
 
     const trackBtn = !isTracking ? `
   <div style="padding:4px 14px 8px;border-top:1px solid ${t.hudSep};">
-    <button id="radarTrackPlayerBtn" style="width:100%;padding:6px 0;
+    <button data-hud-action="track-player" data-ac-id="${displayAc?.id ?? ''}" style="width:100%;padding:6px 0;
       background:rgba(60,180,80,0.15);border:1px solid rgba(60,200,80,0.4);border-radius:6px;
       color:rgba(100,230,110,0.95);font:bold ${UI.hudStopBtnFont}px ${FONT_SANS};
       letter-spacing:1px;cursor:pointer;transition:background .15s;">▶  TRACK PLAYER</button>
@@ -812,6 +903,11 @@ function updateNearestHUD(nearest, myData) {
       <div style="color:${t.hudLabel};font-size:${UI.hudSectionLabelFont}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Heading</div>
       <div style="color:${t.hudHdg};font-size:${UI.hudDataFont}px;font-weight:bold">${hdgStr}</div>
     </div>
+    ${etaStr !== null ? `
+    <div style="grid-column:1/-1;border-top:1px solid ${t.hudSep};margin-top:4px;padding-top:4px;">
+      <div style="color:${t.hudLabel};font-size:${UI.hudSectionLabelFont}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">ETA (Chase)</div>
+      <div style="color:${etaStr === 'ARRIVED' ? 'rgba(100,255,140,0.95)' : 'rgba(255,200,60,0.98)'};font-size:${UI.hudDataFont}px;font-weight:bold">${etaStr}</div>
+    </div>` : ''}
   </div>
   ${isolateRow}
   ${chaseRow}
@@ -819,88 +915,7 @@ function updateNearestHUD(nearest, myData) {
   ${trackBtn}
 </div>`;
 
-    const isolateRowEl = document.getElementById('radarIsolateRow');
-    if (isolateRowEl) {
-        isolateRowEl.onclick = (e) => {
-            e.stopPropagation();
-            settings.isolateTracked = !settings.isolateTracked;
-            saveSettings();
-            updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
-        };
-    }
-    const stopEl = document.getElementById('radarStopTrackBtn');
-    if (stopEl) {
-        stopEl.onmouseover = () => stopEl.style.background = T().hudBorder;
-        stopEl.onmouseout  = () => stopEl.style.background = T().hudBg;
-        stopEl.onclick     = (e) => { e.stopPropagation(); stopTracking(); };
-    }
-
-    const trackPlayerEl = document.getElementById('radarTrackPlayerBtn');
-    if (trackPlayerEl) {
-        trackPlayerEl.onmouseover = () => trackPlayerEl.style.background = 'rgba(60,180,80,0.3)';
-        trackPlayerEl.onmouseout  = () => trackPlayerEl.style.background = 'rgba(60,180,80,0.15)';
-        trackPlayerEl.onclick = (e) => {
-            e.stopPropagation();
-            if (!displayAc) return;
-            _trackedAc     = displayAc;
-            _trackedId     = displayAc.id;
-            activePopupCs  = displayAc.cs;
-            _lastHudUpdate = 0;
-            _lastNearestCs = null;
-            updateNearestHUD(displayAc, myData);
-        };
-    }
-
-    const chaseRowEl = document.getElementById('radarChaseRow');
-    if (chaseRowEl) {
-        chaseRowEl.onclick = (e) => {
-            e.stopPropagation();
-            _chaseActive = !_chaseActive;
-            if (_chaseActive) {
-                _chasePhase = 'chase';
-                _escortMode = null;
-                _chasePid   = { integral: 0, prevError: 0, lastTime: 0 };
-                _headingPid = { integral: 0, prevError: 0, lastTime: 0 };
-                _apLastHdg  = -999;
-                _apLastSpd  = -1;
-                _apLastAlt  = -9e9;
-                // _apEngaged stays false here — _apEnable() will fire on first tick
-            } else {
-                _apDisable();
-                _apSetAirbrakes(false);
-                _chasePhase = 'chase';
-                _escortMode = null;
-            }
-            _lastHudUpdate = 0;
-            _lastNearestCs = null;
-            updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
-        };
-    }
-
-    const distSlider = document.getElementById('radarEscortDistSlider');
-    if (distSlider) {
-        distSlider.addEventListener('input', (e) => {
-            e.stopPropagation();
-            _escortDistNm = parseFloat(e.target.value);
-            const lbl = document.getElementById('radarEscortDistLbl');
-            if (lbl) lbl.textContent = _escortDistNm.toFixed(1) + ' NM';
-        });
-        distSlider.addEventListener('click', e => e.stopPropagation());
-    }
-
-    ['forward', 'back', 'left', 'right'].forEach(mode => {
-        const el = document.getElementById(`radarEscort${mode.charAt(0).toUpperCase() + mode.slice(1)}`);
-        if (!el) return;
-        el.addEventListener('click', (e) => {
-            e.stopPropagation();
-            _escortMode = (_escortMode === mode) ? null : mode;
-            _chasePid   = { integral: 0, prevError: 0, lastTime: 0 };
-            _headingPid = { integral: 0, prevError: 0, lastTime: 0 };
-            _lastHudUpdate = 0;
-            _lastNearestCs = null;
-            updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
-        });
-    });
+    // All interactive elements use data-hud-action delegation (see nearestHUD.addEventListener above)
 }
 
 function repositionNearestHUD() {
@@ -1335,6 +1350,35 @@ function createMenu() {
     addToggle('Range Rings',              'showRings');
     addToggle('Ring Labels',              'showRingLabels');
     addSep();
+    // Radar Opacity moved here from Radar Settings
+    {
+        const row = document.createElement('div');
+        row.style.cssText = `padding:${UI.menuRowPadY-1}px 16px 2px;`;
+        const topRow = document.createElement('div');
+        topRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;';
+        const lbl = document.createElement('span');
+        lbl.dataset.menuRowlbl = '1';
+        lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
+        lbl.textContent = 'Radar Opacity';
+        const valSpan = document.createElement('span');
+        valSpan.style.cssText = `color:rgba(0,255,0,0.95);font:bold ${UI.menuRowFont}px ${FONT_MONO};min-width:52px;text-align:right;`;
+        valSpan.textContent = Math.round((prefs.radarOpacity ?? 1) * 100) + '%';
+        topRow.appendChild(lbl); topRow.appendChild(valSpan);
+        const slider = document.createElement('input');
+        slider.type = 'range'; slider.min = 0.1; slider.max = 1.0; slider.step = 0.05;
+        slider.value = prefs.radarOpacity ?? 1;
+        slider.style.cssText = `width:100%;margin:0;accent-color:rgba(0,200,0,0.8);`;
+        slider.addEventListener('input', () => {
+            const v = parseFloat(slider.value);
+            prefs.radarOpacity = v;
+            radarCanvas.style.opacity = v;
+            valSpan.textContent = Math.round(v * 100) + '%';
+            savePrefs();
+        });
+        row.appendChild(topRow); row.appendChild(slider);
+        panel.appendChild(row);
+    }
+    addSep();
 
     addSection('✈️  Traffic');
     addToggle('Show Traffic',             'showTraffic');
@@ -1478,6 +1522,40 @@ function createMenu() {
 
     addSection('🗺️  Map');
     addToggle('Airports & Runways',       'showAirports');
+    // Hide Airbases — suppresses placeholder dots for airports without runway data
+    {
+        const row = document.createElement('div');
+        row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
+            padding:${UI.menuRowPadY}px 16px;cursor:pointer;transition:background .15s;`;
+        row.onmouseover = () => row.style.background = T().menuRowHover;
+        row.onmouseout  = () => row.style.background = '';
+        const lbl = document.createElement('span');
+        lbl.dataset.menuRowlbl = '1';
+        lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
+        lbl.textContent = 'Hide Airbases';
+        const sw = document.createElement('div');
+        const knobOff = 3, knobOn = UI.menuSwitchW - UI.menuKnobSize - 3;
+        sw.style.cssText = `width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
+            border-radius:${UI.menuSwitchH/2}px;position:relative;
+            background:${prefs.hideAirbases ? 'rgba(0,200,0,0.75)' : 'rgba(80,80,80,0.5)'};
+            border:1px solid rgba(0,255,0,0.3);transition:background .2s;flex-shrink:0;`;
+        const knob = document.createElement('div');
+        knob.style.cssText = `position:absolute;top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+            left:${prefs.hideAirbases ? knobOn : knobOff}px;
+            width:${UI.menuKnobSize}px;height:${UI.menuKnobSize}px;border-radius:50%;
+            background:${prefs.hideAirbases ? '#0f0' : '#888'};transition:left .2s,background .2s;`;
+        sw.appendChild(knob); row.appendChild(lbl); row.appendChild(sw);
+        row.onclick = () => {
+            prefs.hideAirbases = !prefs.hideAirbases;
+            const t = T();
+            sw.style.background   = prefs.hideAirbases ? t.switchOn  : t.switchOff;
+            knob.style.left       = prefs.hideAirbases ? knobOn+'px' : knobOff+'px';
+            knob.style.background = prefs.hideAirbases ? t.knobOn    : t.knobOff;
+            drawAirportsAndRunways._cachedGroups = null; // invalidate cache
+            savePrefs();
+        };
+        panel.appendChild(row);
+    }
     addSep();
 
     addSection('🛩️  My Aircraft');
@@ -1686,97 +1764,8 @@ function createMenu() {
         onCommit: applyPrefs,
     });
 
-    {
-        const row = document.createElement('div');
-        row.style.cssText = `padding:${UI.menuRowPadY-1}px 16px 2px;`;
-        const topRow = document.createElement('div');
-        topRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;';
-        const lbl = document.createElement('span');
-        lbl.dataset.menuRowlbl = '1';
-        lbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
-        lbl.textContent = 'Radar Opacity';
-        const valSpan = document.createElement('span');
-        valSpan.style.cssText = `color:rgba(0,255,0,0.95);font:bold ${UI.menuRowFont}px ${FONT_MONO};min-width:52px;text-align:right;`;
-        valSpan.textContent = Math.round((prefs.radarOpacity ?? 1) * 100) + '%';
-        topRow.appendChild(lbl); topRow.appendChild(valSpan);
-        const slider = document.createElement('input');
-        slider.type = 'range'; slider.min = 0.1; slider.max = 1.0; slider.step = 0.05;
-        slider.value = prefs.radarOpacity ?? 1;
-        slider.style.cssText = `width:100%;margin:0;accent-color:rgba(0,200,0,0.8);`;
-        slider.addEventListener('input', () => {
-            const v = parseFloat(slider.value);
-            prefs.radarOpacity = v;
-            radarCanvas.style.opacity = v;
-            valSpan.textContent = Math.round(v * 100) + '%';
-            savePrefs();
-        });
-        row.appendChild(topRow); row.appendChild(slider);
-        panel.appendChild(row);
-    }
-    addSep();
-
     addSection('📡  API Status');
     addStatusRow();
-
-    addSep();
-    addSection('🎨  Customization');
-
-    function addUISlider(label, key, min, max, step) {
-        addSlider({
-            label,
-            get:  () => UI[key],
-            set:  v  => { UI[key] = v; },
-            fmt:  v  => v + 'px',
-            min, max, step,
-            onCommit: () => {},
-        });
-    }
-
-    addUISlider('Blip Dot Size',        'blipDotR',       2,  14, 1);
-    addUISlider('Traffic Triangle Size','blipTriTip',     6,  20, 1);
-    addUISlider('Blip Label Font',      'blipLabelFont',  8,  18, 1);
-    addSep();
-    addUISlider('Player Triangle Size', 'playerTriTip',   8,  24, 1);
-    addUISlider('Player CS Font',       'playerCsFont',   10, 22, 1);
-    addSep();
-    addUISlider('HUD Callsign Font',    'hudCallsignFont', 12, 26, 1);
-    addUISlider('HUD Data Font',        'hudDataFont',    10, 22, 1);
-    addUISlider('HUD Label Font',       'hudSectionLabelFont', 10, 20, 1);
-    addSep();
-    addUISlider('Compass Font',         'compassFont',    16, 40, 1);
-    addUISlider('Ring Label Font',      'ringLabelFont',  10, 22, 1);
-    addSep();
-    addUISlider('Popup Title Font',     'popupTitleFont', 12, 24, 1);
-    addUISlider('Popup Body Font',      'popupBodyFont',  11, 20, 1);
-    addSep();
-    addSlider({
-        label:    'Trail Thickness',
-        get:      () => prefs.trailWidth,
-        set:      v  => { prefs.trailWidth = v; },
-        fmt:      v  => v + ' px',
-        min: 1, max: 8, step: 0.5,
-        onCommit: savePrefs,
-    });
-    addSep();
-
-    addSection('🛬  ILS Display');
-    function addILSFontSlider(label, key) {
-        addSlider({
-            label,
-            get:  () => ilsPrefs[key],
-            set:  v  => { ilsPrefs[key] = v; },
-            fmt:  v  => v + 'px',
-            min: 7, max: 24, step: 1,
-            onCommit: saveIlsPrefs,
-        });
-    }
-    addILSFontSlider('ILS Header Font',       'fontHeader');
-    addILSFontSlider('ILS Label Font',         'fontLabel');
-    addILSFontSlider('ILS Value Font',         'fontValue');
-    addILSFontSlider('ILS Pill Label Font',    'fontPillLabel');
-    addILSFontSlider('ILS Pill Value Font',    'fontPillValue');
-    addILSFontSlider('ILS Footer Font',        'fontFooter');
-    addILSFontSlider('ILS Bank Label Font',    'fontBankValue');
     addSep();
 
     addSection('⚠️  TCAS');
@@ -1852,6 +1841,185 @@ function createMenu() {
     addSlider({ label: 'Intersection Margin', get: () => prefs.tcasMarginM, set: v => { prefs.tcasMarginM = v; }, fmt: v => v + ' m', min: 50, max: 2000, step: 50, onCommit: savePrefs });
     addSlider({ label: 'Audio Cooldown', get: () => prefs.tcasAudioCooldownMs / 1000, set: v => { prefs.tcasAudioCooldownMs = v * 1000; }, fmt: v => v + ' s', min: 1, max: 60, step: 1, onCommit: savePrefs });
     addSlider({ label: 'Time Sync Tolerance', get: () => prefs.tcasTimeTolPct, set: v => { prefs.tcasTimeTolPct = v; }, fmt: v => '±' + v + '%', min: 1, max: 30, step: 1, onCommit: savePrefs });
+    addSep();
+
+    addSection('🎯  Tracking');
+    addSlider({
+        label: 'Min Chase Speed',
+        get:  () => CHASE_MIN_SPEED_KT,
+        set:  v  => { CHASE_MIN_SPEED_KT = v; },
+        fmt:  v  => Math.round(v) + ' kt',
+        min: 30, max: 300, step: 5,
+        onCommit: _saveChaseParams,
+    });
+    addSlider({
+        label: 'Max Chase Speed',
+        get:  () => CHASE_MAX_SPEED_KT,
+        set:  v  => { CHASE_MAX_SPEED_KT = v; },
+        fmt:  v  => Math.round(v) + ' kt',
+        min: 100, max: 1200, step: 10,
+        onCommit: _saveChaseParams,
+    });
+    addSep();
+    // Dev Testing Mode toggle + PID sliders
+    {
+        const devSectionWrap = document.createElement('div');
+        let devOpen = false;
+
+        const devHeaderRow = document.createElement('div');
+        devHeaderRow.style.cssText = `display:flex;align-items:center;justify-content:space-between;
+            padding:${UI.menuRowPadY}px 16px;cursor:pointer;transition:background .15s;`;
+        devHeaderRow.onmouseover = () => devHeaderRow.style.background = T().menuRowHover;
+        devHeaderRow.onmouseout  = () => devHeaderRow.style.background = '';
+        const devLbl = document.createElement('span');
+        devLbl.style.cssText = `color:rgba(200,255,200,0.9);font:${UI.menuRowFont}px ${FONT_SANS};`;
+        devLbl.textContent = '🔧 Dev Testing Mode';
+        const devArrow = document.createElement('span');
+        devArrow.style.cssText = `color:rgba(0,255,0,0.7);font:bold ${UI.menuRowFont}px ${FONT_SANS};`;
+        devArrow.textContent = '▶';
+        devHeaderRow.appendChild(devLbl); devHeaderRow.appendChild(devArrow);
+        panel.appendChild(devHeaderRow);
+
+        const devBody = document.createElement('div');
+        devBody.style.cssText = 'display:none;';
+
+        function addDevSlider(label, getF, setF, min, max, step, fmt) {
+            const row = document.createElement('div');
+            row.style.cssText = `padding:${UI.menuRowPadY-1}px 16px 2px;`;
+            const topRow = document.createElement('div');
+            topRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;';
+            const lbl = document.createElement('span');
+            lbl.style.cssText = `color:rgba(180,240,180,0.8);font:${UI.menuRowFont-1}px ${FONT_SANS};`;
+            lbl.textContent = label;
+            const val = document.createElement('span');
+            val.style.cssText = `color:rgba(255,200,80,0.95);font:bold ${UI.menuRowFont-1}px ${FONT_MONO};min-width:52px;text-align:right;`;
+            val.textContent = fmt(getF());
+            topRow.appendChild(lbl); topRow.appendChild(val);
+            const sldr = document.createElement('input');
+            sldr.type = 'range'; sldr.min = min; sldr.max = max; sldr.step = step;
+            sldr.value = getF();
+            sldr.style.cssText = `width:100%;margin:0;accent-color:rgba(255,180,0,0.8);`;
+            sldr.addEventListener('input', () => {
+                setF(parseFloat(sldr.value));
+                val.textContent = fmt(getF());
+                _saveChaseParams();
+            });
+            row.appendChild(topRow); row.appendChild(sldr);
+            devBody.appendChild(row);
+        }
+
+        addDevSlider('PID Kp',           () => CHASE_PID_KP,       v => { CHASE_PID_KP = v; },       0.1, 30,   0.1,  v => v.toFixed(1));
+        addDevSlider('PID Ki',           () => CHASE_PID_KI,       v => { CHASE_PID_KI = v; },       0,   0.5,  0.001,v => v.toFixed(3));
+        addDevSlider('PID Kd',           () => CHASE_PID_KD,       v => { CHASE_PID_KD = v; },       0,   20,   0.1,  v => v.toFixed(1));
+        addDevSlider('Hdg Kp',           () => CHASE_HDG_KP,       v => { CHASE_HDG_KP = v; },       1,   60,   0.5,  v => v.toFixed(1));
+        addDevSlider('Hdg Max Corr (°)', () => CHASE_HDG_MAX_CORR, v => { CHASE_HDG_MAX_CORR = v; }, 5,   90,   1,    v => Math.round(v) + '°');
+        addDevSlider('Arrival Ratio',    () => CHASE_ARRIVAL_RATIO,v => { CHASE_ARRIVAL_RATIO = v; },0.5, 3,    0.05, v => v.toFixed(2));
+        addDevSlider('Decel Zone (×)',   () => CHASE_DECEL_ZONE,   v => { CHASE_DECEL_ZONE = v; },   1,   30,   0.5,  v => v.toFixed(1));
+        addDevSlider('Overshoot R',      () => CHASE_OVERSHOOT_R,  v => { CHASE_OVERSHOOT_R = v; },  0.1, 1.5,  0.01, v => v.toFixed(2));
+        addDevSlider('AP Hdg Thresh (°)',() => AP_HDG_THRESH,      v => { AP_HDG_THRESH = v; },      0.1, 10,   0.1,  v => v.toFixed(1) + '°');
+        addDevSlider('AP Spd Thresh (kt)',() => AP_SPD_THRESH,     v => { AP_SPD_THRESH = v; },      1,   30,   1,    v => Math.round(v) + ' kt');
+        addDevSlider('AP Alt Thresh (ft)',() => AP_ALT_THRESH,     v => { AP_ALT_THRESH = v; },      10,  500,  10,   v => Math.round(v) + ' ft');
+
+        // Reset button
+        const resetRow = document.createElement('div');
+        resetRow.style.cssText = 'padding:4px 16px 8px;';
+        const resetBtn = document.createElement('button');
+        resetBtn.textContent = '↺  Reset to Defaults';
+        resetBtn.style.cssText = `width:100%;padding:5px 0;
+            background:rgba(80,30,0,0.7);border:1px solid rgba(255,120,40,0.5);border-radius:6px;
+            color:rgba(255,160,80,0.95);font:bold ${UI.menuRowFont-1}px ${FONT_SANS};cursor:pointer;`;
+        resetBtn.onclick = () => {
+            CHASE_PID_KP = 8.0; CHASE_PID_KI = 0.05; CHASE_PID_KD = 3.0;
+            CHASE_HDG_KP = 20.0; CHASE_HDG_MAX_CORR = 35;
+            CHASE_MIN_SPEED_KT = 60; CHASE_MAX_SPEED_KT = 600;
+            CHASE_ARRIVAL_RATIO = 1.25; CHASE_DECEL_ZONE = 8; CHASE_OVERSHOOT_R = 0.85;
+            AP_HDG_THRESH = 1; AP_SPD_THRESH = 5; AP_ALT_THRESH = 50;
+            _saveChaseParams();
+            // Rebuild panel to show updated values
+            const panelEl = document.getElementById('radarMenuPanel');
+            if (panelEl) { panelEl.remove(); }
+            createMenu();
+            openMenu();
+        };
+        resetRow.appendChild(resetBtn);
+        devBody.appendChild(resetRow);
+
+        devHeaderRow.onclick = () => {
+            devOpen = !devOpen;
+            devBody.style.display = devOpen ? 'block' : 'none';
+            devArrow.textContent = devOpen ? '▼' : '▶';
+        };
+
+        panel.appendChild(devBody);
+    }
+    addSep();
+
+    addSection('🎨  Customization');
+
+    function addUISlider(label, key, min, max, step) {
+        addSlider({
+            label,
+            get:  () => UI[key],
+            set:  v  => { UI[key] = v; },
+            fmt:  v  => v + 'px',
+            min, max, step,
+            onCommit: () => {},
+        });
+    }
+
+    addUISlider('Blip Dot Size',        'blipDotR',       2,  14, 1);
+    addUISlider('Traffic Triangle Size','blipTriTip',     6,  20, 1);
+    addUISlider('Blip Label Font',      'blipLabelFont',  8,  18, 1);
+    addSep();
+    addUISlider('Player Triangle Size', 'playerTriTip',   8,  24, 1);
+    addUISlider('Player CS Font',       'playerCsFont',   10, 22, 1);
+    addSep();
+    addUISlider('HUD Callsign Font',    'hudCallsignFont', 12, 26, 1);
+    addUISlider('HUD Data Font',        'hudDataFont',    10, 22, 1);
+    addUISlider('HUD Label Font',       'hudSectionLabelFont', 10, 20, 1);
+    addSep();
+    addUISlider('Compass Font',         'compassFont',    16, 40, 1);
+    addUISlider('Ring Label Font',      'ringLabelFont',  10, 22, 1);
+    addSep();
+    addUISlider('Popup Title Font',     'popupTitleFont', 12, 24, 1);
+    addUISlider('Popup Body Font',      'popupBodyFont',  11, 20, 1);
+    addSep();
+    addSlider({
+        label:    'Trail Thickness',
+        get:      () => prefs.trailWidth,
+        set:      v  => { prefs.trailWidth = v; },
+        fmt:      v  => v + ' px',
+        min: 1, max: 8, step: 0.5,
+        onCommit: savePrefs,
+    });
+    addSep();
+
+    // ILS Display sliders moved here from separate section
+    {
+        const ilsHdr = document.createElement('div');
+        ilsHdr.style.cssText = `color:rgba(0,180,220,0.75);font:bold ${UI.menuSectionFont}px ${FONT_SANS};
+            padding:8px 16px 3px;letter-spacing:1px;text-transform:uppercase;`;
+        ilsHdr.textContent = '— ILS Display —';
+        panel.appendChild(ilsHdr);
+    }
+    function addILSFontSlider(label, key) {
+        addSlider({
+            label,
+            get:  () => ilsPrefs[key],
+            set:  v  => { ilsPrefs[key] = v; },
+            fmt:  v  => v + 'px',
+            min: 7, max: 24, step: 1,
+            onCommit: saveIlsPrefs,
+        });
+    }
+    addILSFontSlider('ILS Header Font',       'fontHeader');
+    addILSFontSlider('ILS Label Font',         'fontLabel');
+    addILSFontSlider('ILS Value Font',         'fontValue');
+    addILSFontSlider('ILS Pill Label Font',    'fontPillLabel');
+    addILSFontSlider('ILS Pill Value Font',    'fontPillValue');
+    addILSFontSlider('ILS Footer Font',        'fontFooter');
+    addILSFontSlider('ILS Bank Label Font',    'fontBankValue');
+    addSep();
 
     document.body.appendChild(panel);
     repositionMenu();
@@ -2490,10 +2658,10 @@ function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpee
 
     let bankDeg = null;
     try {
-        const rawRoll = av?.roll ?? geofs.aircraft?.instance?.animationValue?.roll ?? null;
-        if (rawRoll !== null && isFinite(rawRoll)) {
-            bankDeg = Math.abs(rawRoll) <= 6.28 ? rawRoll * 180 / Math.PI : rawRoll;
-            bankDeg = Math.round(bankDeg * 10) / 10;
+        // aroll is the actual aircraft bank angle in degrees (not joystick roll input)
+        const rawBank = geofs.animation?.values?.aroll ?? null;
+        if (rawBank !== null && isFinite(rawBank)) {
+            bankDeg = Math.round(rawBank * 10) / 10;
         }
     } catch(e) {}
 
@@ -2987,19 +3155,52 @@ function worldToCanvas(dx, dy, cx, cy, rotRad) {
 // ALL of this is TOP-LEVEL — NOT inside drawRadar().
 // _apEngaged is declared in Section 3 above.
 
-const CHASE_PID_KP        =  8.0;
-const CHASE_PID_KI        =  0.05;
-const CHASE_PID_KD        =  3.0;
-const CHASE_HDG_KP        = 20.0;
-const CHASE_HDG_MAX_CORR  = 35;
-const CHASE_MIN_SPEED_KT  = 60;
-const CHASE_MAX_SPEED_KT  = 600;
-const CHASE_ARRIVAL_RATIO = 1.25;
-const CHASE_DECEL_ZONE    = 8;
-const CHASE_OVERSHOOT_R   = 0.85;
-const AP_HDG_THRESH       = 1;
-const AP_SPD_THRESH       = 5;
-const AP_ALT_THRESH       = 50;
+// Chase / Escort tunable parameters — loaded from prefs, overrideable via dev mode
+let CHASE_PID_KP        = 8.0;
+let CHASE_PID_KI        = 0.05;
+let CHASE_PID_KD        = 3.0;
+let CHASE_HDG_KP        = 20.0;
+let CHASE_HDG_MAX_CORR  = 35;
+let CHASE_MIN_SPEED_KT  = 60;
+let CHASE_MAX_SPEED_KT  = 600;
+let CHASE_ARRIVAL_RATIO = 1.25;
+let CHASE_DECEL_ZONE    = 8;
+let CHASE_OVERSHOOT_R   = 0.85;
+let AP_HDG_THRESH       = 1;
+let AP_SPD_THRESH       = 5;
+let AP_ALT_THRESH       = 50;
+
+// Load persisted chase params
+(function _loadChaseParams() {
+    try {
+        const saved = JSON.parse(localStorage.getItem('radarChaseParams') || '{}');
+        if (isFinite(saved.CHASE_PID_KP))       CHASE_PID_KP       = saved.CHASE_PID_KP;
+        if (isFinite(saved.CHASE_PID_KI))       CHASE_PID_KI       = saved.CHASE_PID_KI;
+        if (isFinite(saved.CHASE_PID_KD))       CHASE_PID_KD       = saved.CHASE_PID_KD;
+        if (isFinite(saved.CHASE_HDG_KP))       CHASE_HDG_KP       = saved.CHASE_HDG_KP;
+        if (isFinite(saved.CHASE_HDG_MAX_CORR)) CHASE_HDG_MAX_CORR = saved.CHASE_HDG_MAX_CORR;
+        if (isFinite(saved.CHASE_MIN_SPEED_KT)) CHASE_MIN_SPEED_KT = saved.CHASE_MIN_SPEED_KT;
+        if (isFinite(saved.CHASE_MAX_SPEED_KT)) CHASE_MAX_SPEED_KT = saved.CHASE_MAX_SPEED_KT;
+        if (isFinite(saved.CHASE_ARRIVAL_RATIO))CHASE_ARRIVAL_RATIO= saved.CHASE_ARRIVAL_RATIO;
+        if (isFinite(saved.CHASE_DECEL_ZONE))   CHASE_DECEL_ZONE   = saved.CHASE_DECEL_ZONE;
+        if (isFinite(saved.CHASE_OVERSHOOT_R))  CHASE_OVERSHOOT_R  = saved.CHASE_OVERSHOOT_R;
+        if (isFinite(saved.AP_HDG_THRESH))      AP_HDG_THRESH      = saved.AP_HDG_THRESH;
+        if (isFinite(saved.AP_SPD_THRESH))      AP_SPD_THRESH      = saved.AP_SPD_THRESH;
+        if (isFinite(saved.AP_ALT_THRESH))      AP_ALT_THRESH      = saved.AP_ALT_THRESH;
+    } catch(e) {}
+})();
+
+function _saveChaseParams() {
+    try {
+        localStorage.setItem('radarChaseParams', JSON.stringify({
+            CHASE_PID_KP, CHASE_PID_KI, CHASE_PID_KD,
+            CHASE_HDG_KP, CHASE_HDG_MAX_CORR,
+            CHASE_MIN_SPEED_KT, CHASE_MAX_SPEED_KT,
+            CHASE_ARRIVAL_RATIO, CHASE_DECEL_ZONE, CHASE_OVERSHOOT_R,
+            AP_HDG_THRESH, AP_SPD_THRESH, AP_ALT_THRESH,
+        }));
+    } catch(e) {}
+}
 
 // Engage AP once. No-op if already on.
 function _apEnable() {
@@ -3325,6 +3526,7 @@ function drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad) {
         const allPlaceholder = g.runways.length > 0 && g.runways.every(r => r.isPlaceholder);
 
         if (allPlaceholder) {
+            if (prefs.hideAirbases) return; // user opted to hide airbases without runway data
             ctx.beginPath(); ctx.arc(g.centX, g.centY, 5, 0, Math.PI*2);
             ctx.fillStyle = 'rgba(50,150,255,0.9)'; ctx.fill();
             ctx.strokeStyle = 'rgba(150,210,255,0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
