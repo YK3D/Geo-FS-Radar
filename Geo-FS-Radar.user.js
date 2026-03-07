@@ -3566,7 +3566,17 @@ function _tickChaseEscort(myLat, myLon, myData) {
         _apSetHeading(trackedHdg);
         _apSetSpeed(CHASE_MIN_SPEED_KT);
         _apSetAirbrakes(true);
+        if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
         return;
+    }
+
+    // ── SPEED-EXCESS SPOILER ──────────────────────────────────────────────────────
+    // Within escort distance + 100 m, if my speed ≥ tracked speed + 20 kt, deploy spoilers.
+    const _speedExcessZone = distM <= (_escortDistM + 100);
+    const _mySpd = _apCurrentSpeed();
+    const _speedTooHigh = _speedExcessZone && (_mySpd >= trackedSpd + 20);
+    if (_speedTooHigh) {
+        _apSetAirbrakes(true);
     }
 
     // ── CHASE PHASE ───────────────────────────────────────────────────────────────
@@ -3576,7 +3586,7 @@ function _tickChaseEscort(myLat, myLon, myData) {
         if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
         // Geometric overshoot handled globally above; we only reach here if not ahead of target.
-        _apSetAirbrakes(false);
+        if (!_speedTooHigh) _apSetAirbrakes(false);
         const finalApproachM = _escortDistM + 1000;
         if (distM <= finalApproachM) {
             // Final approach zone: match target speed + 50 kt; if already too fast apply brakes
@@ -3587,7 +3597,7 @@ function _tickChaseEscort(myLat, myLon, myData) {
                 _apSetAirbrakes(true);
             } else {
                 _apSetSpeed(approachSpd);
-                _apSetAirbrakes(false);
+                if (!_speedTooHigh) _apSetAirbrakes(false);
             }
         } else {
             // Normal chase — ramp speed down toward target as we close
@@ -3600,7 +3610,7 @@ function _tickChaseEscort(myLat, myLon, myData) {
 
         if (distNm <= escDistNm * CHASE_ARRIVAL_RATIO && altWithinBand) {
             _chasePhase = 'escort';
-            _apSetAirbrakes(false);
+            if (!_speedTooHigh) _apSetAirbrakes(false);
             _chasePid   = { integral: 0, prevError: 0, lastTime: now };
             _headingPid = { integral: 0, prevError: 0, lastTime: now };
             _lastHudUpdate = 0;
@@ -3612,7 +3622,7 @@ function _tickChaseEscort(myLat, myLon, myData) {
         // Re-chase if distance exceeds escort dist + 500m buffer, OR altitude drifts too far
         if (distM > rechaseThreshM || !altWithinBand) {
             _chasePhase = 'chase';
-            _apSetAirbrakes(false);
+            if (!_speedTooHigh) _apSetAirbrakes(false);
             _chasePid   = { integral: 0, prevError: 0, lastTime: now };
             _headingPid = { integral: 0, prevError: 0, lastTime: now };
             _lastHudUpdate = 0;
@@ -3670,6 +3680,7 @@ function _tickChaseEscort(myLat, myLon, myData) {
         const desiredSpd = Math.max(CHASE_MIN_SPEED_KT,
             Math.min(CHASE_MAX_SPEED_KT, trackedSpd + pidOut));
 
+        if (!_speedTooHigh) _apSetAirbrakes(false);
         if (slotDist < 50) {
             // On-slot — match tracked player's speed exactly
             _apSetSpeed(trackedSpd);
