@@ -469,7 +469,7 @@ rangeBox.style.cssText = `
     position:fixed; width:${UI.rangeBoxW + 60}px; height:${UI.rangeBoxH}px;
     background:rgba(0,40,0,0.82); border:1.5px solid rgba(0,255,0,0.6);
     border-radius:14px; box-shadow:0 0 12px rgba(0,255,0,0.35);
-    z-index:2147483646; display:flex; flex-direction:row;
+    z-index:2147483648; display:flex; flex-direction:row;
     align-items:center; justify-content:space-between; pointer-events:auto;
     padding:0 6px; gap:4px;
 `;
@@ -888,9 +888,26 @@ function updateNearestHUD(nearest, myData) {
   </div>`;
     })() : '';
 
+    // Altitude delta vs target for HUD display (computed from live aircraft data)
+    const _hudMyAltFt = (() => {
+        try {
+            const av = window.geofs?.animation?.values;
+            const a = av?.altitudeFt ?? av?.altitude ?? null;
+            return isFinite(a) ? a : null;
+        } catch(e) { return null; }
+    })();
+    const _hudTrackedAltFt = _chaseActive && _trackedAc
+        ? (isFinite(parseFloat(_trackedAc.al)) ? parseFloat(_trackedAc.al) : null)
+        : null;
+    const _hudAltDelta = (_hudMyAltFt !== null && _hudTrackedAltFt !== null)
+        ? Math.abs(_hudMyAltFt - _hudTrackedAltFt) : null;
+    const _hudAltOk    = _hudAltDelta === null || _hudAltDelta <= CHASE_ALT_BAND_FT;
+    const _hudAltLabel = _chaseActive && _hudAltDelta !== null
+        ? ` <span style="color:${_hudAltOk ? 'rgba(100,255,100,0.85)' : 'rgba(255,100,60,0.9)'};font-size:${UI.hudIsolateLabelFont - 2}px;">ALT Δ ${Math.round(_hudAltDelta)} ft ${_hudAltOk ? '✓' : '✗'}</span>` : '';
+
     const chasePhaseRow = _chaseActive ? `
   <div style="padding:2px 14px 4px;text-align:center;">
-    <span style="color:${chasePhaseCol};font-size:${UI.hudIsolateLabelFont - 1}px;letter-spacing:1px;font-weight:bold;">● ${chasePhaseLbl}</span>
+    <span style="color:${chasePhaseCol};font-size:${UI.hudIsolateLabelFont - 1}px;letter-spacing:1px;font-weight:bold;">● ${chasePhaseLbl}</span>${_hudAltLabel}
   </div>` : '';
 
     const escortArrowPanel = (_chaseActive && _chasePhase === 'escort') ? (() => {
@@ -1087,8 +1104,11 @@ function repositionUI() {
     const rt = parseInt(radarCanvas.style.top)  || 0;
     const rb = document.getElementById('radarRangeBox');
     if (rb) {
-        rb.style.left = (rl + radarSize/2 - 55) + 'px';
-        rb.style.top  = (rt - 60) + 'px';
+        const boxW = rb.offsetWidth  || (UI.rangeBoxW + 60);
+        const boxH = rb.offsetHeight || UI.rangeBoxH;
+        // Horizontally centred over radar, positioned just above its top edge
+        rb.style.left = Math.round(rl + radarSize / 2 - boxW / 2) + 'px';
+        rb.style.top  = Math.round(rt - boxH - 6) + 'px';
     }
     const mb = document.getElementById('radarMenuBtn');
     if (mb) {
@@ -2024,6 +2044,10 @@ function createMenu() {
             'Minimum speed change before a new AP speed command is sent. Prevents constant micro-adjustments.');
         addDevSlider('AP Alt Thresh (ft)',() => AP_ALT_THRESH,     v => { AP_ALT_THRESH = v; },      10,  500,  10,   v => Math.round(v) + ' ft',
             'Minimum altitude change before a new AP altitude command is sent. Reduces altitude hunting.');
+        addDevSlider('Alt Band (±ft)',    () => CHASE_ALT_BAND_FT, v => { CHASE_ALT_BAND_FT = v; },  50,  2000, 50,   v => '±' + Math.round(v) + ' ft',
+            'My altitude must be within ±this value of the target\'s altitude to count as arrived / stay in escort. If altitude drifts outside band, reverts to chase.');
+        addDevSlider('Re-chase Buffer (m)', () => ESCORT_RECHASE_M, v => { ESCORT_RECHASE_M = v; }, 100, 5000, 100, v => Math.round(v) + ' m',
+            'How far beyond escort distance before escort reverts to chase. E.g. 500 m = re-chase if dist > escort dist + 500 m.');
 
         // Reset button
         const resetRow = document.createElement('div');
@@ -3274,6 +3298,8 @@ let CHASE_OVERSHOOT_R   = 0.85;
 let AP_HDG_THRESH       = 1;
 let AP_SPD_THRESH       = 5;
 let AP_ALT_THRESH       = 50;
+let CHASE_ALT_BAND_FT   = 150;   // ±ft — must be within this alt band to count as arrived/escort
+let ESCORT_RECHASE_M    = 500;   // extra metres beyond escort dist before reverting to chase
 
 // Load persisted chase params
 (function _loadChaseParams() {
@@ -3289,9 +3315,11 @@ let AP_ALT_THRESH       = 50;
         if (isFinite(saved.CHASE_ARRIVAL_RATIO))CHASE_ARRIVAL_RATIO= saved.CHASE_ARRIVAL_RATIO;
         if (isFinite(saved.CHASE_DECEL_ZONE))   CHASE_DECEL_ZONE   = saved.CHASE_DECEL_ZONE;
         if (isFinite(saved.CHASE_OVERSHOOT_R))  CHASE_OVERSHOOT_R  = saved.CHASE_OVERSHOOT_R;
-        if (isFinite(saved.AP_HDG_THRESH))      AP_HDG_THRESH      = saved.AP_HDG_THRESH;
-        if (isFinite(saved.AP_SPD_THRESH))      AP_SPD_THRESH      = saved.AP_SPD_THRESH;
-        if (isFinite(saved.AP_ALT_THRESH))      AP_ALT_THRESH      = saved.AP_ALT_THRESH;
+        if (isFinite(saved.AP_HDG_THRESH))         AP_HDG_THRESH         = saved.AP_HDG_THRESH;
+        if (isFinite(saved.AP_SPD_THRESH))         AP_SPD_THRESH         = saved.AP_SPD_THRESH;
+        if (isFinite(saved.AP_ALT_THRESH))         AP_ALT_THRESH         = saved.AP_ALT_THRESH;
+        if (isFinite(saved.CHASE_ALT_BAND_FT))     CHASE_ALT_BAND_FT     = saved.CHASE_ALT_BAND_FT;
+        if (isFinite(saved.ESCORT_RECHASE_M))      ESCORT_RECHASE_M      = saved.ESCORT_RECHASE_M;
     } catch(e) {}
 })();
 
@@ -3303,6 +3331,7 @@ function _saveChaseParams() {
             CHASE_MIN_SPEED_KT, CHASE_MAX_SPEED_KT,
             CHASE_ARRIVAL_RATIO, CHASE_DECEL_ZONE, CHASE_OVERSHOOT_R,
             AP_HDG_THRESH, AP_SPD_THRESH, AP_ALT_THRESH,
+            CHASE_ALT_BAND_FT, ESCORT_RECHASE_M,
         }));
     } catch(e) {}
 }
@@ -3388,13 +3417,51 @@ function _apSetAltitude(ft) {
 
 function _apSetAirbrakes(deploy) {
     try {
-        const c = window.controls;
-        if (!c?.airbrakes) return;
+        const c  = window.controls;
+        const ac = window.geofs?.aircraft?.instance;
         const target = deploy ? 1 : 0;
-        if (c.airbrakes.target === target) return;
-        c.airbrakes.target = target;
-        if (typeof c.setPartAnimationDelta === 'function')
-            c.setPartAnimationDelta(c.airbrakes);
+
+        // ── controls.airbrakes (part animation) ──────────────────────────────
+        if (c?.airbrakes) {
+            c.airbrakes.target = target;
+            c.airbrakes.value  = target;
+            if (typeof c.setPartAnimationDelta === 'function')
+                c.setPartAnimationDelta(c.airbrakes);
+        }
+
+        // ── controls.spoilers (some aircraft use this key) ───────────────────
+        if (c?.spoilers) {
+            c.spoilers.target = target;
+            c.spoilers.value  = target;
+            if (typeof c.setPartAnimationDelta === 'function')
+                c.setPartAnimationDelta(c.spoilers);
+        }
+
+        // ── geofs.aircraft.instance.controls array / object ──────────────────
+        if (ac) {
+            if (Array.isArray(ac.controls)) {
+                // Index 9 is spoilers in most GeoFS aircraft
+                if (ac.controls.length > 9) ac.controls[9] = target;
+            } else if (ac.controls && typeof ac.controls === 'object') {
+                if ('airbrakes'  in ac.controls) ac.controls.airbrakes  = target;
+                if ('spoilers'   in ac.controls) ac.controls.spoilers   = target;
+                if ('airBrakes'  in ac.controls) ac.controls.airBrakes  = target;
+            }
+        }
+
+        // ── Direct keyboard/control function calls ───────────────────────────
+        if (deploy) {
+            if (typeof c?.setAirbrakes  === 'function') c.setAirbrakes(1);
+            if (typeof c?.setSpoilers   === 'function') c.setSpoilers(1);
+            if (typeof geofs?.controls?.setAirbrakes === 'function')
+                geofs.controls.setAirbrakes(1);
+        } else {
+            if (typeof c?.setAirbrakes  === 'function') c.setAirbrakes(0);
+            if (typeof c?.setSpoilers   === 'function') c.setSpoilers(0);
+            if (typeof geofs?.controls?.setAirbrakes === 'function')
+                geofs.controls.setAirbrakes(0);
+        }
+
         _apAirbrakesOn = deploy;
     } catch(e) {}
 }
@@ -3465,11 +3532,30 @@ function _tickChaseEscort(myLat, myLon, myData) {
     const distNm = calcDistNm(myLat, myLon, trackedLat, trackedLon);
     const distM  = distNm * 1852;
 
+    // My current altitude in feet
+    const myAltFt = (() => {
+        try {
+            const av = window.geofs?.animation?.values;
+            const a  = av?.altitudeFt ?? av?.altitude ?? av?.altMSL;
+            if (isFinite(a)) return a;
+            // fallback: co[2] is metres MSL in GeoFS
+            const co = window.geofs?.aircraft?.instance?.llaLocation;
+            if (co && isFinite(co[2])) return co[2] * 3.28084;
+        } catch(e) {}
+        return null;
+    })();
+
+    // Altitude delta vs target (null = unknown, treat as within band)
+    const altDeltaFt = (myAltFt !== null && trackedAltFt !== null)
+        ? Math.abs(myAltFt - trackedAltFt) : 0;
+    const altWithinBand = altDeltaFt <= CHASE_ALT_BAND_FT;
+
     // Escort distance in NM (for threshold comparisons)
     const escDistNm = _escortDistM / 1852;
 
-    // Re-chase threshold: if we drift more than 3× escort distance away, revert to chase
-    const rechaseThreshNm = escDistNm * 3.0;
+    // Re-chase threshold: escort distance + configurable hysteresis
+    const rechaseThreshM  = _escortDistM + ESCORT_RECHASE_M;
+    const rechaseThreshNm = rechaseThreshM / 1852;
 
     _apEnable();
 
@@ -3492,7 +3578,7 @@ function _tickChaseEscort(myLat, myLon, myData) {
             _apSetAirbrakes(false);
         }
 
-        if (distNm <= escDistNm * CHASE_ARRIVAL_RATIO) {
+        if (distNm <= escDistNm * CHASE_ARRIVAL_RATIO && altWithinBand) {
             _chasePhase = 'escort';
             _apSetAirbrakes(false);
             _chasePid   = { integral: 0, prevError: 0, lastTime: now };
@@ -3503,8 +3589,8 @@ function _tickChaseEscort(myLat, myLon, myData) {
 
     // ── ESCORT PHASE ─────────────────────────────────────────────────────────────
     } else {
-        // Re-chase if we've drifted too far
-        if (distNm > rechaseThreshNm) {
+        // Re-chase if distance exceeds escort dist + 500m buffer, OR altitude drifts too far
+        if (distM > rechaseThreshM || !altWithinBand) {
             _chasePhase = 'chase';
             _apSetAirbrakes(false);
             _chasePid   = { integral: 0, prevError: 0, lastTime: now };
