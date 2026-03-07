@@ -3648,21 +3648,36 @@ function _tickChaseEscort(myLat, myLon, myData) {
         const [tgtLat, tgtLon] = _offsetLatLon(trackedLat, trackedLon, trackedHdg, tgtFwdM, tgtLatM);
 
         // Distance and bearing from MY position to that slot
-        const slotDistM   = latLonToMeters(myLat, myLon, tgtLat, tgtLon);
-        const slotDist    = Math.hypot(slotDistM[0], slotDistM[1]);
+        const slotVec       = latLonToMeters(myLat, myLon, tgtLat, tgtLon);
+        const slotDist      = Math.hypot(slotVec[0], slotVec[1]);
         const bearingToSlot = calcBearing(myLat, myLon, tgtLat, tgtLon);
 
-        // Steer directly toward the slot
-        _apSetHeading(bearingToSlot);
+        // Heading: blend from bearing-to-slot toward tracked player's heading as we close.
+        // Beyond 200 m from slot: steer directly to slot.
+        // Within 200 m: linearly blend toward trackedHdg so we match their course on arrival.
+        // Within 30 m (on-slot): use trackedHdg exactly.
+        let cmdHdg;
+        if (slotDist <= 30) {
+            cmdHdg = trackedHdg;
+        } else if (slotDist <= 200) {
+            const t = (slotDist - 30) / (200 - 30); // 1 = far edge, 0 = near edge
+            // Blend angles correctly (shortest arc)
+            let diff = ((trackedHdg - bearingToSlot + 540) % 360) - 180;
+            cmdHdg = bearingToSlot + diff * (1 - t);
+        } else {
+            cmdHdg = bearingToSlot;
+        }
+        _apSetHeading(cmdHdg);
+
+        // Altitude: always track the player's current altitude
         if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
         // Speed: match target speed + PID correction for slot distance error
         const slotDistNm = slotDist / 1852;
 
         // Overshoot = I have passed the target in their forward axis (I am in front of them).
-        // This is the only case where airbrakes make physical sense — I overran them.
         const { forwardM: escFwdM } = _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdg);
-        const escortOvershot = escFwdM > 0; // positive = I am ahead of the target
+        const escortOvershot = escFwdM > 0;
 
         const errNm  = slotDistNm;
         const pidOut = _pidStep(_chasePid, errNm, dt);
@@ -3670,11 +3685,11 @@ function _tickChaseEscort(myLat, myLon, myData) {
             Math.min(CHASE_MAX_SPEED_KT, trackedSpd + pidOut));
 
         if (escortOvershot) {
-            // Passed the target — hard braking
+            // Passed the target — hard braking, match their heading
             _apSetSpeed(CHASE_MIN_SPEED_KT);
             _apSetAirbrakes(true);
         } else if (slotDist < 50) {
-            // On-slot — match target speed exactly
+            // On-slot — match tracked player's speed, heading, altitude exactly
             _apSetAirbrakes(false);
             _apSetSpeed(trackedSpd);
         } else {
