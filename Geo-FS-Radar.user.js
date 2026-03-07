@@ -3587,10 +3587,12 @@ function _tickChaseEscort(myLat, myLon, myData) {
 
         // Geometric overshoot handled globally above; we only reach here if not ahead of target.
         if (!_speedTooHigh) _apSetAirbrakes(false);
+        // Chase speed floor: never drop below tracked player speed + 10 kt while chasing
+        const chaseFloorSpd = Math.min(CHASE_MAX_SPEED_KT, trackedSpd + 10);
         const finalApproachM = _escortDistM + 1000;
         if (distM <= finalApproachM) {
-            // Final approach zone: match target speed + 50 kt; if already too fast apply brakes
-            const approachSpd = Math.min(CHASE_MAX_SPEED_KT, trackedSpd + 50);
+            // Final approach zone: target speed + 50 kt; if already too fast apply brakes
+            const approachSpd = Math.min(CHASE_MAX_SPEED_KT, Math.max(chaseFloorSpd, trackedSpd + 50));
             const mySpd = _apCurrentSpeed();
             if (mySpd > approachSpd + AP_SPD_THRESH) {
                 _apSetSpeed(approachSpd);
@@ -3603,9 +3605,9 @@ function _tickChaseEscort(myLat, myLon, myData) {
             // Normal chase — ramp speed down toward target as we close
             const decelZoneNm = escDistNm * CHASE_DECEL_ZONE;
             const closeRatio  = Math.max(0, Math.min(1, distNm / decelZoneNm));
-            const chaseSpd    = Math.round(
+            const rawSpd      = Math.round(
                 CHASE_MIN_SPEED_KT + (CHASE_MAX_SPEED_KT - CHASE_MIN_SPEED_KT) * closeRatio);
-            _apSetSpeed(chaseSpd);
+            _apSetSpeed(Math.max(chaseFloorSpd, rawSpd));
         }
 
         if (distNm <= escDistNm * CHASE_ARRIVAL_RATIO && altWithinBand) {
