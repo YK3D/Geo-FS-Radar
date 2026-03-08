@@ -194,6 +194,7 @@ const settings = {
     orientMode:         'north',
     nightMode:          false,
     showAirports:       true,
+    showWaypoints:      true,
     showCallsign:       true,
     showPlayerTriangle: true,
     showNearestHUD:     true,
@@ -934,6 +935,10 @@ function updateNearestHUD(nearest, myData) {
       <div data-hud-action="escort-mode" data-escort-mode="back" style="${btnBase}${arrowStyle('back')}text-align:center;" title="Behind target">▼</div>
       <div></div>
     </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;max-width:140px;margin:5px auto 0;">
+      <div data-hud-action="escort-mode" data-escort-mode="above" style="${btnBase}${arrowStyle('above')}text-align:center;font-size:12px;padding:6px 4px;" title="50 m above target">▲ ABOVE</div>
+      <div data-hud-action="escort-mode" data-escort-mode="below" style="${btnBase}${arrowStyle('below')}text-align:center;font-size:12px;padding:6px 4px;" title="50 m below target">▼ BELOW</div>
+    </div>
   </div>`;
     })() : '';
 
@@ -1627,6 +1632,7 @@ function createMenu() {
 
     addSection('🗺️  Map');
     addToggle('Airports & Runways',       'showAirports');
+    addToggle('Flight Path Waypoints',    'showWaypoints');
     // Hide Airbases — suppresses placeholder dots for airports without runway data
     {
         const row = document.createElement('div');
@@ -3558,11 +3564,11 @@ function _tickChaseEscort(myLat, myLon, myData) {
     _apEnable();
 
     // ── UNIVERSAL OVERSHOOT GUARD ─────────────────────────────────────────────────
-    // If I am anywhere ahead of the tracked aircraft in their forward axis (forwardM > 0),
-    // lock heading to their heading and hold full airbrakes regardless of phase.
-    // Remains active until forwardM ≤ 0 (target draws level with or passes me).
+    // If I am more than (escortDist + 100 m) ahead of the tracked aircraft,
+    // lock heading to their heading and hold full airbrakes until back within escort distance.
     const { forwardM: _fwdCheck } = _relativePosition(myLat, myLon, trackedLat, trackedLon, trackedHdg);
-    if (_fwdCheck > 0) {
+    const _tooFarAhead = _fwdCheck > (_escortDistM + 100);
+    if (_tooFarAhead) {
         _apSetHeading(trackedHdg);
         _apSetSpeed(CHASE_MIN_SPEED_KT);
         _apSetAirbrakes(true);
@@ -3581,8 +3587,8 @@ function _tickChaseEscort(myLat, myLon, myData) {
 
     // ── CHASE PHASE ───────────────────────────────────────────────────────────────
     if (_chasePhase === 'chase') {
-        const bearingDeg  = calcBearing(myLat, myLon, trackedLat, trackedLon);
-        _apSetHeading(bearingDeg);
+        const bearingDeg = calcBearing(myLat, myLon, trackedLat, trackedLon);
+        _apSetHeading(distM <= _escortDistM + 100 ? trackedHdg : bearingDeg);
         if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
 
         // Geometric overshoot handled globally above; we only reach here if not ahead of target.
@@ -3636,8 +3642,8 @@ function _tickChaseEscort(myLat, myLon, myData) {
         // +fwd = ahead of target, +lat = to target's right
         let tgtFwdM = 0;
         let tgtLatM = 0;
+        let tgtAltOffsetFt = 0; // additional altitude offset for above/below modes
         if (_escortMode === null) {
-            // Direct trailing: stay at escortDistM directly behind target
             tgtFwdM = -_escortDistM;
             tgtLatM = 0;
         } else if (_escortMode === 'forward') {
@@ -3647,12 +3653,21 @@ function _tickChaseEscort(myLat, myLon, myData) {
             tgtFwdM = -_escortDistM;
             tgtLatM = 0;
         } else if (_escortMode === 'left') {
-            // Left of target from target's perspective = negative lateral
             tgtFwdM = 0;
             tgtLatM = -_escortDistM;
         } else if (_escortMode === 'right') {
             tgtFwdM = 0;
             tgtLatM = +_escortDistM;
+        } else if (_escortMode === 'above') {
+            // Same lat/lon as target, 50 m (≈164 ft) above
+            tgtFwdM = 0;
+            tgtLatM = 0;
+            tgtAltOffsetFt = +164;
+        } else if (_escortMode === 'below') {
+            // Same lat/lon as target, 50 m (≈164 ft) below
+            tgtFwdM = 0;
+            tgtLatM = 0;
+            tgtAltOffsetFt = -164;
         }
 
         // Apply fine-tune offsets
@@ -3672,8 +3687,8 @@ function _tickChaseEscort(myLat, myLon, myData) {
         const cmdHdg = (distM <= _escortDistM) ? trackedHdg : bearingToSlot;
         _apSetHeading(cmdHdg);
 
-        // Altitude: always track the player's current altitude
-        if (trackedAltFt !== null) _apSetAltitude(trackedAltFt);
+        // Altitude: track player's altitude + formation offset (above/below modes)
+        if (trackedAltFt !== null) _apSetAltitude(trackedAltFt + tgtAltOffsetFt);
 
         // Speed
         const slotDistNm = slotDist / 1852;
@@ -3887,6 +3902,120 @@ function drawPlayerTriangle(cx, cy, playerHeading, isGamePaused) {
 }
 
 // ═══════════════════════════════════════════════════
+// SECTION 16b — WAYPOINT / FLIGHT PATH DRAWING
+// ═══════════════════════════════════════════════════
+
+function drawWaypoints(playerLat, playerLon, cx, cy, rotRad) {
+    if (!settings.showWaypoints) return;
+    try {
+        // GeoFS exposes the flight plan on the autopilot object.
+        // Supported structures (GeoFS has changed over time):
+        //   geofs.autopilot.flightPlan.waypoints[]  — array of {lat,lon,name/id}
+        //   geofs.autopilot.waypoints[]
+        //   geofs.autopilot.route[]
+        const ap = window.geofs?.autopilot;
+        if (!ap) return;
+
+        const wpts = ap.flightPlan?.waypoints
+            ?? ap.flightPlan?.fixes
+            ?? ap.waypoints
+            ?? ap.route
+            ?? null;
+        if (!wpts || wpts.length === 0) return;
+
+        // Active (next) waypoint index — try every known property name
+        const activeIdx = ap.flightPlan?.currentWaypointIndex
+            ?? ap.flightPlan?.activeIndex
+            ?? ap.currentWaypointIndex
+            ?? ap.activeWaypointIndex
+            ?? ap.waypointIndex
+            ?? -1;
+
+        // ── Project each waypoint to canvas coords ───────────────────────────────
+        const pts = wpts.map(wp => {
+            const lat = wp.lat ?? wp.latitude  ?? wp.lla?.[0] ?? null;
+            const lon = wp.lon ?? wp.longitude ?? wp.lla?.[1] ?? null;
+            const name = wp.name ?? wp.id ?? wp.ident ?? wp.fix ?? '';
+            if (lat === null || lon === null || !isFinite(lat) || !isFinite(lon)) return null;
+            const [dx, dy] = latLonToMeters(playerLat, playerLon, lat, lon);
+            const [sx, sy] = worldToCanvas(dx, dy, cx, cy, rotRad);
+            return { sx, sy, name };
+        });
+
+        ctx.save();
+
+        // ── Draw connecting lines ────────────────────────────────────────────────
+        for (let i = 0; i < pts.length - 1; i++) {
+            const a = pts[i], b = pts[i + 1];
+            if (!a || !b) continue;
+
+            // Is this segment the "current" leg (leading into the active waypoint)?
+            const isActiveLeg = (i + 1 === activeIdx);
+
+            if (isActiveLeg) {
+                // Thicker, brighter neon purple for the active leg
+                ctx.strokeStyle = 'rgba(160,0,255,0.95)';
+                ctx.lineWidth   = 2.8;
+                ctx.shadowColor = 'rgba(160,0,255,0.7)';
+                ctx.shadowBlur  = 6;
+            } else {
+                // Standard neon purple, slightly thinner and more transparent
+                ctx.strokeStyle = 'rgba(180,60,255,0.65)';
+                ctx.lineWidth   = 1.8;
+                ctx.shadowColor = 'rgba(160,0,255,0.4)';
+                ctx.shadowBlur  = 4;
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(a.sx, a.sy);
+            ctx.lineTo(b.sx, b.sy);
+            ctx.stroke();
+        }
+
+        ctx.shadowBlur = 0;
+
+        // ── Draw waypoint dots and labels ────────────────────────────────────────
+        for (let i = 0; i < pts.length; i++) {
+            const pt = pts[i];
+            if (!pt) continue;
+
+            const isActive = (i === activeIdx);
+            const dotR     = isActive ? 5 : 3.5;
+            const dotColor = isActive ? 'rgba(220,80,255,1)' : 'rgba(180,60,255,0.85)';
+            const glowCol  = isActive ? 'rgba(200,0,255,0.8)' : 'rgba(160,0,255,0.4)';
+
+            ctx.fillStyle   = dotColor;
+            ctx.shadowColor = glowCol;
+            ctx.shadowBlur  = isActive ? 10 : 5;
+            ctx.beginPath();
+            ctx.arc(pt.sx, pt.sy, dotR, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Active waypoint — extra outer ring
+            if (isActive) {
+                ctx.strokeStyle = 'rgba(220,80,255,0.6)';
+                ctx.lineWidth   = 1.2;
+                ctx.beginPath();
+                ctx.arc(pt.sx, pt.sy, dotR + 3.5, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            // Label
+            if (pt.name) {
+                ctx.shadowBlur  = 0;
+                ctx.font        = `bold ${isActive ? 10 : 9}px ${FONT_CANVAS}`;
+                ctx.fillStyle   = isActive ? 'rgba(230,130,255,0.95)' : 'rgba(190,100,255,0.8)';
+                ctx.textAlign   = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(pt.name, pt.sx + dotR + 3, pt.sy - 5);
+            }
+        }
+
+        ctx.restore();
+    } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════════
 // SECTION 17 — MAIN DRAW
 // ═══════════════════════════════════════════════════
 
@@ -4007,6 +4136,7 @@ function drawRadar() {
 
     if (!isGamePaused && hasPos) {
         drawAirportsAndRunways(playerLat, playerLon, cx, cy, rotRad);
+        drawWaypoints(playerLat, playerLon, cx, cy, rotRad);
     }
 
     if (prefs.showTrail && hasPos && _trailPoints.length > 1) {
