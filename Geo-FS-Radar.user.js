@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════
-// Geo-FS-Radar  v8.21
+// Geo-FS-Radar  v8.22
 // ═══════════════════════════════════════════════════
 
 const ilsPrefs = {
@@ -555,6 +555,63 @@ document.body.appendChild(nearestHUD);
 // that occurs when handlers are attached to freshly innerHTML'd elements.
 nearestHUD.addEventListener('click', (e) => {
     e.stopPropagation();
+
+    // ── Semi-auto controls (checked first — they don't have data-hud-action) ──
+    const semiTarget = e.target.closest('[data-semi-action]');
+    if (semiTarget) {
+        const sa = semiTarget.dataset.semiAction;
+        const tLive = _trackedAc;
+        const liveHdg = isFinite(parseFloat(tLive?.h)) ? Math.round(parseFloat(tLive.h)) : 0;
+        const liveAlt = isFinite(parseFloat(tLive?.al)) ? Math.round(parseFloat(tLive.al)) : 0;
+        const liveSpd = isFinite(parseFloat(tLive?.s)) ? Math.round(parseFloat(tLive.s)) : 0;
+        if      (sa === 'hdg-inc')  { _semiHdgOffset = ((_semiHdgOffset + 1) % 360 + 360) % 360; }
+        else if (sa === 'hdg-dec')  { _semiHdgOffset = ((_semiHdgOffset - 1) % 360 + 360) % 360; }
+        else if (sa === 'hdg-reset'){ _semiHdgOffset = 0; _semiHdgFixed = false; }
+        else if (sa === 'hdg-fix') {
+            if (_semiHdgFixed) { _semiHdgFixed = false; }
+            else {
+                const hdgBase = _semiHdgMode === 'bearing'
+                    ? (() => { try { if (!_hudNearestData?.myData || !tLive?.co) return liveHdg; const dLat = tLive.co[0] - _hudNearestData.myData.lat; const dLon = tLive.co[1] - _hudNearestData.myData.lon; return Math.round(((Math.atan2(dLon, dLat) * 180 / Math.PI) + 360) % 360); } catch(ex) { return liveHdg; } })()
+                    : liveHdg;
+                _semiHdgFixed_val = ((hdgBase + _semiHdgOffset) % 360 + 360) % 360;
+                _semiHdgFixed = true;
+            }
+        }
+        else if (sa === 'hdg-mode') { _semiHdgMode = semiTarget.dataset.semiVal; _semiHdgOffset = 0; }
+        else if (sa === 'alt-inc')  { _semiAltOffset += 10; }
+        else if (sa === 'alt-dec')  { _semiAltOffset -= 10; }
+        else if (sa === 'alt-reset'){ _semiAltOffset = 0; _semiAltFixed = false; }
+        else if (sa === 'alt-fix') {
+            if (_semiAltFixed) { _semiAltFixed = false; }
+            else { _semiAltFixed_val = liveAlt + _semiAltOffset; _semiAltFixed = true; }
+        }
+        else if (sa === 'spd-inc')  { _semiSpdOffset += 10; }
+        else if (sa === 'spd-dec')  { _semiSpdOffset -= 10; }
+        else if (sa === 'spd-reset'){ _semiSpdOffset = 0; _semiSpdFixed = false; }
+        else if (sa === 'spd-fix') {
+            if (_semiSpdFixed) { _semiSpdFixed = false; }
+            else { _semiSpdFixed_val = Math.max(0, liveSpd + _semiSpdOffset); _semiSpdFixed = true; }
+        }
+        // Apply immediately to AP if semi-auto is active
+        if (_semiActive && tLive) {
+            const hdgBase2 = _semiHdgMode === 'bearing'
+                ? (() => { try { if (!_hudNearestData?.myData || !tLive?.co) return liveHdg; const dLat = tLive.co[0] - _hudNearestData.myData.lat; const dLon = tLive.co[1] - _hudNearestData.myData.lon; return Math.round(((Math.atan2(dLon, dLat) * 180 / Math.PI) + 360) % 360); } catch(ex) { return liveHdg; } })()
+                : liveHdg;
+            const hdgCmd = _semiHdgFixed ? _semiHdgFixed_val : ((hdgBase2 + _semiHdgOffset + 360) % 360);
+            const altCmd = _semiAltFixed ? _semiAltFixed_val : (liveAlt + _semiAltOffset);
+            const spdCmd = _semiSpdFixed ? _semiSpdFixed_val : Math.max(0, liveSpd + _semiSpdOffset);
+            _apEnable();
+            _apSetHeading(hdgCmd);
+            _apSetAltitude(altCmd);
+            _apSetSpeed(spdCmd);
+        }
+        _lastHudUpdate = 0;
+        _lastNearestCs = null;
+        updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+        return;   // handled
+    }
+
+    // ── Standard hud-action controls ─────────────────────────────────────────
     const target = e.target.closest('[data-hud-action]');
     if (!target) return;
     const action = target.dataset.hudAction;
@@ -630,62 +687,9 @@ nearestHUD.addEventListener('click', (e) => {
         }
         _semiActive = !_semiActive;
         if (_semiActive) {
-            // Snapshot current live values as fixed base if already fixed
-            // (offsets already 0 from stopTracking, nothing to do here)
+            _apEnable();  // engage AP when semi-auto activates
         } else {
             _apDisable();
-        }
-        _lastHudUpdate = 0;
-        _lastNearestCs = null;
-        updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
-    }
-    // Semi-auto sub-controls — use data-semi-action
-    const semiTarget = e.target.closest('[data-semi-action]');
-    if (semiTarget) {
-        const sa = semiTarget.dataset.semiAction;
-        const tLive = _trackedAc;
-        const liveHdg = isFinite(parseFloat(tLive?.h)) ? Math.round(parseFloat(tLive.h)) : 0;
-        const liveAlt = isFinite(parseFloat(tLive?.al)) ? Math.round(parseFloat(tLive.al)) : 0;
-        const liveSpd = isFinite(parseFloat(tLive?.s)) ? Math.round(parseFloat(tLive.s)) : 0;
-        if (sa === 'hdg-inc') { _semiHdgOffset = (_semiHdgOffset + 1 + 360) % 360; }
-        else if (sa === 'hdg-dec') { _semiHdgOffset = (_semiHdgOffset - 1 + 360) % 360; }
-        else if (sa === 'hdg-reset') { _semiHdgOffset = 0; _semiHdgFixed = false; }
-        else if (sa === 'hdg-fix') {
-            if (_semiHdgFixed) { _semiHdgFixed = false; }
-            else {
-                const hdgBase = _semiHdgMode === 'bearing'
-                    ? (() => { try { if (!_hudNearestData?.myData || !tLive?.co) return liveHdg; const dLat = tLive.co[0] - _hudNearestData.myData.lat; const dLon = tLive.co[1] - _hudNearestData.myData.lon; return Math.round(((Math.atan2(dLon, dLat) * 180 / Math.PI) + 360) % 360); } catch(e) { return liveHdg; } })()
-                    : liveHdg;
-                _semiHdgFixed_val = (hdgBase + _semiHdgOffset + 360) % 360;
-                _semiHdgFixed = true;
-            }
-        }
-        else if (sa === 'hdg-mode') { _semiHdgMode = semiTarget.dataset.semiVal; _semiHdgOffset = 0; }
-        else if (sa === 'alt-inc') { _semiAltOffset += 10; }
-        else if (sa === 'alt-dec') { _semiAltOffset -= 10; }
-        else if (sa === 'alt-reset') { _semiAltOffset = 0; _semiAltFixed = false; }
-        else if (sa === 'alt-fix') {
-            if (_semiAltFixed) { _semiAltFixed = false; }
-            else { _semiAltFixed_val = liveAlt + _semiAltOffset; _semiAltFixed = true; }
-        }
-        else if (sa === 'spd-inc') { _semiSpdOffset += 10; }
-        else if (sa === 'spd-dec') { _semiSpdOffset -= 10; }
-        else if (sa === 'spd-reset') { _semiSpdOffset = 0; _semiSpdFixed = false; }
-        else if (sa === 'spd-fix') {
-            if (_semiSpdFixed) { _semiSpdFixed = false; }
-            else { _semiSpdFixed_val = Math.max(0, liveSpd + _semiSpdOffset); _semiSpdFixed = true; }
-        }
-        // Apply immediately to AP
-        if (_semiActive && tLive) {
-            const hdgBase = _semiHdgMode === 'bearing'
-                ? (() => { try { if (!_hudNearestData?.myData || !tLive?.co) return liveHdg; const dLat = tLive.co[0] - _hudNearestData.myData.lat; const dLon = tLive.co[1] - _hudNearestData.myData.lon; return Math.round(((Math.atan2(dLon, dLat) * 180 / Math.PI) + 360) % 360); } catch(e) { return liveHdg; } })()
-                : liveHdg;
-            const hdgVal = _semiHdgFixed ? _semiHdgFixed_val : ((hdgBase + _semiHdgOffset + 360) % 360);
-            const altVal = _semiAltFixed ? _semiAltFixed_val : (liveAlt + _semiAltOffset);
-            const spdVal = _semiSpdFixed ? _semiSpdFixed_val : Math.max(0, liveSpd + _semiSpdOffset);
-            _apSetHeading(hdgVal);
-            _apSetAltitude(altVal);
-            _apSetSpeed(spdVal);
         }
         _lastHudUpdate = 0;
         _lastNearestCs = null;
@@ -4169,33 +4173,42 @@ function drawPlayerTriangle(cx, cy, playerHeading, isGamePaused) {
 function drawWaypoints(playerLat, playerLon, cx, cy, rotRad) {
     if (!settings.showWaypoints) return;
     try {
-        // GeoFS v3.9: flight plan lives on geofs.flightPlan (separate from geofs.autopilot).
-        // Internal waypoint data is stored in geofs.flightPlan._waypoints or .waypoints.
-        // Each entry has at minimum: lat, lon, name (ICAO/fix id).
+        // GeoFS v3.9 official flight plan format (geo-fs.com/pages/documentation.php):
+        // geofs.flightPlan.route — array of {lat, lon, ident, type, alt, spd, heading}
+        // Active waypoint tracked by geofs.flightPlan.activeWaypoint (object) or index properties.
         const fp = window.geofs?.flightPlan;
         if (!fp) return;
 
-        // Try the most likely internal property names
-        const wpts = fp._waypoints
+        // One-time debug: dump flightPlan keys to console so we can verify the property name
+        if (!window._fpKeysLogged) {
+            window._fpKeysLogged = true;
+            try { console.log('[Radar] geofs.flightPlan keys:', Object.keys(fp)); } catch(ex) {}
+        }
+
+        // Official property is 'route'; fall back to other possible names
+        const wpts = fp.route
+            ?? fp._route
             ?? fp.waypoints
+            ?? fp._waypoints
             ?? fp.fixes
-            ?? fp.route
             ?? null;
         if (!wpts || wpts.length === 0) return;
 
-        // Active (next) waypoint index — try every known property name
-        const activeIdx = fp.currentWaypointIndex
-            ?? fp.activeWaypointIndex
+        // Active waypoint index — try all known property names
+        const activeIdx = fp.activeWaypointIndex
+            ?? fp.currentWaypointIndex
             ?? fp.activeIndex
             ?? fp.waypointIndex
             ?? fp._currentIndex
+            ?? (fp.activeWaypoint ? wpts.indexOf(fp.activeWaypoint) : -1)
             ?? -1;
 
         // ── Project each waypoint to canvas coords ───────────────────────────────
         const pts = wpts.map(wp => {
-            const lat = wp.lat ?? wp.latitude  ?? wp.lla?.[0] ?? null;
+            // Official format: {lat, lon, ident, type}
+            const lat = wp.lat ?? wp.latitude ?? wp.lla?.[0] ?? null;
             const lon = wp.lon ?? wp.longitude ?? wp.lla?.[1] ?? null;
-            const name = wp.name ?? wp.id ?? wp.ident ?? wp.fix ?? '';
+            const name = wp.ident ?? wp.name ?? wp.id ?? wp.fix ?? '';
             if (lat === null || lon === null || !isFinite(lat) || !isFinite(lon)) return null;
             const [dx, dy] = latLonToMeters(playerLat, playerLon, lat, lon);
             const [sx, sy] = worldToCanvas(dx, dy, cx, cy, rotRad);
