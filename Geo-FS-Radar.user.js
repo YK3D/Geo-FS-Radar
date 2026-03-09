@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════
-// Geo-FS-Radar  v8.08
+// Geo-FS-Radar  v8.21
 // ═══════════════════════════════════════════════════
 
 const ilsPrefs = {
@@ -176,6 +176,7 @@ const UI = {
 let radarRange = Math.max(MIN_RANGE, Math.min(MAX_RANGE,
     parseInt(localStorage.getItem('radarRange') || '5000')));
 let isGamePaused = false;
+let _radarHidden  = false;   // set true by Alt+Z to suppress draw loop & background ticks
 
 let _lastValidLat   = null;
 let _lastValidLon   = null;
@@ -618,6 +619,77 @@ nearestHUD.addEventListener('click', (e) => {
         _lastHudUpdate = 0;
         _lastNearestCs = null;
         updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+    } else if (action === 'toggle-semi') {
+        // Mutual exclusion: disable auto chase if enabling semi
+        if (!_semiActive && _chaseActive) {
+            _chaseActive = false;
+            _apDisable();
+            _apSetAirbrakes(false);
+            _chasePhase = 'chase';
+            _escortMode = null;
+        }
+        _semiActive = !_semiActive;
+        if (_semiActive) {
+            // Snapshot current live values as fixed base if already fixed
+            // (offsets already 0 from stopTracking, nothing to do here)
+        } else {
+            _apDisable();
+        }
+        _lastHudUpdate = 0;
+        _lastNearestCs = null;
+        updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+    }
+    // Semi-auto sub-controls — use data-semi-action
+    const semiTarget = e.target.closest('[data-semi-action]');
+    if (semiTarget) {
+        const sa = semiTarget.dataset.semiAction;
+        const tLive = _trackedAc;
+        const liveHdg = isFinite(parseFloat(tLive?.h)) ? Math.round(parseFloat(tLive.h)) : 0;
+        const liveAlt = isFinite(parseFloat(tLive?.al)) ? Math.round(parseFloat(tLive.al)) : 0;
+        const liveSpd = isFinite(parseFloat(tLive?.s)) ? Math.round(parseFloat(tLive.s)) : 0;
+        if (sa === 'hdg-inc') { _semiHdgOffset = (_semiHdgOffset + 1 + 360) % 360; }
+        else if (sa === 'hdg-dec') { _semiHdgOffset = (_semiHdgOffset - 1 + 360) % 360; }
+        else if (sa === 'hdg-reset') { _semiHdgOffset = 0; _semiHdgFixed = false; }
+        else if (sa === 'hdg-fix') {
+            if (_semiHdgFixed) { _semiHdgFixed = false; }
+            else {
+                const hdgBase = _semiHdgMode === 'bearing'
+                    ? (() => { try { if (!_hudNearestData?.myData || !tLive?.co) return liveHdg; const dLat = tLive.co[0] - _hudNearestData.myData.lat; const dLon = tLive.co[1] - _hudNearestData.myData.lon; return Math.round(((Math.atan2(dLon, dLat) * 180 / Math.PI) + 360) % 360); } catch(e) { return liveHdg; } })()
+                    : liveHdg;
+                _semiHdgFixed_val = (hdgBase + _semiHdgOffset + 360) % 360;
+                _semiHdgFixed = true;
+            }
+        }
+        else if (sa === 'hdg-mode') { _semiHdgMode = semiTarget.dataset.semiVal; _semiHdgOffset = 0; }
+        else if (sa === 'alt-inc') { _semiAltOffset += 10; }
+        else if (sa === 'alt-dec') { _semiAltOffset -= 10; }
+        else if (sa === 'alt-reset') { _semiAltOffset = 0; _semiAltFixed = false; }
+        else if (sa === 'alt-fix') {
+            if (_semiAltFixed) { _semiAltFixed = false; }
+            else { _semiAltFixed_val = liveAlt + _semiAltOffset; _semiAltFixed = true; }
+        }
+        else if (sa === 'spd-inc') { _semiSpdOffset += 10; }
+        else if (sa === 'spd-dec') { _semiSpdOffset -= 10; }
+        else if (sa === 'spd-reset') { _semiSpdOffset = 0; _semiSpdFixed = false; }
+        else if (sa === 'spd-fix') {
+            if (_semiSpdFixed) { _semiSpdFixed = false; }
+            else { _semiSpdFixed_val = Math.max(0, liveSpd + _semiSpdOffset); _semiSpdFixed = true; }
+        }
+        // Apply immediately to AP
+        if (_semiActive && tLive) {
+            const hdgBase = _semiHdgMode === 'bearing'
+                ? (() => { try { if (!_hudNearestData?.myData || !tLive?.co) return liveHdg; const dLat = tLive.co[0] - _hudNearestData.myData.lat; const dLon = tLive.co[1] - _hudNearestData.myData.lon; return Math.round(((Math.atan2(dLon, dLat) * 180 / Math.PI) + 360) % 360); } catch(e) { return liveHdg; } })()
+                : liveHdg;
+            const hdgVal = _semiHdgFixed ? _semiHdgFixed_val : ((hdgBase + _semiHdgOffset + 360) % 360);
+            const altVal = _semiAltFixed ? _semiAltFixed_val : (liveAlt + _semiAltOffset);
+            const spdVal = _semiSpdFixed ? _semiSpdFixed_val : Math.max(0, liveSpd + _semiSpdOffset);
+            _apSetHeading(hdgVal);
+            _apSetAltitude(altVal);
+            _apSetSpeed(spdVal);
+        }
+        _lastHudUpdate = 0;
+        _lastNearestCs = null;
+        updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
     }
 });
 nearestHUD.addEventListener('input', (e) => {
@@ -708,6 +780,20 @@ let _escortDistM  = 500;   // escort / formation distance in metres (100–5000)
 let _ftFwdOffset = 0;
 let _ftLatOffset = 0;
 const FT_STEP = 20; // metres per nudge
+
+// ── Semi-Auto Chase/Escort state ──────────────────
+// Each control has: offset (adjustment delta), fixed (if true, don't follow live value)
+let _semiActive = false;                // Semi-Auto mode enabled
+let _semiHdgMode = 'heading';           // 'heading' | 'bearing' — base heading source
+let _semiHdgOffset  = 0;               // degrees offset from base
+let _semiHdgFixed   = false;           // if true, _semiHdgFixed_val is used directly
+let _semiHdgFixed_val = 0;
+let _semiAltOffset  = 0;               // ft offset from tracked alt
+let _semiAltFixed   = false;
+let _semiAltFixed_val = 0;
+let _semiSpdOffset  = 0;               // kt offset from tracked speed
+let _semiSpdFixed   = false;
+let _semiSpdFixed_val = 0;
 let _chasePid     = { integral: 0, prevError: 0, lastTime: 0 };
 let _headingPid   = { integral: 0, prevError: 0, lastTime: 0 };
 
@@ -733,6 +819,12 @@ function stopTracking() {
     _apLastHdg     = -999;
     _apLastSpd     = -1;
     _apLastAlt     = -9e9;
+    // reset semi-auto state
+    _semiActive        = false;
+    _semiHdgMode       = 'heading';
+    _semiHdgOffset     = 0; _semiHdgFixed = false;
+    _semiAltOffset     = 0; _semiAltFixed = false;
+    _semiSpdOffset     = 0; _semiSpdFixed = false;
 }
 
 function refreshTracked() {
@@ -776,9 +868,10 @@ function updateNearestHUD(nearest, myData) {
     const cs  = displayAc.cs && displayAc.cs !== 'Foo' ? displayAc.cs : `Foo #${displayAc.id || '???'}`;
     const { distStr, brgStr } = _hudDistBrg(myData, displayAc);
 
-    // ETA — only shown while chase is active
+    // ETA — only shown while chase/semi-auto is active
+    // Accounts for target movement: ETA = dist / closing_speed
     let etaStr = null;
-    if (_chaseActive && myData && displayAc.co && displayAc.co.length >= 2) {
+    if ((_chaseActive || _semiActive) && myData && displayAc.co && displayAc.co.length >= 2) {
         try {
             if (_chasePhase === 'escort') {
                 etaStr = 'ARRIVED';
@@ -786,7 +879,25 @@ function updateNearestHUD(nearest, myData) {
                 const distNm = calcDistNm(myData.lat, myData.lon, displayAc.co[0], displayAc.co[1]);
                 const av = geofs.animation?.values;
                 const mySpd = Math.max(1, av?.groundSpeed ?? av?.kias ?? 0); // kts
-                const etaMin = (distNm / mySpd) * 60;
+                // Target speed — positive means target is moving away if we're behind it
+                const tgtSpd = isFinite(parseFloat(displayAc.s)) ? parseFloat(displayAc.s) : 0;
+                // Bearing from me to target vs target heading — use component of tgt velocity toward/away
+                const myHdg  = isFinite(parseFloat(myData.h)) ? parseFloat(myData.h) : 0;
+                const bearingToTgt = (() => {
+                    try {
+                        const dLat = displayAc.co[0] - myData.lat;
+                        const dLon = displayAc.co[1] - myData.lon;
+                        const brg = Math.atan2(dLon, dLat) * 180 / Math.PI;
+                        return (brg + 360) % 360;
+                    } catch(e) { return myHdg; }
+                })();
+                const tgtHdg = isFinite(parseFloat(displayAc.h)) ? parseFloat(displayAc.h) : 0;
+                // Component of target speed along the bearing-away vector (+ve = running away)
+                const angleDiff = (tgtHdg - bearingToTgt + 360) % 360;
+                const tgtAwayComponent = tgtSpd * Math.cos(angleDiff * Math.PI / 180);
+                // Closing speed = my speed toward target minus target's away component
+                const closingSpd = Math.max(1, mySpd - tgtAwayComponent);
+                const etaMin = (distNm / closingSpd) * 60;
                 if (etaMin < 1) etaStr = Math.round(etaMin * 60) + 's';
                 else if (etaMin < 60) etaStr = etaMin.toFixed(1) + ' min';
                 else etaStr = (etaMin / 60).toFixed(1) + ' hr';
@@ -942,11 +1053,120 @@ function updateNearestHUD(nearest, myData) {
   </div>`;
     })() : '';
 
-    const chaseRow = isTracking ? `
+    // ── Semi-Auto Chase/Escort panel ───────────────────────────────────────────
+    const semiSwBg     = _semiActive ? t.switchOn    : t.switchOff;
+    const semiKnobBg   = _semiActive ? t.knobOn      : t.knobOff;
+    const semiKnobLeft = _semiActive ? (UI.menuSwitchW - UI.menuKnobSize - 3) : 3;
+
+    const semiRow = isTracking ? (() => {
+        const tLive = _trackedAc;
+        // Current live values from tracked aircraft
+        const liveHdg = isFinite(parseFloat(tLive?.h)) ? Math.round(parseFloat(tLive.h)) : 0;
+        const liveAlt = isFinite(parseFloat(tLive?.al)) ? Math.round(parseFloat(tLive.al)) : 0;
+        const liveSpd = isFinite(parseFloat(tLive?.s)) ? Math.round(parseFloat(tLive.s)) : 0;
+        const bearingToTracked = (() => {
+            try {
+                if (!myData || !tLive?.co) return liveHdg;
+                const dLat = tLive.co[0] - myData.lat;
+                const dLon = tLive.co[1] - myData.lon;
+                return Math.round(((Math.atan2(dLon, dLat) * 180 / Math.PI) + 360) % 360);
+            } catch(e) { return liveHdg; }
+        })();
+        const hdgBase  = _semiHdgMode === 'bearing' ? bearingToTracked : liveHdg;
+        const hdgVal   = _semiHdgFixed ? _semiHdgFixed_val : ((hdgBase + _semiHdgOffset + 360) % 360);
+        const altVal   = _semiAltFixed ? _semiAltFixed_val : (liveAlt + _semiAltOffset);
+        const spdVal   = _semiSpdFixed ? _semiSpdFixed_val : Math.max(0, liveSpd + _semiSpdOffset);
+
+        const fs = UI.hudIsolateLabelFont - 1;
+        const btnS = `padding:2px 6px;border-radius:4px;cursor:pointer;font-size:${fs}px;
+            border:1px solid ${t.hudBorder};color:${t.hudLabel};background:rgba(0,40,0,0.5);
+            user-select:none;min-width:22px;text-align:center;`;
+        const fixedBtnStyle = (fixed) => fixed
+            ? `padding:2px 6px;border-radius:4px;cursor:pointer;font-size:${fs - 1}px;
+               border:1px solid rgba(255,200,60,0.7);color:rgba(255,200,60,0.95);
+               background:rgba(80,60,0,0.5);user-select:none;`
+            : `padding:2px 6px;border-radius:4px;cursor:pointer;font-size:${fs - 1}px;
+               border:1px solid ${t.hudBorder};color:${t.hudLabel};
+               background:rgba(0,40,0,0.5);user-select:none;`;
+        const valColor = 'rgba(100,220,255,0.95)';
+
+        const hdgModeHdg = _semiHdgMode === 'heading';
+        const modeTabStyle = (active) => active
+            ? `padding:1px 6px;border-radius:3px;font-size:${fs-1}px;cursor:pointer;
+               border:1px solid rgba(100,220,255,0.7);color:rgba(100,220,255,1);
+               background:rgba(0,60,80,0.6);user-select:none;`
+            : `padding:1px 6px;border-radius:3px;font-size:${fs-1}px;cursor:pointer;
+               border:1px solid ${t.hudBorder};color:${t.hudLabel};
+               background:rgba(0,20,20,0.4);user-select:none;`;
+
+        const panel = _semiActive ? `
+  <div style="padding:4px 14px 6px;border-top:1px solid ${t.hudSep};">
+    <div style="color:${t.hudLabel};font-size:${fs}px;text-align:center;margin-bottom:4px;letter-spacing:0.5px;">SEMI-AUTO AP CONTROLS</div>
+
+    <!-- HDG row -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+      <span style="color:${t.hudLabel};font-size:${fs}px;width:30px;">HDG</span>
+      <div style="display:flex;align-items:center;gap:3px;">
+        <div data-semi-action="hdg-mode" data-semi-val="heading" style="${modeTabStyle(hdgModeHdg)}">HDG</div>
+        <div data-semi-action="hdg-mode" data-semi-val="bearing" style="${modeTabStyle(!hdgModeHdg)}">BRG</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:3px;">
+        <div data-semi-action="hdg-dec" style="${btnS}">−</div>
+        <span style="color:${valColor};font-size:${fs}px;font-weight:bold;min-width:30px;text-align:center;">${String(Math.round(hdgVal)).padStart(3,'0')}°</span>
+        <div data-semi-action="hdg-inc" style="${btnS}">+</div>
+        <div data-semi-action="hdg-reset" title="Reset offset" style="${btnS}font-size:${fs-2}px;">↺</div>
+      </div>
+      <div data-semi-action="hdg-fix" title="${_semiHdgFixed ? 'Unfix (follow live)' : 'Fix at current value'}" style="${fixedBtnStyle(_semiHdgFixed)}">${_semiHdgFixed ? '📌' : '🔓'}</div>
+    </div>
+
+    <!-- ALT row -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+      <span style="color:${t.hudLabel};font-size:${fs}px;width:30px;">ALT</span>
+      <span style="color:rgba(150,150,150,0.7);font-size:${fs-1}px;">${_semiAltFixed ? 'FIXED' : ((_semiAltOffset >= 0 ? '+' : '') + _semiAltOffset + ' ft')}</span>
+      <div style="display:flex;align-items:center;gap:3px;">
+        <div data-semi-action="alt-dec" style="${btnS}">−</div>
+        <span style="color:${valColor};font-size:${fs}px;font-weight:bold;min-width:48px;text-align:center;">${altVal.toLocaleString()} ft</span>
+        <div data-semi-action="alt-inc" style="${btnS}">+</div>
+        <div data-semi-action="alt-reset" style="${btnS}font-size:${fs-2}px;">↺</div>
+      </div>
+      <div data-semi-action="alt-fix" style="${fixedBtnStyle(_semiAltFixed)}">${_semiAltFixed ? '📌' : '🔓'}</div>
+    </div>
+
+    <!-- SPD row -->
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <span style="color:${t.hudLabel};font-size:${fs}px;width:30px;">SPD</span>
+      <span style="color:rgba(150,150,150,0.7);font-size:${fs-1}px;">${_semiSpdFixed ? 'FIXED' : ((_semiSpdOffset >= 0 ? '+' : '') + _semiSpdOffset + ' kt')}</span>
+      <div style="display:flex;align-items:center;gap:3px;">
+        <div data-semi-action="spd-dec" style="${btnS}">−</div>
+        <span style="color:${valColor};font-size:${fs}px;font-weight:bold;min-width:40px;text-align:center;">${spdVal} kt</span>
+        <div data-semi-action="spd-inc" style="${btnS}">+</div>
+        <div data-semi-action="spd-reset" style="${btnS}font-size:${fs-2}px;">↺</div>
+      </div>
+      <div data-semi-action="spd-fix" style="${fixedBtnStyle(_semiSpdFixed)}">${_semiSpdFixed ? '📌' : '🔓'}</div>
+    </div>
+  </div>` : '';
+
+        return `
+  <div style="padding:5px 14px 6px;border-top:1px solid ${t.hudSep};
+    display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
+    data-hud-action="toggle-semi">
+    <span style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont}px;letter-spacing:0.5px;">Semi Auto Chase/Escort</span>
+    <div style="width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
+      border-radius:${UI.menuSwitchH/2}px;position:relative;background:${semiSwBg};
+      border:1px solid ${t.switchBorder};transition:background .2s;flex-shrink:0;pointer-events:none;">
+      <div style="position:absolute;top:${(UI.menuSwitchH-UI.menuKnobSize)/2}px;
+        left:${semiKnobLeft}px;width:${UI.menuKnobSize}px;height:${UI.menuKnobSize}px;
+        border-radius:50%;background:${semiKnobBg};transition:left .2s,background .2s;"></div>
+    </div>
+  </div>
+  ${panel}`;
+    })() : '';
+
+        const chaseRow = isTracking ? `
   <div style="padding:5px 14px 6px;border-top:1px solid ${t.hudSep};
     display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
     data-hud-action="toggle-chase">
-    <span style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont}px;letter-spacing:0.5px;">Chase / Escort Player</span>
+    <span style="color:${t.hudLabel};font-size:${UI.hudIsolateLabelFont}px;letter-spacing:0.5px;">Auto Chase/Escort (Beta)</span>
     <div style="width:${UI.menuSwitchW}px;height:${UI.menuSwitchH}px;
       border-radius:${UI.menuSwitchH/2}px;position:relative;background:${chaseSwBg};
       border:1px solid ${t.switchBorder};transition:background .2s;flex-shrink:0;pointer-events:none;">
@@ -1018,6 +1238,7 @@ function updateNearestHUD(nearest, myData) {
   </div>
   ${isolateRow}
   ${chaseRow}
+  ${semiRow}
   ${stopBtn}
   ${trackBtn}
 </div>`;
@@ -2347,6 +2568,7 @@ radarCanvas.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
     if (e.altKey && e.code === 'KeyZ') {
         const hide = radarCanvas.style.display !== 'none';
+        _radarHidden = hide;             // pause draw loop & background ticks
         const val  = hide ? 'none' : 'block';
         radarCanvas.style.display = val;
         const rb = document.getElementById('radarRangeBox');
@@ -2507,7 +2729,7 @@ let _internalConsecutiveFails = 0;
 const INTERNAL_FAIL_THRESHOLD = 10;
 
 function _tickInternalSource() {
-    if (isGamePaused) return;
+    if (isGamePaused || _radarHidden) return;
     const result = _readInternalMultiplayer();
     if (result !== null) {
         aircraftListCache = result;
@@ -3517,6 +3739,44 @@ function _offsetLatLon(refLat, refLon, hdgDeg, fwdM, latM) {
     return [refLat + dLat * 180 / Math.PI, refLon + dLon * 180 / Math.PI];
 }
 
+// ═══════════════════════════════════════════════════
+// SECTION 18b — SEMI-AUTO CHASE/ESCORT TICK
+// ═══════════════════════════════════════════════════
+// Continuously applies HDG/ALT/SPD from tracked aircraft + user offsets.
+// Relative mode: offset is added to live value each tick.
+// Fixed mode: a snapshot value is used regardless of live changes.
+function _tickSemiAuto() {
+    if (!_semiActive || !_trackedAc) return;
+    try {
+        const tLive = _trackedAc;
+        const liveHdg = isFinite(parseFloat(tLive?.h))  ? parseFloat(tLive.h)  : 0;
+        const liveAlt = isFinite(parseFloat(tLive?.al)) ? parseFloat(tLive.al) : 0;
+        const liveSpd = isFinite(parseFloat(tLive?.s))  ? parseFloat(tLive.s)  : 0;
+
+        // Bearing to tracked (for BRG mode)
+        let bearingToTracked = liveHdg;
+        try {
+            const av = window.geofs?.animation?.values;
+            const myLat2 = av?.latitude  ?? av?.lat ?? null;
+            const myLon2 = av?.longitude ?? av?.lon ?? null;
+            if (tLive.co && myLat2 !== null && myLon2 !== null) {
+                const dLat = tLive.co[0] - myLat2;
+                const dLon = tLive.co[1] - myLon2;
+                bearingToTracked = ((Math.atan2(dLon, dLat) * 180 / Math.PI) + 360) % 360;
+            }
+        } catch(e) {}
+
+        const hdgBase = _semiHdgMode === 'bearing' ? bearingToTracked : liveHdg;
+        const hdgCmd  = _semiHdgFixed ? _semiHdgFixed_val : ((hdgBase + _semiHdgOffset + 360) % 360);
+        const altCmd  = _semiAltFixed ? _semiAltFixed_val : (liveAlt + _semiAltOffset);
+        const spdCmd  = _semiSpdFixed ? _semiSpdFixed_val : Math.max(0, liveSpd + _semiSpdOffset);
+
+        _apSetHeading(hdgCmd);
+        _apSetAltitude(altCmd);
+        _apSetSpeed(spdCmd);
+    } catch(e) {}
+}
+
 function _tickChaseEscort(myLat, myLon, myData) {
     if (!_chaseActive || !_trackedAc || !_trackedAc.co) return;
 
@@ -3716,12 +3976,13 @@ let _lastHeavyTs = 0;
 
 function _rafTick(ts) {
     if (!_rafActive) return;
+    requestAnimationFrame(_rafTick);
+    if (_radarHidden) return;            // Alt+Z: suppress drawing & background ticks
     const now = performance.now();
     if (now - _lastHeavyTs >= DRAW_INTERVAL && !isDragging) {
         _lastHeavyTs = now;
         drawRadar();
     }
-    requestAnimationFrame(_rafTick);
 }
 requestAnimationFrame(_rafTick);
 
@@ -3908,27 +4169,26 @@ function drawPlayerTriangle(cx, cy, playerHeading, isGamePaused) {
 function drawWaypoints(playerLat, playerLon, cx, cy, rotRad) {
     if (!settings.showWaypoints) return;
     try {
-        // GeoFS exposes the flight plan on the autopilot object.
-        // Supported structures (GeoFS has changed over time):
-        //   geofs.autopilot.flightPlan.waypoints[]  — array of {lat,lon,name/id}
-        //   geofs.autopilot.waypoints[]
-        //   geofs.autopilot.route[]
-        const ap = window.geofs?.autopilot;
-        if (!ap) return;
+        // GeoFS v3.9: flight plan lives on geofs.flightPlan (separate from geofs.autopilot).
+        // Internal waypoint data is stored in geofs.flightPlan._waypoints or .waypoints.
+        // Each entry has at minimum: lat, lon, name (ICAO/fix id).
+        const fp = window.geofs?.flightPlan;
+        if (!fp) return;
 
-        const wpts = ap.flightPlan?.waypoints
-            ?? ap.flightPlan?.fixes
-            ?? ap.waypoints
-            ?? ap.route
+        // Try the most likely internal property names
+        const wpts = fp._waypoints
+            ?? fp.waypoints
+            ?? fp.fixes
+            ?? fp.route
             ?? null;
         if (!wpts || wpts.length === 0) return;
 
         // Active (next) waypoint index — try every known property name
-        const activeIdx = ap.flightPlan?.currentWaypointIndex
-            ?? ap.flightPlan?.activeIndex
-            ?? ap.currentWaypointIndex
-            ?? ap.activeWaypointIndex
-            ?? ap.waypointIndex
+        const activeIdx = fp.currentWaypointIndex
+            ?? fp.activeWaypointIndex
+            ?? fp.activeIndex
+            ?? fp.waypointIndex
+            ?? fp._currentIndex
             ?? -1;
 
         // ── Project each waypoint to canvas coords ───────────────────────────────
@@ -4316,6 +4576,11 @@ function drawRadar() {
     // ── Chase / Escort autopilot tick ─────────────
     if (_chaseActive && hasPos && !isGamePaused && _trackedAc) {
         _tickChaseEscort(playerLat, playerLon, myData);
+    }
+
+    // ── Semi-Auto Chase/Escort tick ────────────────
+    if (_semiActive && hasPos && !isGamePaused && _trackedAc && _trackedAc.co) {
+        _tickSemiAuto();
     }
 
     // ── Update ILS HUD if active ──────────────────
