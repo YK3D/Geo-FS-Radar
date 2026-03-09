@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════
-// Geo-FS-Radar  v8.22
+// Geo-FS-Radar  v8.23
 // ═══════════════════════════════════════════════════
 
 const ilsPrefs = {
@@ -636,6 +636,11 @@ nearestHUD.addEventListener('click', (e) => {
     } else if (action === 'toggle-chase') {
         _chaseActive = !_chaseActive;
         if (_chaseActive) {
+            // Mutual exclusion: disable semi if enabling auto chase
+            if (_semiActive) {
+                _semiActive = false;
+                _apDisable();
+            }
             _chasePhase = 'chase';
             _escortMode = null;
             _chasePid   = { integral: 0, prevError: 0, lastTime: 0 };
@@ -643,6 +648,7 @@ nearestHUD.addEventListener('click', (e) => {
             _apLastHdg  = -999;
             _apLastSpd  = -1;
             _apLastAlt  = -9e9;
+            _apEnable();
         } else {
             _apDisable();
             _apSetAirbrakes(false);
@@ -3568,22 +3574,30 @@ function _saveChaseParams() {
 
 // Engage AP once. No-op if already on.
 function _apEnable() {
-    if (_apEngaged) return;
     try {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
-        if (!ap.on) ap.turnOn();
-        if (typeof ap.setMode === 'function') ap.setMode('HDG');
+        // Sync flag to real GeoFS AP state first, then engage
+        const reallyOn = !!(ap.on || ap.engaged || ap._engaged);
+        if (!reallyOn) {
+            if (typeof ap.toggle === 'function') ap.toggle();
+            else if (typeof ap.turnOn === 'function') ap.turnOn();
+        }
         _apEngaged = true;
     } catch(e) {}
 }
 
 // Disengage AP and clear flag.
 function _apDisable() {
-    if (!_apEngaged) return;
     try {
         const ap = window.geofs?.autopilot;
-        if (ap?.on) ap.turnOff();
+        if (ap) {
+            const reallyOn = !!(ap.on || ap.engaged || ap._engaged);
+            if (reallyOn) {
+                if (typeof ap.toggle === 'function') ap.toggle();
+                else if (typeof ap.turnOff === 'function') ap.turnOff();
+            }
+        }
     } catch(e) {}
     _apEngaged = false;
 }
@@ -4179,18 +4193,31 @@ function drawWaypoints(playerLat, playerLon, cx, cy, rotRad) {
         const fp = window.geofs?.flightPlan;
         if (!fp) return;
 
-        // One-time debug: dump flightPlan keys to console so we can verify the property name
-        if (!window._fpKeysLogged) {
+        // One-time debug: dump flightPlan + autopilot structure to console
+        // Re-probe whenever route appears (plan might load after radar starts)
+        const _hasRoute = !!(fp?.route?.length || fp?.waypoints?.length);
+        if (_hasRoute && !window._fpKeysLogged) {
             window._fpKeysLogged = true;
-            try { console.log('[Radar] geofs.flightPlan keys:', Object.keys(fp)); } catch(ex) {}
+            try {
+                console.log('[Radar] geofs.flightPlan keys:', Object.keys(fp));
+                console.log('[Radar] geofs.flightPlan.route:', fp.route);
+                const ap2 = window.geofs?.autopilot;
+                if (ap2) console.log('[Radar] geofs.autopilot keys:', Object.keys(ap2));
+            } catch(ex) {}
         }
 
-        // Official property is 'route'; fall back to other possible names
-        const wpts = fp.route
-            ?? fp._route
-            ?? fp.waypoints
-            ?? fp._waypoints
-            ?? fp.fixes
+        // GeoFS v3.9 stores the route as geofs.flightPlan.route (official docs).
+        // Also probe geofs.autopilot for legacy compat, and flightplan (lowercase).
+        const fp2 = window.geofs?.flightplan ?? window.geofs?.flightPlan;
+        const wpts = fp?.route
+            ?? fp2?.route
+            ?? fp?.waypoints
+            ?? fp2?.waypoints
+            ?? fp?._waypoints
+            ?? fp2?._waypoints
+            ?? window.geofs?.autopilot?.flightPlan?.route
+            ?? window.geofs?.autopilot?.flightPlan?.waypoints
+            ?? window.geofs?.autopilot?.route
             ?? null;
         if (!wpts || wpts.length === 0) return;
 
