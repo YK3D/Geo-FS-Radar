@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════
-// Geo-FS-Radar  v8.23
+// Geo-FS-Radar  v8.48
+
 // ═══════════════════════════════════════════════════
 
 const ilsPrefs = {
@@ -10,6 +11,7 @@ const ilsPrefs = {
     fontPillValue:13,
     fontFooter:   10,
     fontBankValue:11,
+    hudScale:     1.0,
 };
 try { Object.assign(ilsPrefs, JSON.parse(localStorage.getItem('radarIlsPrefs') || '{}')); } catch(e) {}
 function saveIlsPrefs() { localStorage.setItem('radarIlsPrefs', JSON.stringify(ilsPrefs)); }
@@ -196,6 +198,10 @@ const settings = {
     nightMode:          false,
     showAirports:       true,
     showWaypoints:      true,
+    waypointLineWidth:  1.8,
+    waypointDotSize:    4,
+    waypointShape:      'default',
+    waypointLabelSize:  9,
     showCallsign:       true,
     showPlayerTriangle: true,
     showNearestHUD:     true,
@@ -547,12 +553,28 @@ nearestHUD.style.cssText = `
     font-family:${FONT_MONO};
     transition:opacity 0.3s;
     display:none;
+    overflow-y:auto;
+    overflow-x:hidden;
+    scrollbar-width:thin;
+    scrollbar-color:rgba(0,200,0,0.3) transparent;
 `;
 document.body.appendChild(nearestHUD);
 
 // Event delegation — all HUD button/toggle clicks route here.
 // Using the stable outer container avoids the first-click-to-focus issue
 // that occurs when handlers are attached to freshly innerHTML'd elements.
+nearestHUD.addEventListener('pointerdown', (e) => {
+    // Handle stop-tracking and track-player on pointerdown for instant response
+    const pdTarget = e.target.closest('[data-hud-action]');
+    if (pdTarget) {
+        const pdAction = pdTarget.dataset.hudAction;
+        if (pdAction === 'stop-tracking') {
+            e.stopPropagation(); e.preventDefault();
+            stopTracking();
+            return;
+        }
+    }
+});
 nearestHUD.addEventListener('click', (e) => {
     e.stopPropagation();
 
@@ -578,6 +600,60 @@ nearestHUD.addEventListener('click', (e) => {
             }
         }
         else if (sa === 'hdg-mode') { _semiHdgMode = semiTarget.dataset.semiVal; _semiHdgOffset = 0; }
+        else if (sa === 'hdg-edit' || sa === 'alt-edit' || sa === 'spd-edit') {
+            // Replace the span with an inline text input
+            const axis = sa.split('-')[0]; // 'hdg', 'alt', 'spd'
+            // Recompute current values here (not in scope from template literal)
+            const _brg = (() => { try { if (!_hudNearestData?.myData || !tLive?.co) return liveHdg; const dLat = tLive.co[0] - _hudNearestData.myData.lat; const dLon = tLive.co[1] - _hudNearestData.myData.lon; return Math.round(((Math.atan2(dLon, dLat)*180/Math.PI)+360)%360); } catch(ex) { return liveHdg; } })();
+            const _hdgBase = _semiHdgMode === 'bearing' ? _brg : liveHdg;
+            const _hdgVal = Math.round(_semiHdgFixed ? _semiHdgFixed_val : ((_hdgBase + _semiHdgOffset + 360) % 360));
+            const _altVal = Math.round(_semiAltFixed ? _semiAltFixed_val : (liveAlt + _semiAltOffset));
+            const _spdVal = Math.round(_semiSpdFixed ? _semiSpdFixed_val : Math.max(0, liveSpd + _semiSpdOffset));
+            const curVal = axis === 'hdg' ? _hdgVal : axis === 'alt' ? _altVal : _spdVal;
+            const inp = document.createElement('input');
+            inp.type = 'number';
+            inp.value = curVal;
+            inp.style.cssText = `width:58px;padding:1px 3px;font-size:${UI.hudIsolateLabelFont-1}px;font-weight:bold;
+                background:rgba(0,30,50,0.9);border:1px solid rgba(100,220,255,0.7);border-radius:3px;
+                color:rgba(100,220,255,1);outline:none;text-align:center;`;
+            semiTarget.replaceWith(inp);
+            inp.focus(); inp.select();
+            const commitEdit = () => {
+                const v = parseFloat(inp.value);
+                if (isFinite(v)) {
+                    const tl = _trackedAc;
+                    const lh = isFinite(parseFloat(tl?.h))  ? Math.round(parseFloat(tl.h))  : 0;
+                    const la = isFinite(parseFloat(tl?.al)) ? Math.round(parseFloat(tl.al)) : 0;
+                    const ls = isFinite(parseFloat(tl?.s))  ? Math.round(parseFloat(tl.s))  : 0;
+                    if (axis === 'hdg') {
+                        // Compute offset so that live base + offset = typed value, without fixing
+                        const brgNow = (() => { try { if (!_hudNearestData?.myData || !tl?.co) return lh; const dLat=tl.co[0]-_hudNearestData.myData.lat, dLon=tl.co[1]-_hudNearestData.myData.lon; return Math.round(((Math.atan2(dLon,dLat)*180/Math.PI)+360)%360); } catch(ex){return lh;} })();
+                        const base = _semiHdgMode === 'bearing' ? brgNow : lh;
+                        _semiHdgOffset = (((Math.round(v) - base) % 360) + 360) % 360;
+                        if (_semiHdgOffset > 180) _semiHdgOffset -= 360; // keep compact
+                        _semiHdgFixed = false;
+                    } else if (axis === 'alt') {
+                        _semiAltOffset = Math.round(v) - la;
+                        _semiAltFixed = false;
+                    } else {
+                        _semiSpdOffset = Math.round(v) - ls;
+                        _semiSpdFixed = false;
+                    }
+                    // Force AP update immediately
+                    _semiPrevHdgCmd = null; _semiPrevAltCmd = null; _semiPrevSpdCmd = null;
+    _prevTrackedH = null; _prevTrackedAl = null; _prevTrackedS = null;
+                }
+                _lastHudUpdate = 0;
+                updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+            };
+            inp.addEventListener('keydown', ev => {
+                ev.stopPropagation();
+                if (ev.key === 'Enter') { commitEdit(); ev.preventDefault(); }
+                if (ev.key === 'Escape') { _lastHudUpdate = 0; updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null); }
+            });
+            // No blur commit — blur fires when HUD rebuilds, causing recursive loop
+            return;
+        }
         else if (sa === 'alt-inc')  { _semiAltOffset += 10; }
         else if (sa === 'alt-dec')  { _semiAltOffset -= 10; }
         else if (sa === 'alt-reset'){ _semiAltOffset = 0; _semiAltFixed = false; }
@@ -618,6 +694,24 @@ nearestHUD.addEventListener('click', (e) => {
 
     if (action === 'stop-tracking') {
         stopTracking();
+    } else if (action === 'cs-search-go') {
+        // Execute callsign search
+        const inp = nearestHUD.querySelector('[data-hud-action="cs-search-input"]');
+        const query = inp?.value?.trim()?.toUpperCase();
+        if (query) {
+            const found = aircraftListCache.find(a => (a.cs ?? '').toUpperCase() === query)
+                       ?? aircraftListCache.find(a => (a.cs ?? '').toUpperCase().includes(query));
+            if (found) {
+                _trackedAc = found; _trackedId = found.id;
+                activePopupCs = found.cs;
+                _lastHudUpdate = 0; _lastNearestCs = null;
+                if (inp) inp.value = '';
+                updateNearestHUD(found, _hudNearestData?.myData ?? null);
+            } else if (inp) {
+                inp.style.border = '1px solid rgba(255,80,80,0.8)';
+                setTimeout(() => { if (inp) inp.style.border = ''; }, 800);
+            }
+        }
     } else if (action === 'track-player') {
         const acId = target.dataset.acId;
         if (!acId || !_hudNearestData) return;
@@ -694,6 +788,18 @@ nearestHUD.addEventListener('click', (e) => {
         _semiActive = !_semiActive;
         if (_semiActive) {
             _apEnable();  // engage AP when semi-auto activates
+            // After 1s: simulate clicking the HDG reset button (resets offset + unfixes HDG)
+            setTimeout(() => {
+                if (!_semiActive) return;
+                _semiHdgOffset = 0; _semiHdgFixed = false;
+                // Also reset alt and spd offsets for a clean baseline
+                _semiAltOffset = 0; _semiAltFixed = false;
+                _semiSpdOffset = 0; _semiSpdFixed = false;
+                _semiPrevHdgCmd = null; _semiPrevAltCmd = null; _semiPrevSpdCmd = null;
+                _lastHudUpdate = 0;
+                // Rebuild HUD to reflect reset state
+                updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
+            }, 1000);
         } else {
             _apDisable();
         }
@@ -702,6 +808,27 @@ nearestHUD.addEventListener('click', (e) => {
         updateNearestHUD(_hudNearestData?.nearest ?? null, _hudNearestData?.myData ?? null);
     }
 });
+nearestHUD.addEventListener('keydown', (e) => {
+    if (e.target.dataset?.hudAction === 'cs-search-input' && e.key === 'Enter') {
+        e.preventDefault(); e.stopPropagation();
+        const query = e.target.value?.trim()?.toUpperCase();
+        if (query) {
+            const found = aircraftListCache.find(a => (a.cs ?? '').toUpperCase() === query)
+                       ?? aircraftListCache.find(a => (a.cs ?? '').toUpperCase().includes(query));
+            if (found) {
+                _trackedAc = found; _trackedId = found.id;
+                activePopupCs = found.cs;
+                _lastHudUpdate = 0; _lastNearestCs = null;
+                e.target.value = '';
+                updateNearestHUD(found, _hudNearestData?.myData ?? null);
+            } else {
+                e.target.style.border = '1px solid rgba(255,80,80,0.8)';
+                setTimeout(() => { e.target.style.border = ''; }, 800);
+            }
+        }
+    }
+});
+
 nearestHUD.addEventListener('input', (e) => {
     const target = e.target;
     if (target.id === 'radarEscortDistSlider') {
@@ -794,7 +921,7 @@ const FT_STEP = 20; // metres per nudge
 // ── Semi-Auto Chase/Escort state ──────────────────
 // Each control has: offset (adjustment delta), fixed (if true, don't follow live value)
 let _semiActive = false;                // Semi-Auto mode enabled
-let _semiHdgMode = 'heading';           // 'heading' | 'bearing' — base heading source
+let _semiHdgMode = 'bearing';           // 'heading' | 'bearing' — base heading source
 let _semiHdgOffset  = 0;               // degrees offset from base
 let _semiHdgFixed   = false;           // if true, _semiHdgFixed_val is used directly
 let _semiHdgFixed_val = 0;
@@ -831,10 +958,11 @@ function stopTracking() {
     _apLastAlt     = -9e9;
     // reset semi-auto state
     _semiActive        = false;
-    _semiHdgMode       = 'heading';
+    _semiHdgMode       = 'bearing';
     _semiHdgOffset     = 0; _semiHdgFixed = false;
     _semiAltOffset     = 0; _semiAltFixed = false;
     _semiSpdOffset     = 0; _semiSpdFixed = false;
+    _semiPrevHdgCmd = null; _semiPrevAltCmd = null; _semiPrevSpdCmd = null;
 }
 
 function refreshTracked() {
@@ -939,6 +1067,7 @@ function updateNearestHUD(nearest, myData) {
             ? displayAc._computedSpd : null);
     const spdStr = nearSpdRaw !== null ? (fmtSpd(nearSpdRaw) ?? '–') : '–';
     const hdgStr = fmtHdg(displayAc.h);
+    const acNameStr = _getAircraftName(displayAc) ?? '—';
 
     const trackBorder = isTracking ? 'rgba(255,200,60,0.55)' : t.hudBorder;
     const trackGlow   = isTracking ? ', 0 0 14px rgba(255,180,30,0.2)' : '';
@@ -1122,7 +1251,7 @@ function updateNearestHUD(nearest, myData) {
       </div>
       <div style="display:flex;align-items:center;gap:3px;">
         <div data-semi-action="hdg-dec" style="${btnS}">−</div>
-        <span style="color:${valColor};font-size:${fs}px;font-weight:bold;min-width:30px;text-align:center;">${String(Math.round(hdgVal)).padStart(3,'0')}°</span>
+        <span data-semi-action="hdg-edit" title="Click to type value" style="color:${valColor};font-size:${fs}px;font-weight:bold;min-width:30px;text-align:center;cursor:text;border-bottom:1px dashed rgba(100,220,255,0.4);">${String(Math.round(hdgVal)).padStart(3,'0')}°</span>
         <div data-semi-action="hdg-inc" style="${btnS}">+</div>
         <div data-semi-action="hdg-reset" title="Reset offset" style="${btnS}font-size:${fs-2}px;">↺</div>
       </div>
@@ -1135,7 +1264,7 @@ function updateNearestHUD(nearest, myData) {
       <span style="color:rgba(150,150,150,0.7);font-size:${fs-1}px;">${_semiAltFixed ? 'FIXED' : ((_semiAltOffset >= 0 ? '+' : '') + _semiAltOffset + ' ft')}</span>
       <div style="display:flex;align-items:center;gap:3px;">
         <div data-semi-action="alt-dec" style="${btnS}">−</div>
-        <span style="color:${valColor};font-size:${fs}px;font-weight:bold;min-width:48px;text-align:center;">${altVal.toLocaleString()} ft</span>
+        <span data-semi-action="alt-edit" title="Click to type value" style="color:${valColor};font-size:${fs}px;font-weight:bold;min-width:48px;text-align:center;cursor:text;border-bottom:1px dashed rgba(100,220,255,0.4);">${altVal.toLocaleString()} ft</span>
         <div data-semi-action="alt-inc" style="${btnS}">+</div>
         <div data-semi-action="alt-reset" style="${btnS}font-size:${fs-2}px;">↺</div>
       </div>
@@ -1148,7 +1277,7 @@ function updateNearestHUD(nearest, myData) {
       <span style="color:rgba(150,150,150,0.7);font-size:${fs-1}px;">${_semiSpdFixed ? 'FIXED' : ((_semiSpdOffset >= 0 ? '+' : '') + _semiSpdOffset + ' kt')}</span>
       <div style="display:flex;align-items:center;gap:3px;">
         <div data-semi-action="spd-dec" style="${btnS}">−</div>
-        <span style="color:${valColor};font-size:${fs}px;font-weight:bold;min-width:40px;text-align:center;">${spdVal} kt</span>
+        <span data-semi-action="spd-edit" title="Click to type value" style="color:${valColor};font-size:${fs}px;font-weight:bold;min-width:40px;text-align:center;cursor:text;border-bottom:1px dashed rgba(100,220,255,0.4);">${spdVal} kt</span>
         <div data-semi-action="spd-inc" style="${btnS}">+</div>
         <div data-semi-action="spd-reset" style="${btnS}font-size:${fs-2}px;">↺</div>
       </div>
@@ -1206,9 +1335,24 @@ function updateNearestHUD(nearest, myData) {
       letter-spacing:1px;cursor:pointer;transition:background .15s;">▶  TRACK PLAYER</button>
   </div>` : '';
 
+    // Don't rebuild innerHTML while a semi-auto edit input is focused — it would close it
+    if (nearestHUD.querySelector('input:focus')) return;
+
     nearestHUD.innerHTML = `
 <div style="background:${t.hudBg};border:1.5px solid ${trackBorder};border-radius:10px;overflow:hidden;
   box-shadow:0 4px 20px rgba(0,0,0,0.75)${trackGlow};font-family:${FONT_MONO};">
+  <!-- Callsign search bar — always visible at top of HUD -->
+  <div style="padding:5px 10px 5px;border-bottom:1px solid ${t.hudSep};display:flex;align-items:center;gap:6px;">
+    <span style="color:${t.hudLabel};font-size:9px;letter-spacing:0.5px;white-space:nowrap;flex-shrink:0;">TRACK</span>
+    <input data-hud-action="cs-search-input" type="text" placeholder="Callsign…" autocomplete="off" spellcheck="false"
+      style="flex:1;background:rgba(0,20,10,0.85);border:1px solid ${t.hudBorder};border-radius:4px;
+      padding:2px 5px;color:rgba(120,255,140,0.95);font:bold 11px ${FONT_MONO};
+      outline:none;min-width:0;" />
+    <button data-hud-action="cs-search-go"
+      style="padding:2px 8px;border-radius:4px;cursor:pointer;flex-shrink:0;
+      background:rgba(0,60,0,0.7);border:1px solid rgba(0,220,80,0.5);
+      color:rgba(100,255,120,0.95);font-size:10px;font-family:${FONT_MONO};">Go</button>
+  </div>
   <div style="padding:9px 14px 7px;border-bottom:1px solid ${t.hudSep};display:flex;align-items:center;gap:8px;">
     <span style="display:inline-block;width:10px;height:10px;border-radius:50%;
       background:${headerDot};box-shadow:0 0 6px ${headerDot};flex-shrink:0;"></span>
@@ -1236,9 +1380,13 @@ function updateNearestHUD(nearest, myData) {
       <div style="color:${t.hudLabel};font-size:${UI.hudSectionLabelFont}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Speed (GS)</div>
       <div style="color:${t.hudSpeed};font-size:${UI.hudDataFont}px;font-weight:bold">${spdStr}</div>
     </div>
-    <div style="grid-column:1/-1">
+    <div>
       <div style="color:${t.hudLabel};font-size:${UI.hudSectionLabelFont}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Heading</div>
       <div style="color:${t.hudHdg};font-size:${UI.hudDataFont}px;font-weight:bold">${hdgStr}</div>
+    </div>
+    <div>
+      <div style="color:${t.hudLabel};font-size:${UI.hudSectionLabelFont}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Aircraft</div>
+      <div style="color:rgba(200,220,255,0.9);font-size:${UI.hudDataFont - 1 || 11}px;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${acNameStr}</div>
     </div>
     ${etaStr !== null ? `
     <div style="grid-column:1/-1;border-top:1px solid ${t.hudSep};margin-top:4px;padding-top:4px;">
@@ -1261,9 +1409,12 @@ function repositionNearestHUD() {
     const rt = parseInt(radarCanvas.style.top)  || 0;
     const spacing = 5;
     const hudLeft = rl + radarSize + spacing;
-    const hudTop  = rt + 40 + spacing + 5;
-    nearestHUD.style.left = hudLeft + 'px';
-    nearestHUD.style.top  = hudTop  + 'px';
+    const rawTop  = rt + 40 + spacing + 5;
+    const margin  = 12;
+    const maxH    = window.innerHeight - Math.max(margin, rawTop) - margin;
+    nearestHUD.style.left      = hudLeft + 'px';
+    nearestHUD.style.top       = Math.max(margin, rawTop) + 'px';
+    nearestHUD.style.maxHeight = Math.max(80, maxH) + 'px';
     repositionILSHUD();
     repositionMenu();
 }
@@ -1273,6 +1424,7 @@ function repositionNearestHUD() {
 // ═══════════════════════════════════════════════════
 
 let isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
+let _dragMoved = false;   // suppresses the click that fires right after a drag ends
 
 radarCanvas.addEventListener('mousedown', startDrag);
 radarCanvas.addEventListener('touchstart', startDragTouch, {passive:false});
@@ -1300,12 +1452,14 @@ function startDragTouch(e) {
 }
 function onDrag(e) {
     if (!isDragging) return;
+    _dragMoved = true;   // actual movement occurred — suppress the post-mouseup click
     radarCanvas.style.left = (e.clientX - dragOffsetX) + 'px';
     radarCanvas.style.top  = (e.clientY - dragOffsetY) + 'px';
     repositionUI();
 }
 function onDragTouch(e) {
     if (!isDragging || e.touches.length !== 1) return;
+    _dragMoved = true;
     radarCanvas.style.left = (e.touches[0].clientX - dragOffsetX) + 'px';
     radarCanvas.style.top  = (e.touches[0].clientY - dragOffsetY) + 'px';
     repositionUI();
@@ -1313,6 +1467,7 @@ function onDragTouch(e) {
 }
 function stopDrag() {
     isDragging = false;
+    // _dragMoved already set by onDrag if movement occurred; don't set it here
     document.removeEventListener('mousemove', onDrag);
     document.removeEventListener('touchmove', onDragTouch);
     document.removeEventListener('mouseup', stopDrag);
@@ -1864,6 +2019,77 @@ function createMenu() {
     addSection('🗺️  Map');
     addToggle('Airports & Runways',       'showAirports');
     addToggle('Flight Path Waypoints',    'showWaypoints');
+    // ── Waypoint customisation controls ──────────────────────────────────────
+    {
+        // Line width
+        const rwLW = document.createElement('div');
+        rwLW.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:4px 16px;`;
+        const lwLbl = document.createElement('span');
+        lwLbl.style.cssText = `color:rgba(180,220,255,0.8);font:${UI.menuRowFont}px ${FONT_SANS};`;
+        lwLbl.textContent = 'Waypoint Line Width';
+        const lwVal = document.createElement('span');
+        lwVal.style.cssText = `color:rgba(255,255,255,0.9);font:${UI.menuRowFont}px ${FONT_SANS};min-width:28px;text-align:right;`;
+        lwVal.textContent = settings.waypointLineWidth.toFixed(1);
+        const lwRange = document.createElement('input');
+        lwRange.type='range'; lwRange.min='0.5'; lwRange.max='5'; lwRange.step='0.5';
+        lwRange.value = settings.waypointLineWidth;
+        lwRange.style.cssText = 'width:80px;margin-left:8px;accent-color:#7a40ff;';
+        lwRange.oninput = () => { settings.waypointLineWidth = parseFloat(lwRange.value); lwVal.textContent = settings.waypointLineWidth.toFixed(1); saveSettings(); };
+        rwLW.append(lwLbl, lwVal, lwRange);
+        panel.appendChild(rwLW);
+
+        // Dot size
+        const rwDS = document.createElement('div');
+        rwDS.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:4px 16px;`;
+        const dsLbl = document.createElement('span');
+        dsLbl.style.cssText = `color:rgba(180,220,255,0.8);font:${UI.menuRowFont}px ${FONT_SANS};`;
+        dsLbl.textContent = 'Waypoint Dot Size';
+        const dsVal = document.createElement('span');
+        dsVal.style.cssText = `color:rgba(255,255,255,0.9);font:${UI.menuRowFont}px ${FONT_SANS};min-width:28px;text-align:right;`;
+        dsVal.textContent = settings.waypointDotSize;
+        const dsRange = document.createElement('input');
+        dsRange.type='range'; dsRange.min='2'; dsRange.max='14'; dsRange.step='1';
+        dsRange.value = settings.waypointDotSize;
+        dsRange.style.cssText = 'width:80px;margin-left:8px;accent-color:#7a40ff;';
+        dsRange.oninput = () => { settings.waypointDotSize = parseFloat(dsRange.value); dsVal.textContent = settings.waypointDotSize; saveSettings(); };
+        rwDS.append(dsLbl, dsVal, dsRange);
+        panel.appendChild(rwDS);
+
+        // Label size
+        const rwLS = document.createElement('div');
+        rwLS.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:4px 16px;`;
+        const lsLbl = document.createElement('span');
+        lsLbl.style.cssText = `color:rgba(180,220,255,0.8);font:${UI.menuRowFont}px ${FONT_SANS};`;
+        lsLbl.textContent = 'Waypoint Label Size';
+        const lsVal = document.createElement('span');
+        lsVal.style.cssText = `color:rgba(255,255,255,0.9);font:${UI.menuRowFont}px ${FONT_SANS};min-width:28px;text-align:right;`;
+        lsVal.textContent = settings.waypointLabelSize;
+        const lsRange = document.createElement('input');
+        lsRange.type='range'; lsRange.min='6'; lsRange.max='18'; lsRange.step='1';
+        lsRange.value = settings.waypointLabelSize;
+        lsRange.style.cssText = 'width:80px;margin-left:8px;accent-color:#7a40ff;';
+        lsRange.oninput = () => { settings.waypointLabelSize = parseFloat(lsRange.value); lsVal.textContent = settings.waypointLabelSize; saveSettings(); };
+        rwLS.append(lsLbl, lsVal, lsRange);
+        panel.appendChild(rwLS);
+
+        // Shape selector
+        const rwSH = document.createElement('div');
+        rwSH.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:4px 16px 8px;`;
+        const shLbl = document.createElement('span');
+        shLbl.style.cssText = `color:rgba(180,220,255,0.8);font:${UI.menuRowFont}px ${FONT_SANS};flex-shrink:0;`;
+        shLbl.textContent = 'Waypoint Shape';
+        const shSel = document.createElement('select');
+        shSel.style.cssText = `background:rgba(20,30,50,0.95);color:rgba(200,220,255,0.9);border:1px solid rgba(100,140,200,0.4);border-radius:4px;padding:2px 6px;font:${UI.menuRowFont}px ${FONT_SANS};cursor:pointer;`;
+        [['default','✦ Default'],['circle-full','● Full Circle'],['circle-empty','○ Empty Circle'],['square','■ Square'],['star4','✦ 4-Point Star'],['star5','✦ 5-Point Star']].forEach(([val,lbl]) => {
+            const opt = document.createElement('option');
+            opt.value = val; opt.textContent = lbl;
+            if (val === settings.waypointShape) opt.selected = true;
+            shSel.appendChild(opt);
+        });
+        shSel.onchange = () => { settings.waypointShape = shSel.value; saveSettings(); };
+        rwSH.append(shLbl, shSel);
+        panel.appendChild(rwSH);
+    }
     // Hide Airbases — suppresses placeholder dots for airports without runway data
     {
         const row = document.createElement('div');
@@ -2186,22 +2412,6 @@ function createMenu() {
     addSep();
 
     addSection('🎯  Tracking');
-    addSlider({
-        label: 'Min Chase Speed',
-        get:  () => CHASE_MIN_SPEED_KT,
-        set:  v  => { CHASE_MIN_SPEED_KT = v; },
-        fmt:  v  => Math.round(v) + ' kt',
-        min: 30, max: 300, step: 5,
-        onCommit: _saveChaseParams,
-    });
-    addSlider({
-        label: 'Max Chase Speed',
-        get:  () => CHASE_MAX_SPEED_KT,
-        set:  v  => { CHASE_MAX_SPEED_KT = v; },
-        fmt:  v  => Math.round(v) + ' kt',
-        min: 100, max: 1200, step: 10,
-        onCommit: _saveChaseParams,
-    });
     addSep();
     // Dev Testing Mode toggle + PID sliders
     {
@@ -2376,6 +2586,14 @@ function createMenu() {
             onCommit: saveIlsPrefs,
         });
     }
+    addSlider({
+        label: 'ILS HUD Scale',
+        get:  () => ilsPrefs.hudScale ?? 1.0,
+        set:  v  => { ilsPrefs.hudScale = v; saveIlsPrefs(); repositionILSHUD(); },
+        fmt:  v  => Math.round(v * 100) + '%',
+        min: 0.4, max: 1.0, step: 0.05,
+        onCommit: saveIlsPrefs,
+    });
     addILSFontSlider('ILS Header Font',       'fontHeader');
     addILSFontSlider('ILS Label Font',         'fontLabel');
     addILSFontSlider('ILS Value Font',         'fontValue');
@@ -2526,6 +2744,9 @@ function distToSegment(px, py, x1, y1, x2, y2) {
 }
 
 radarCanvas.addEventListener('click', (e) => {
+    // Suppress click that fires immediately after a drag ends
+    if (_dragMoved) { _dragMoved = false; return; }
+
     const rect = radarCanvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
@@ -2568,7 +2789,9 @@ radarCanvas.addEventListener('click', (e) => {
     }
 
     hidePopup();
-    stopTracking();
+    // Only stop tracking if not currently tracking a player
+    // (clicking empty radar space should not dismiss an active tracking HUD)
+    if (!_trackedAc) stopTracking();
 });
 
 // ═══════════════════════════════════════════════════
@@ -2757,6 +2980,17 @@ function _tickInternalSource() {
 }
 setInterval(_tickInternalSource, DRAW_INTERVAL);
 
+// Semi-auto AP pushes commands every 250ms independently of draw rate
+setInterval(() => {
+    if (_semiActive && _trackedAc && _trackedAc.co) {
+        try {
+            const av = window.geofs?.animation?.values;
+            const hasPos2 = av && isFinite(av.latitude ?? av.lat);
+            if (hasPos2) _tickSemiAuto();
+        } catch(e) {}
+    }
+}, 250);
+
 let _fetchConsecutiveErrors = 0;
 let _fetchDelay = FETCH_DELAY_BASE;
 const FETCH_MIN = FETCH_DELAY_BASE;
@@ -2902,6 +3136,13 @@ let _lastRunwayPositions = [];
 
 const ilsHUD = document.createElement('div');
 ilsHUD.id = 'radarILSHUD';
+// Delegated close button — fires reliably regardless of innerHTML rebuilds
+ilsHUD.addEventListener('pointerdown', (e) => {
+    if (e.target.id === 'ilsCloseBtn' || e.target.closest('#ilsCloseBtn')) {
+        e.stopPropagation(); e.preventDefault();
+        deactivateILS();
+    }
+}, true);
 ilsHUD.style.cssText = `
     position:fixed; z-index:2147483646; display:none;
     pointer-events:auto; font-family:${FONT_MONO};
@@ -2937,8 +3178,16 @@ function repositionILSHUD() {
     const rl = parseInt(radarCanvas.style.left) || 5;
     const rt = parseInt(radarCanvas.style.top)  || 0;
     const spacing = 5;
-    ilsHUD.style.left = (rl + radarSize + spacing) + 'px';
-    ilsHUD.style.top  = (rt + 40 + spacing + 5) + 'px';
+    const rawTop  = rt + 40 + spacing + 5;
+    const margin  = 12;
+    const maxH    = window.innerHeight - Math.max(margin, rawTop) - margin;
+    const sc = ilsPrefs.hudScale ?? 1.0;
+    ilsHUD.style.transformOrigin = 'top left';
+    ilsHUD.style.transform       = `scale(${sc})`;
+    ilsHUD.style.left      = (rl + radarSize + spacing) + 'px';
+    ilsHUD.style.top       = Math.max(margin, rawTop) + 'px';
+    ilsHUD.style.maxHeight = Math.max(80, maxH / sc) + 'px';
+    ilsHUD.style.overflowY = 'auto';
 }
 
 function computeVS(altFt) {
@@ -2953,29 +3202,44 @@ function computeVS(altFt) {
 }
 
 function getApproachThreshold(playerLat, playerLon, playerHdg, rwy) {
-    const brg1 = calcBearing(playerLat, playerLon, rwy.lat1, rwy.lon1);
-    const brg2 = calcBearing(playerLat, playerLon, rwy.lat2, rwy.lon2);
-    const diff1 = Math.abs(((playerHdg - brg1 + 540) % 360) - 180);
-    const diff2 = Math.abs(((playerHdg - brg2 + 540) % 360) - 180);
-    return diff1 < diff2
-        ? { tLat: rwy.lat1, tLon: rwy.lon1, oLat: rwy.lat2, oLon: rwy.lon2 }
-        : { tLat: rwy.lat2, tLon: rwy.lon2, oLat: rwy.lat1, oLon: rwy.lon1 };
+    // Pick the threshold the player is approaching: the end whose runway heading
+    // most closely matches the player's heading (i.e. player is flying toward it).
+    const rwHdg12 = calcBearing(rwy.lat1, rwy.lon1, rwy.lat2, rwy.lon2); // hdg from end1 → end2
+    const rwHdg21 = (rwHdg12 + 180) % 360;                                // hdg from end2 → end1
+    const diff12  = Math.abs(((playerHdg - rwHdg12 + 540) % 360) - 180); // how aligned with 1→2
+    const diff21  = Math.abs(((playerHdg - rwHdg21 + 540) % 360) - 180); // how aligned with 2→1
+    // Landing on end2: runway heading is rwHdg12 (pointing toward end2) → threshold = end2, opposite = end1
+    // Landing on end1: runway heading is rwHdg21 (pointing toward end1) → threshold = end1, opposite = end2
+    return diff12 < diff21
+        ? { tLat: rwy.lat2, tLon: rwy.lon2, oLat: rwy.lat1, oLon: rwy.lon1, rwHdgLanding: rwHdg12 }
+        : { tLat: rwy.lat1, tLon: rwy.lon1, oLat: rwy.lat2, oLon: rwy.lon2, rwHdgLanding: rwHdg21 };
 }
 
 function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpeedKts) {
     if (!_ilsRunway) return null;
 
-    const { tLat, tLon, oLat, oLon } = getApproachThreshold(playerLat, playerLon, playerHdg, _ilsRunway);
+    const { tLat, tLon, oLat, oLon, rwHdgLanding } = getApproachThreshold(playerLat, playerLon, playerHdg, _ilsRunway);
 
-    const [pDx, pDy] = latLonToMeters(tLat, tLon, playerLat, playerLon);
-    const [rDx, rDy] = latLonToMeters(tLat, tLon, oLat, oLon);
+    // Runway axis vector (from opposite end → threshold, i.e. the landing direction)
+    const [rDx, rDy] = latLonToMeters(oLat, oLon, tLat, tLon);
     const rLen = Math.hypot(rDx, rDy);
     if (rLen < 1) return null;
+    const rUx = rDx / rLen, rUy = rDy / rLen;   // unit vector pointing toward threshold
 
-    const rUx = rDx / rLen, rUy = rDy / rLen;
+    // Player vector from opposite end
+    const [pDx, pDy] = latLonToMeters(oLat, oLon, playerLat, playerLon);
+
+    // along > rLen  → player is beyond threshold (past the runway end)
+    // along = rLen  → player exactly at threshold
+    // along = rLen/2 → player at runway centre
+    // along < 0    → player behind opposite end (very far on approach)
     const along = pDx * rUx + pDy * rUy;
-    const cross  = pDx * (-rUy) + pDy * rUx;
-    const distToThreshM = -along;
+    const cross  = pDx * rUy - pDy * rUx;   // positive = right of centreline
+
+    // Distance to threshold via haversine (accurate, avoids flat-earth projection drift)
+    // Positive = player is before threshold (on approach); negative = past threshold
+    const directDistM = calcDistNm(playerLat, playerLon, tLat, tLon) * 1852;
+    const distToThreshM_final = (along <= rLen) ? directDistM : -directDistM;
 
     const av = window.geofs?.animation?.values;
 
@@ -2994,11 +3258,12 @@ function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpee
     }
 
     const GS_DEG    = 3.0;
-    const idealAltFt = Math.max(0, distToThreshM) * Math.tan(GS_DEG * Math.PI / 180) * 3.28084;
+    const distM      = distToThreshM_final;
+    const idealAltFt = Math.max(0, distM) * Math.tan(GS_DEG * Math.PI / 180) * 3.28084;
     const gsErrFt   = playerAltAGL - idealAltFt;
 
-    const locErrDeg = Math.atan2(cross, Math.max(100, Math.abs(distToThreshM))) * 180 / Math.PI;
-    const gsErrDeg  = Math.atan2(gsErrFt / 3.28084, Math.max(100, Math.abs(distToThreshM))) * 180 / Math.PI;
+    const locErrDeg = Math.atan2(cross, Math.max(100, Math.abs(distM))) * 180 / Math.PI;
+    const gsErrDeg  = Math.atan2(gsErrFt / 3.28084, Math.max(100, Math.abs(distM))) * 180 / Math.PI;
 
     let vs = null;
     if (av && av.verticalSpeed !== undefined && isFinite(av.verticalSpeed)) {
@@ -3030,14 +3295,14 @@ function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpee
         }
     } catch(e) {}
 
-    const rwHdg = calcBearing(oLat, oLon, tLat, tLon);
+    const rwHdg = rwHdgLanding;
 
     return {
         locErrDeg,
         gsErrDeg,
         gsErrFt:        Math.round(gsErrFt),
-        distToThreshNm: distToThreshM / 1852,
-        distToThreshM,
+        distToThreshNm: distM / 1852,
+        distToThreshM: distM,
         altAGL:         Math.round(playerAltAGL),
         vs,
         descentAngle,
@@ -3045,7 +3310,7 @@ function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpee
         rwHdg:          Math.round(((rwHdg % 360) + 360) % 360),
         runwayName:     _ilsRunway.name || 'RWY',
         airportICAO:    _ilsAirportICAO,
-        onGround:       distToThreshM < 50 && Math.abs(along) < rLen + 50,
+        onGround:       distM < 50 && Math.abs(along) < rLen + 50,
     };
 }
 
@@ -3152,7 +3417,8 @@ function drawBankIndicator(bankDeg) {
     });
 
     const clampedBank  = Math.max(-45, Math.min(45, bankDeg || 0));
-    const needleAngle  = Math.PI * 1.5 + (clampedBank / 90) * (Math.PI / 2);
+    // Negate: GeoFS aroll is positive=left, so invert to match visual right=right
+    const needleAngle  = Math.PI * 1.5 + (-clampedBank / 90) * (Math.PI / 2);
     const bankColor    = Math.abs(clampedBank) < 15 ? '#00ffaa'
                        : Math.abs(clampedBank) < 30 ? '#ffcc00' : '#ff4444';
 
@@ -3170,13 +3436,184 @@ function drawBankIndicator(bankDeg) {
     bc.font = `bold ${ilsPrefs.fontBankValue}px Arial`;
     bc.textAlign = 'center'; bc.textBaseline = 'bottom';
     bc.fillStyle = bankColor;
-    bc.fillText((clampedBank <= 0 ? 'L' : 'R') + Math.abs(clampedBank).toFixed(1) + '°', cx, H - 0);
+    // aroll positive = left bank in GeoFS
+    bc.fillText((clampedBank >= 0 ? 'L' : 'R') + Math.abs(clampedBank).toFixed(1) + '°', cx, H - 0);
 }
 
 const ilsBankCanvas = document.createElement('canvas');
 ilsBankCanvas.width  = 200;
 ilsBankCanvas.height = 44;
 const ilsBankCtx = ilsBankCanvas.getContext('2d');
+
+// Approach profile diagram — side-view of aircraft + runway
+const ilsProfileCanvas = document.createElement('canvas');
+ilsProfileCanvas.width  = 260;
+ilsProfileCanvas.height = 220;
+const ilsProfileCtx = ilsProfileCanvas.getContext('2d');
+
+// Load plane image from repo — used in approach profile diagram
+const _planeImg = new Image();
+_planeImg.crossOrigin = 'anonymous';
+_planeImg.src = 'https://raw.githubusercontent.com/YK3D/Geo-FS-Radar/main/Plane.png';
+
+function drawApproachProfile(descentAngleDeg, altAGL, gsErrFt, locErrDeg, distToThreshM) {
+    const W = 260, H = 220;   // fixed height — runway moves up inside it
+    const pc = ilsProfileCtx;
+
+    // ── Descent angle ────────────────────────────────────────────────────────
+    const rawAngle = isFinite(descentAngleDeg) ? descentAngleDeg : 0;
+    const angleDeg = Math.max(-25, Math.min(25, rawAngle));
+    const angleRad = angleDeg * Math.PI / 180;
+
+    // ── Layout ───────────────────────────────────────────────────────────────
+    const imgW = 160, imgH = 88;
+    const acX  = W / 2;
+    const acY  = 62;
+
+    const imgTopY     = acY - imgH / 2;
+    const bellyFrac   = 0.72;
+    const planeBottom = imgTopY + imgH * bellyFrac;
+
+    // ── Runway Y: fixed canvas, runway moves UP as altitude decreases ─────────
+    // 0 ft AGL  → runway flush under belly (planeBottom + 2)
+    // 650 ft AGL → runway near bottom of canvas (H - 20)
+    const showRwy = isFinite(altAGL) && altAGL <= 650 && altAGL >= -20;
+    const agl     = isFinite(altAGL) ? Math.max(0, altAGL) : 0;
+    const rwyAtGround  = planeBottom + 2;   // runway flush under belly at 0 ft AGL
+    const rwyAtCeiling = H - 20;            // runway near bottom at 650 ft AGL
+    // As agl increases → runway moves DOWN (away); as agl decreases → runway moves UP (closer)
+    const rwyY    = rwyAtGround + (agl / 650) * (rwyAtCeiling - rwyAtGround);
+
+    // ── Runway X: lateral offset from locErr + distance perspective ──────────
+    // locErrDeg: positive = aircraft right of centreline → runway shifts left
+    // As distance shrinks the runway approaches acX (perspective convergence)
+    // Map locErrDeg to px: ±5° = ±(W/2 - rwyHalf - 8) max shift
+    const rwyHalf    = 80;    // longer runway
+    const rwyThick   = 10;
+    const distM      = isFinite(distToThreshM) ? Math.max(0, distToThreshM) : 0;
+    // Max lateral shift shrinks with distance (far away = small shift, near = large)
+    // At 5000m away shift is small; at 0m shift is proportional to locErr
+    const maxShiftPx  = W / 2 - 10;   // hard limit to stay on canvas
+    const distFactor  = 1 - Math.min(1, distM / 3000);  // 0 at 3km+, 1 at 0m
+    const locShiftPx  = isFinite(locErrDeg)
+        ? Math.max(-maxShiftPx, Math.min(maxShiftPx, -locErrDeg * 18 * distFactor))
+        : 0;
+    const rwyX = acX + locShiftPx;   // centre of runway on canvas X
+
+    pc.clearRect(0, 0, W, H);
+
+    // Background + border
+    pc.fillStyle = 'rgba(0,6,14,0.97)';
+    pc.fillRect(0, 0, W, H);
+    pc.strokeStyle = 'rgba(0,100,160,0.4)';
+    pc.lineWidth = 1;
+    pc.strokeRect(0.5, 0.5, W - 1, H - 1);
+
+    // ── Ground fill ──────────────────────────────────────────────────────────
+    const groundY = showRwy ? rwyY + rwyThick / 2 + 2 : H - 4;
+    pc.fillStyle = 'rgba(30,55,25,0.35)';
+    pc.fillRect(0, groundY, W, H - groundY);
+    pc.strokeStyle = 'rgba(60,100,50,0.5)';
+    pc.lineWidth = 1;
+    pc.beginPath(); pc.moveTo(0, groundY); pc.lineTo(W, groundY); pc.stroke();
+
+    // ── Trajectory line from aircraft nose ───────────────────────────────────
+    const trajLen = H - acY - 4;
+    pc.save();
+    pc.strokeStyle = 'rgba(0,200,255,0.28)';
+    pc.lineWidth = 1;
+    pc.setLineDash([6, 4]);
+    pc.beginPath();
+    pc.moveTo(acX, acY);
+    pc.lineTo(acX + trajLen, acY + trajLen * Math.tan(angleRad));
+    pc.stroke();
+    pc.setLineDash([]);
+    pc.restore();
+
+    // ── Vertical connector: aircraft to runway centre ─────────────────────────
+    if (showRwy && rwyY - acY > 4) {
+        pc.save();
+        pc.strokeStyle = 'rgba(100,200,100,0.25)';
+        pc.lineWidth = 1;
+        pc.setLineDash([3, 3]);
+        pc.beginPath();
+        pc.moveTo(acX, acY);
+        pc.lineTo(rwyX, rwyY);
+        pc.stroke();
+        pc.setLineDash([]);
+        pc.restore();
+    }
+
+    // ── Runway ───────────────────────────────────────────────────────────────
+    if (showRwy) {
+        const rwyMid = rwyY;
+
+        // Tarmac
+        pc.fillStyle = 'rgba(90,90,70,0.90)';
+        pc.fillRect(rwyX - rwyHalf, rwyMid - rwyThick / 2, rwyHalf * 2, rwyThick);
+
+        // Centre-line dashes
+        pc.strokeStyle = 'rgba(255,255,180,0.75)';
+        pc.lineWidth = 1.5;
+        for (let i = -6; i <= 6; i++) {
+            if (i === 0) continue;
+            const mx = rwyX + i * 13;
+            if (mx < rwyX - rwyHalf + 4 || mx > rwyX + rwyHalf - 4) continue;
+            pc.beginPath();
+            pc.moveTo(mx - 4, rwyMid);
+            pc.lineTo(mx + 4, rwyMid);
+            pc.stroke();
+        }
+
+        // Threshold end bars
+        pc.strokeStyle = 'rgba(240,230,140,0.88)';
+        pc.lineWidth = 2.5;
+        pc.beginPath();
+        pc.moveTo(rwyX - rwyHalf, rwyMid - rwyThick / 2);
+        pc.lineTo(rwyX - rwyHalf, rwyMid + rwyThick / 2);
+        pc.moveTo(rwyX + rwyHalf, rwyMid - rwyThick / 2);
+        pc.lineTo(rwyX + rwyHalf, rwyMid + rwyThick / 2);
+        pc.stroke();
+
+        // AGL label
+        const altColor = altAGL < 50 ? '#ff7744' : altAGL < 100 ? '#ffcc44' : 'rgba(160,220,140,0.9)';
+        pc.font = 'bold 9px monospace';
+        pc.fillStyle = altColor;
+        pc.textAlign = 'left';
+        pc.textBaseline = 'middle';
+        pc.fillText(Math.round(altAGL) + ' ft', Math.min(W - 36, rwyX + rwyHalf + 4), rwyMid);
+    }
+
+    // ── Aircraft image ────────────────────────────────────────────────────────
+    // Draw AFTER runway so plane renders on top
+    pc.save();
+    pc.translate(acX, acY);
+    pc.rotate(-angleRad);
+    if (_planeImg.complete && _planeImg.naturalWidth > 0) {
+        pc.drawImage(_planeImg, -imgW / 2, -imgH / 2, imgW, imgH);
+    } else {
+        // Fallback vector while image loads
+        const col = 'rgba(0,220,255,0.95)';
+        pc.strokeStyle = col; pc.fillStyle = col; pc.lineWidth = 2;
+        pc.beginPath(); pc.moveTo(-30, 0); pc.lineTo(30, 0); pc.stroke();
+        pc.beginPath(); pc.moveTo(30,0); pc.lineTo(22,-5); pc.lineTo(30,0); pc.lineTo(22,5); pc.closePath(); pc.fill();
+        pc.beginPath(); pc.moveTo(5,0); pc.lineTo(-3,-20); pc.lineTo(-18,-20); pc.lineTo(-23,0); pc.closePath(); pc.globalAlpha=0.7; pc.fill(); pc.globalAlpha=1; pc.stroke();
+        pc.beginPath(); pc.moveTo(-22,0); pc.lineTo(-27,-12); pc.lineTo(-18,0); pc.closePath(); pc.globalAlpha=0.7; pc.fill(); pc.globalAlpha=1; pc.stroke();
+        pc.beginPath(); pc.moveTo(-21,0); pc.lineTo(-26,9); pc.lineTo(-18,0); pc.stroke();
+    }
+    pc.restore();
+
+    // ── ANGLE label bottom-left ───────────────────────────────────────────────
+    const displayAngle = -rawAngle;
+    const sign = displayAngle > 0 ? '+' : '';
+    const angColor = Math.abs(angleDeg) > 6 ? '#ff6644'
+                   : Math.abs(angleDeg) > 3.5 ? '#ffcc00' : '#00ffaa';
+    pc.font = 'bold 10px monospace';
+    pc.fillStyle = angColor;
+    pc.textAlign = 'left';
+    pc.textBaseline = 'bottom';
+    pc.fillText('ANGLE ' + sign + displayAngle.toFixed(1) + '°', 4, H - 4);
+}
 
 let _ilsHUDBuilt = false;
 
@@ -3192,6 +3629,13 @@ function updateILSHUD(ilsData) {
 
     drawCDIInstrument(locErrDeg, gsErrDeg);
     drawBankIndicator(ilsData?.bankDeg ?? 0);
+    drawApproachProfile(
+        ilsData?.descentAngle  ?? 0,
+        ilsData?.altAGL        ?? 9999,
+        ilsData?.gsErrFt       ?? 0,
+        ilsData?.locErrDeg     ?? 0,
+        ilsData?.distToThreshM ?? 5000
+    );
 
     const locDots = Math.abs(locErrDeg) / 2.5 * 2;
     const gsDots  = Math.abs(gsErrDeg)  / 0.7 * 2;
@@ -3270,8 +3714,16 @@ function updateILSHUD(ilsData) {
     </div>
   </div>
   <div style="padding:6px 0 0; border-bottom:1px solid ${t.hudSep};">
-    <div style="color:${t.hudLabel};font-size:${ilsPrefs.fontLabel}px;letter-spacing:1px;text-transform:uppercase;text-align:center;margin-bottom:2px">BANK ANGLE</div>
-    <div id="ilsBankWrap" style="display:flex;justify-content:center;padding:0 0 4px;"></div>
+    <div style="display:flex;gap:0;align-items:flex-start;">
+      <div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;">
+        <div style="color:${t.hudLabel};font-size:${ilsPrefs.fontLabel}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px;padding-left:4px;">BANK ANGLE</div>
+        <div id="ilsBankWrap" style="padding:0 0 4px;"></div>
+      </div>
+      <div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;border-left:1px solid ${t.hudSep};padding-left:6px;margin-left:4px;">
+        <div style="color:${t.hudLabel};font-size:${ilsPrefs.fontLabel}px;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px;">APPROACH</div>
+        <div id="ilsProfileWrap" style="padding:0 0 4px;"></div>
+      </div>
+    </div>
   </div>
   <div style="padding:5px 14px 7px; display:flex; align-items:center; justify-content:space-between;">
     <span style="color:${t.hudLabel};font-size:${ilsPrefs.fontFooter}px;">3° G/S  ·  Click runway to close ILS</span>
@@ -3284,12 +3736,10 @@ function updateILSHUD(ilsData) {
     const bankWrap = document.getElementById('ilsBankWrap');
     if (bankWrap) bankWrap.appendChild(ilsBankCanvas);
 
-    const closeBtn = document.getElementById('ilsCloseBtn');
-    if (closeBtn) {
-        closeBtn.onmouseover = () => closeBtn.style.background = 'rgba(0,160,230,0.15)';
-        closeBtn.onmouseout  = () => closeBtn.style.background = 'none';
-        closeBtn.onclick = (e) => { e.stopPropagation(); deactivateILS(); };
-    }
+    const profileWrap = document.getElementById('ilsProfileWrap');
+    if (profileWrap) profileWrap.appendChild(ilsProfileCanvas);
+
+    // Close button handled by delegated pointerdown listener on ilsHUD
 }
 
 // ═══════════════════════════════════════════════════
@@ -3584,6 +4034,13 @@ function _apEnable() {
             else if (typeof ap.turnOn === 'function') ap.turnOn();
         }
         _apEngaged = true;
+        // Show GeoFS autopilot panel in the UI (v8.37 method — confirmed working)
+        try {
+            const apBar = document.querySelector('.autopilot-bar, #autopilot-bar, [class*="autopilot"]');
+            if (apBar) apBar.style.display = '';
+            if (typeof geofs?.api?.showAutopilot === 'function') geofs.api.showAutopilot();
+            if (typeof geofs?.autopilot?.showBar === 'function') geofs.autopilot.showBar();
+        } catch(e2) {}
     } catch(e) {}
 }
 
@@ -3607,7 +4064,8 @@ function _apSetHeading(hdg) {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
         const h = ((hdg % 360) + 360) % 360;
-        if (Math.abs(((h - _apLastHdg + 540) % 360) - 180) < AP_HDG_THRESH) return;
+        // Skip threshold check when semi-auto is driving (continuous updates needed)
+        if (!_semiActive && Math.abs(((h - _apLastHdg + 540) % 360) - 180) < AP_HDG_THRESH) return;
         _apLastHdg = h;
         if (typeof ap.setCourse === 'function') { ap.setCourse(h); return; }
         if (ap.values != null) {
@@ -3638,7 +4096,7 @@ function _apSetSpeed(kts) {
         const ap = window.geofs?.autopilot;
         if (!ap) return;
         const s = Math.max(CHASE_MIN_SPEED_KT, Math.min(CHASE_MAX_SPEED_KT, Math.round(kts)));
-        if (Math.abs(s - _apLastSpd) < AP_SPD_THRESH) return;
+        if (!_semiActive && Math.abs(s - _apLastSpd) < AP_SPD_THRESH) return;
         _apLastSpd = s;
         if (typeof ap.setSpeed === 'function') { ap.setSpeed(s); return; }
         if (ap.values != null && 'speed' in ap.values) { ap.values.speed = s; return; }
@@ -3651,7 +4109,7 @@ function _apSetAltitude(ft) {
         const ap = window.geofs?.autopilot;
         if (!ap || !isFinite(ft)) return;
         const a = Math.round(ft);
-        if (Math.abs(a - _apLastAlt) < AP_ALT_THRESH) return;
+        if (!_semiActive && Math.abs(a - _apLastAlt) < AP_ALT_THRESH) return;
         _apLastAlt = a;
         if (typeof ap.setAltitude === 'function') { ap.setAltitude(a); return; }
         if (ap.values != null && 'altitude' in ap.values) { ap.values.altitude = a; return; }
@@ -3763,6 +4221,56 @@ function _offsetLatLon(refLat, refLon, hdgDeg, fwdM, latM) {
 // Continuously applies HDG/ALT/SPD from tracked aircraft + user offsets.
 // Relative mode: offset is added to live value each tick.
 // Fixed mode: a snapshot value is used regardless of live changes.
+// Lookup aircraft name for a multiplayer ac object using ac.ac index
+function _getAircraftName(ac) {
+    try {
+        const idx = ac?.ac;
+        // Log aircraft object structure once for debugging
+        if (!window._acObjLogged) {
+            window._acObjLogged = true;
+            try {
+                const g = window.geofs?.aircraft;
+                console.log('[Radar] geofs.aircraft keys:', g ? Object.keys(g) : 'null');
+                console.log('[Radar] ac.ac =', idx, '| ac raw keys:', ac ? Object.keys(ac) : 'null');
+                const sample = g?.list?.[0] ?? g?.aircraftList?.[0] ?? g?.definitions?.[0];
+                if (sample) console.log('[Radar] sample aircraft entry:', JSON.stringify(sample).slice(0,200));
+            } catch(ex) {}
+        }
+        if (idx == null) return null;
+        const g = window.geofs?.aircraft;
+        if (!g) return null;
+        const candidates = [
+            g.list, g.aircraftList, g.aircraft, g.models, g.definitions,
+            window.geofs?.aircraftList, window.geofs?.models,
+        ];
+        for (const list of candidates) {
+            if (!list) continue;
+            let entry;
+            if (Array.isArray(list)) {
+                entry = list[idx] ?? list.find(e => e?.id == idx || e?.index == idx);
+            } else if (typeof list === 'object') {
+                entry = list[idx] ?? Object.values(list).find(e => e?.id == idx || e?.index == idx);
+            }
+            if (entry) {
+                const name = entry.name ?? entry.fullName ?? entry.label ?? entry.title ?? entry.description ?? null;
+                if (name && typeof name === 'string') return name;
+            }
+        }
+        if (window.geofs?.aircraft?.instance?.name) return window.geofs.aircraft.instance.name;
+        return null;
+    } catch(e) { return null; }
+}
+
+// Previous computed commands — used to detect changes and update AP only when value shifts
+// Previous tracked aircraft values — detect changes to trigger immediate HUD + AP update
+let _prevTrackedH  = null;
+let _prevTrackedAl = null;
+let _prevTrackedS  = null;
+
+let _semiPrevHdgCmd = null;
+let _semiPrevAltCmd = null;
+let _semiPrevSpdCmd = null;
+
 function _tickSemiAuto() {
     if (!_semiActive || !_trackedAc) return;
     try {
@@ -3780,18 +4288,19 @@ function _tickSemiAuto() {
             if (tLive.co && myLat2 !== null && myLon2 !== null) {
                 const dLat = tLive.co[0] - myLat2;
                 const dLon = tLive.co[1] - myLon2;
-                bearingToTracked = ((Math.atan2(dLon, dLat) * 180 / Math.PI) + 360) % 360;
+                bearingToTracked = Math.round(((Math.atan2(dLon, dLat) * 180 / Math.PI) + 360) % 360);
             }
         } catch(e) {}
 
         const hdgBase = _semiHdgMode === 'bearing' ? bearingToTracked : liveHdg;
-        const hdgCmd  = _semiHdgFixed ? _semiHdgFixed_val : ((hdgBase + _semiHdgOffset + 360) % 360);
-        const altCmd  = _semiAltFixed ? _semiAltFixed_val : (liveAlt + _semiAltOffset);
-        const spdCmd  = _semiSpdFixed ? _semiSpdFixed_val : Math.max(0, liveSpd + _semiSpdOffset);
+        const hdgCmd  = Math.round(_semiHdgFixed ? _semiHdgFixed_val : ((hdgBase + _semiHdgOffset + 360) % 360));
+        const altCmd  = Math.round(_semiAltFixed ? _semiAltFixed_val : (liveAlt + _semiAltOffset));
+        const spdCmd  = Math.round(_semiSpdFixed ? _semiSpdFixed_val : Math.max(0, liveSpd + _semiSpdOffset));
 
-        _apSetHeading(hdgCmd);
-        _apSetAltitude(altCmd);
-        _apSetSpeed(spdCmd);
+        // Only push to AP when value has changed from previous tick
+        if (hdgCmd !== _semiPrevHdgCmd) { _apSetHeading(hdgCmd); _semiPrevHdgCmd = hdgCmd; }
+        if (altCmd !== _semiPrevAltCmd) { _apSetAltitude(altCmd); _semiPrevAltCmd = altCmd; }
+        if (spdCmd !== _semiPrevSpdCmd) { _apSetSpeed(spdCmd);    _semiPrevSpdCmd = spdCmd; }
     } catch(e) {}
 }
 
@@ -4193,42 +4702,12 @@ function drawWaypoints(playerLat, playerLon, cx, cy, rotRad) {
         const fp = window.geofs?.flightPlan;
         if (!fp) return;
 
-        // One-time debug: dump flightPlan + autopilot structure to console
-        // Re-probe whenever route appears (plan might load after radar starts)
-        const _hasRoute = !!(fp?.route?.length || fp?.waypoints?.length);
-        if (_hasRoute && !window._fpKeysLogged) {
-            window._fpKeysLogged = true;
-            try {
-                console.log('[Radar] geofs.flightPlan keys:', Object.keys(fp));
-                console.log('[Radar] geofs.flightPlan.route:', fp.route);
-                const ap2 = window.geofs?.autopilot;
-                if (ap2) console.log('[Radar] geofs.autopilot keys:', Object.keys(ap2));
-            } catch(ex) {}
-        }
-
-        // GeoFS v3.9 stores the route as geofs.flightPlan.route (official docs).
-        // Also probe geofs.autopilot for legacy compat, and flightplan (lowercase).
-        const fp2 = window.geofs?.flightplan ?? window.geofs?.flightPlan;
-        const wpts = fp?.route
-            ?? fp2?.route
-            ?? fp?.waypoints
-            ?? fp2?.waypoints
-            ?? fp?._waypoints
-            ?? fp2?._waypoints
-            ?? window.geofs?.autopilot?.flightPlan?.route
-            ?? window.geofs?.autopilot?.flightPlan?.waypoints
-            ?? window.geofs?.autopilot?.route
-            ?? null;
+        // Confirmed via runtime probe: geofs.flightPlan.waypointArray
+        const wpts = fp?.waypointArray ?? null;
         if (!wpts || wpts.length === 0) return;
 
-        // Active waypoint index — try all known property names
-        const activeIdx = fp.activeWaypointIndex
-            ?? fp.currentWaypointIndex
-            ?? fp.activeIndex
-            ?? fp.waypointIndex
-            ?? fp._currentIndex
-            ?? (fp.activeWaypoint ? wpts.indexOf(fp.activeWaypoint) : -1)
-            ?? -1;
+        // Active waypoint: geofs.flightPlan.trackedWaypoint is the live object
+        const activeIdx = fp.trackedWaypoint ? wpts.indexOf(fp.trackedWaypoint) : -1;
 
         // ── Project each waypoint to canvas coords ───────────────────────────────
         const pts = wpts.map(wp => {
@@ -4252,16 +4731,15 @@ function drawWaypoints(playerLat, playerLon, cx, cy, rotRad) {
             // Is this segment the "current" leg (leading into the active waypoint)?
             const isActiveLeg = (i + 1 === activeIdx);
 
+            const lw = settings.waypointLineWidth || 1.8;
             if (isActiveLeg) {
-                // Thicker, brighter neon purple for the active leg
                 ctx.strokeStyle = 'rgba(160,0,255,0.95)';
-                ctx.lineWidth   = 2.8;
+                ctx.lineWidth   = lw * 1.55;
                 ctx.shadowColor = 'rgba(160,0,255,0.7)';
                 ctx.shadowBlur  = 6;
             } else {
-                // Standard neon purple, slightly thinner and more transparent
                 ctx.strokeStyle = 'rgba(180,60,255,0.65)';
-                ctx.lineWidth   = 1.8;
+                ctx.lineWidth   = lw;
                 ctx.shadowColor = 'rgba(160,0,255,0.4)';
                 ctx.shadowBlur  = 4;
             }
@@ -4275,37 +4753,101 @@ function drawWaypoints(playerLat, playerLon, cx, cy, rotRad) {
         ctx.shadowBlur = 0;
 
         // ── Draw waypoint dots and labels ────────────────────────────────────────
+        const shape = settings.waypointShape || 'default';
+        const baseR = settings.waypointDotSize || 4;
+        const lblSz = settings.waypointLabelSize || 9;
+
+        function drawWaypointShape(x, y, r, filled, shapeId, isAct) {
+            const dotColor = isAct ? 'rgba(220,80,255,1)' : 'rgba(180,60,255,0.85)';
+            const glowCol  = isAct ? 'rgba(200,0,255,0.8)' : 'rgba(160,0,255,0.4)';
+            ctx.shadowColor = glowCol;
+            ctx.shadowBlur  = isAct ? 10 : 5;
+
+            if (shapeId === 'circle-full') {
+                ctx.fillStyle = dotColor;
+                ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+            } else if (shapeId === 'circle-empty') {
+                ctx.strokeStyle = dotColor; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke();
+            } else if (shapeId === 'square') {
+                ctx.fillStyle = dotColor;
+                ctx.fillRect(x - r, y - r, r*2, r*2);
+            } else if (shapeId === 'star4') {
+                // Sharp 4-point star
+                ctx.fillStyle = dotColor;
+                ctx.beginPath();
+                for (let p = 0; p < 8; p++) {
+                    const ang = (p * Math.PI / 4) - Math.PI/2;
+                    const rad = p % 2 === 0 ? r : r * 0.38;
+                    p === 0 ? ctx.moveTo(x + Math.cos(ang)*rad, y + Math.sin(ang)*rad)
+                            : ctx.lineTo(x + Math.cos(ang)*rad, y + Math.sin(ang)*rad);
+                }
+                ctx.closePath(); ctx.fill();
+            } else if (shapeId === 'star5') {
+                ctx.fillStyle = dotColor;
+                ctx.beginPath();
+                for (let p = 0; p < 10; p++) {
+                    const ang = (p * Math.PI / 5) - Math.PI/2;
+                    const rad = p % 2 === 0 ? r : r * 0.42;
+                    p === 0 ? ctx.moveTo(x + Math.cos(ang)*rad, y + Math.sin(ang)*rad)
+                            : ctx.lineTo(x + Math.cos(ang)*rad, y + Math.sin(ang)*rad);
+                }
+                ctx.closePath(); ctx.fill();
+            } else {
+                // 'default' — 4-point star with curved concave inner points + hollow centre
+                const outerR = r, innerR = r * 0.38, holeR = r * 0.28;
+                ctx.fillStyle = dotColor;
+                ctx.beginPath();
+                for (let p = 0; p < 4; p++) {
+                    const aOuter = (p * Math.PI / 2) - Math.PI / 2;
+                    const aInner1 = aOuter + Math.PI / 4;
+                    const aInner2 = aOuter + Math.PI / 4;
+                    const ox = x + Math.cos(aOuter) * outerR;
+                    const oy = y + Math.sin(aOuter) * outerR;
+                    const i1x = x + Math.cos(aOuter + Math.PI/4) * innerR;
+                    const i1y = y + Math.sin(aOuter + Math.PI/4) * innerR;
+                    const i2x = x + Math.cos(aOuter - Math.PI/4) * innerR;
+                    const i2y = y + Math.sin(aOuter - Math.PI/4) * innerR;
+                    if (p === 0) ctx.moveTo(i2x, i2y);
+                    else ctx.lineTo(i2x, i2y);
+                    // Curved concave arc through inner point to outer point
+                    const cpX1 = x + Math.cos(aOuter - Math.PI/8) * (innerR * 0.55);
+                    const cpY1 = y + Math.sin(aOuter - Math.PI/8) * (innerR * 0.55);
+                    ctx.quadraticCurveTo(cpX1, cpY1, ox, oy);
+                    const cpX2 = x + Math.cos(aOuter + Math.PI/8) * (innerR * 0.55);
+                    const cpY2 = y + Math.sin(aOuter + Math.PI/8) * (innerR * 0.55);
+                    ctx.quadraticCurveTo(cpX2, cpY2, i1x, i1y);
+                }
+                ctx.closePath();
+                ctx.fill();
+                // Hollow centre
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.beginPath(); ctx.arc(x, y, holeR, 0, Math.PI*2); ctx.fill();
+                ctx.globalCompositeOperation = 'source-over';
+            }
+
+            ctx.shadowBlur = 0;
+
+            // Active outer ring
+            if (isAct) {
+                ctx.strokeStyle = 'rgba(220,80,255,0.6)';
+                ctx.lineWidth = 1.2;
+                ctx.beginPath(); ctx.arc(x, y, r + 3.5, 0, Math.PI*2); ctx.stroke();
+            }
+        }
+
         for (let i = 0; i < pts.length; i++) {
             const pt = pts[i];
             if (!pt) continue;
-
             const isActive = (i === activeIdx);
-            const dotR     = isActive ? 5 : 3.5;
-            const dotColor = isActive ? 'rgba(220,80,255,1)' : 'rgba(180,60,255,0.85)';
-            const glowCol  = isActive ? 'rgba(200,0,255,0.8)' : 'rgba(160,0,255,0.4)';
+            const dotR = isActive ? baseR * 1.3 : baseR;
+            drawWaypointShape(pt.sx, pt.sy, dotR, true, shape, isActive);
 
-            ctx.fillStyle   = dotColor;
-            ctx.shadowColor = glowCol;
-            ctx.shadowBlur  = isActive ? 10 : 5;
-            ctx.beginPath();
-            ctx.arc(pt.sx, pt.sy, dotR, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Active waypoint — extra outer ring
-            if (isActive) {
-                ctx.strokeStyle = 'rgba(220,80,255,0.6)';
-                ctx.lineWidth   = 1.2;
-                ctx.beginPath();
-                ctx.arc(pt.sx, pt.sy, dotR + 3.5, 0, Math.PI * 2);
-                ctx.stroke();
-            }
-
-            // Label
             if (pt.name) {
-                ctx.shadowBlur  = 0;
-                ctx.font        = `bold ${isActive ? 10 : 9}px ${FONT_CANVAS}`;
-                ctx.fillStyle   = isActive ? 'rgba(230,130,255,0.95)' : 'rgba(190,100,255,0.8)';
-                ctx.textAlign   = 'left';
+                ctx.shadowBlur = 0;
+                ctx.font = `bold ${isActive ? lblSz + 1 : lblSz}px ${FONT_CANVAS}`;
+                ctx.fillStyle = isActive ? 'rgba(230,130,255,0.95)' : 'rgba(190,100,255,0.8)';
+                ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(pt.name, pt.sx + dotR + 3, pt.sy - 5);
             }
@@ -4618,10 +5160,7 @@ function drawRadar() {
         _tickChaseEscort(playerLat, playerLon, myData);
     }
 
-    // ── Semi-Auto Chase/Escort tick ────────────────
-    if (_semiActive && hasPos && !isGamePaused && _trackedAc && _trackedAc.co) {
-        _tickSemiAuto();
-    }
+    // Semi-Auto tick runs on its own 250ms setInterval (see below)
 
     // ── Update ILS HUD if active ──────────────────
     if (_ilsActive && hasPos && !isGamePaused) {
@@ -4641,6 +5180,19 @@ function drawRadar() {
         if (_trackedId) {
             const freshTracked = refreshTracked();
             const trackKey = freshTracked ? freshTracked.id : _trackedId;
+            // Detect tracked aircraft value changes — force HUD + AP update immediately
+            const tac = freshTracked ?? _trackedAc;
+            if (tac) {
+                const curH  = isFinite(parseFloat(tac.h))  ? Math.round(parseFloat(tac.h))  : null;
+                const curAl = isFinite(parseFloat(tac.al)) ? Math.round(parseFloat(tac.al)) : null;
+                const curS  = isFinite(parseFloat(tac.s))  ? Math.round(parseFloat(tac.s))  : null;
+                if (curH  !== _prevTrackedH  || curAl !== _prevTrackedAl || curS  !== _prevTrackedS) {
+                    _prevTrackedH = curH; _prevTrackedAl = curAl; _prevTrackedS = curS;
+                    // Reset AP cmd cache so _tickSemiAuto pushes fresh values next cycle
+                    _semiPrevHdgCmd = null; _semiPrevAltCmd = null; _semiPrevSpdCmd = null;
+                    _lastHudUpdate = 0;  // force HUD rebuild
+                }
+            }
             if (trackKey !== _lastNearestCs || _hudNow - _lastHudUpdate > HUD_UPDATE_INTERVAL) {
                 _lastNearestCs = trackKey;
                 _lastHudUpdate = _hudNow;
