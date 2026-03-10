@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════
-// Geo-FS-Radar  v8.48
+// Geo-FS-Radar  v8.50
 
 // ═══════════════════════════════════════════════════
 
@@ -2165,9 +2165,7 @@ function createMenu() {
     addSlider({ label:'Trail Length',
         get:()=>prefs.trailLengthSec, set:v=>{prefs.trailLengthSec=v;},
         fmt:v=>v+'s', min:10, max:300, step:10, onCommit:savePrefs });
-    addSep();
 
-    addSection('⚙️  Radar Settings');
     {
         const row = document.createElement('div');
         row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
@@ -2204,6 +2202,7 @@ function createMenu() {
         panel.appendChild(row);
     }
 
+    addSection('⚙️  Radar Settings');
     addSlider({
         label:    'Radar Size',
         get:      () => prefs.radarSizePx,
@@ -2332,9 +2331,6 @@ function createMenu() {
         onCommit: applyPrefs,
     });
 
-    addSection('📡  API Status');
-    addStatusRow();
-    addSep();
 
     addSection('⚠️  TCAS');
     {
@@ -2601,6 +2597,10 @@ function createMenu() {
     addILSFontSlider('ILS Pill Value Font',    'fontPillValue');
     addILSFontSlider('ILS Footer Font',        'fontFooter');
     addILSFontSlider('ILS Bank Label Font',    'fontBankValue');
+    addSep();
+
+    addSection('📡  API Status');
+    addStatusRow();
     addSep();
 
     document.body.appendChild(panel);
@@ -3236,10 +3236,12 @@ function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpee
     const along = pDx * rUx + pDy * rUy;
     const cross  = pDx * rUy - pDy * rUx;   // positive = right of centreline
 
-    // Distance to threshold via haversine (accurate, avoids flat-earth projection drift)
-    // Positive = player is before threshold (on approach); negative = past threshold
-    const directDistM = calcDistNm(playerLat, playerLon, tLat, tLon) * 1852;
-    const distToThreshM_final = (along <= rLen) ? directDistM : -directDistM;
+    // Distance to runway CENTRE via haversine (accurate, avoids flat-earth projection drift)
+    // We measure to the threshold then add half the runway length to get the centre.
+    // Positive = player is before the runway centre (on approach); negative = past centre
+    const distToThreshHaversM = calcDistNm(playerLat, playerLon, tLat, tLon) * 1852;
+    const distToCentreM = distToThreshHaversM + rLen / 2;  // threshold dist + half runway
+    const distToThreshM_final = (along <= rLen) ? distToCentreM : -distToCentreM;
 
     const av = window.geofs?.animation?.values;
 
@@ -3258,12 +3260,15 @@ function computeILSData(playerLat, playerLon, playerHdg, playerAltFt, playerSpee
     }
 
     const GS_DEG    = 3.0;
-    const distM      = distToThreshM_final;
-    const idealAltFt = Math.max(0, distM) * Math.tan(GS_DEG * Math.PI / 180) * 3.28084;
+    // Glideslope references the THRESHOLD (3° path hits the threshold at 0 ft AGL)
+    const distToThresh = (along <= rLen) ? distToThreshHaversM : -distToThreshHaversM;
+    const idealAltFt = Math.max(0, distToThresh) * Math.tan(GS_DEG * Math.PI / 180) * 3.28084;
     const gsErrFt   = playerAltAGL - idealAltFt;
 
-    const locErrDeg = Math.atan2(cross, Math.max(100, Math.abs(distM))) * 180 / Math.PI;
-    const gsErrDeg  = Math.atan2(gsErrFt / 3.28084, Math.max(100, Math.abs(distM))) * 180 / Math.PI;
+    // Display distance uses centre for readout; deviation angles use threshold distance
+    const distM = distToThreshM_final;
+    const locErrDeg = Math.atan2(cross, Math.max(100, Math.abs(distToThresh))) * 180 / Math.PI;
+    const gsErrDeg  = Math.atan2(gsErrFt / 3.28084, Math.max(100, Math.abs(distToThresh))) * 180 / Math.PI;
 
     let vs = null;
     if (av && av.verticalSpeed !== undefined && isFinite(av.verticalSpeed)) {
